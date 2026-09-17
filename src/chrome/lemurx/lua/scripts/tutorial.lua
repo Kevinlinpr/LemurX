@@ -102,7 +102,6 @@ local function restore_chrome()
     }) do
         ok(lemurx.chrome.hideButton, name, false)
     end
-    ok(lemurx.chrome.barLayout, "1-2-3-4-5")
     ok(lemurx.input.interceptBack, false)
     state.back_armed = false
     state.back_once = false
@@ -310,8 +309,13 @@ local function scene_intent()
 end
 
 local function scene_schema()
-    lemurx.schema.launch("chat_ai", { from = "lua_tutorial" })
-    say("当前页可以直接跳进LemurX AI，不用自己找入口")
+    -- 用 Intent 把当前页丢给系统的“搜索/翻译”入口：不依赖任何厂商私有 Schema
+    local tab = lemurx.tabs.current()
+    lemurx.intent.startActivity({
+        action = "android.intent.action.WEB_SEARCH",
+        extras = { query = (tab and tab.title) or "" },
+    })
+    say("当前页标题已直接送进系统搜索，不用复制再切 App")
 end
 
 -- 场景 11：看视频被下拉刷新打断。痛点：全屏刷视频时手滑一下，页面重载、进度清零。
@@ -609,13 +613,12 @@ local function scene_surgery()
     -- 工具抽屉按钮从地址栏右侧摘走（点还原会回来）
     lemurx.ui.detach({ id = "menu_tools" })
     -- 打开主菜单抽屉后，Lua 能扫到 Dialog 窗口，把「历史」标红、「下载」藏掉
-    lemurx.ui.on({ id = "menu_button_lemur" }, "click", function()
+    lemurx.ui.on({ id = "menu_button_wrapper" }, "click", function()
         lemurx.timer.after(450, function()
             lemurx.ui.style({ text = "历史" }, { color = "#FFFF5252", size = 15, bold = true, once = true })
             lemurx.ui.style({ text = "下载" }, { visible = false, once = true })
         end)
     end, { consume = false })
-    lemurx.chrome.barLayout({ "home", "tabs", "search", "menu", "tools" })
     local menus = lemurx.menu.list()
     local n = 0
     if menus and menus.pages then
@@ -639,7 +642,7 @@ local scenes = {
     { title = "7 手机版太挤", pain = "政务银行文档只有桌面版能用，字还太小", run = scene_site },
     { title = "8 登录莫名掉了", pain = "换机被踢时，手机上看不到 Cookie/历史还在不在", run = scene_sandbox },
     { title = "9 丢给别的 App", pain = "分享面板缺微信/笔记，只能复制链接再切走", run = scene_intent },
-    { title = "10 一键进 AI", pain = "看网页时想问LemurX，还得自己找入口", run = scene_schema },
+    { title = "10 一键去搜", pain = "看网页时想搜标题，还得复制再切 App", run = scene_schema },
     { title = "11 视频被刷新", pain = "全屏刷视频手滑一下，进度清零", run = scene_fullscreen },
     { title = "12 接口跨域", pain = "DevTools 看得到 JSON，页面 fetch 被 CORS 拦", run = scene_http },
     { title = "13 客服要截图", pain = "系统截图带着浏览器栏，还无法证明「我点过」", run = scene_rpa },
@@ -647,7 +650,7 @@ local scenes = {
     { title = "15 比价回不去", pain = "详情连跳三层，返回一次只退一页，回不到列表", run = scene_nav },
     { title = "16 更新还是旧页", pain = "Service Worker 把旧资源钉死，扩展看不见后台 worker", run = scene_lab },
     { title = "17 直接点原生 UI", pain = "扩展只能改网页，点不到工具栏、底栏、系统对话框", run = scene_native_ui },
-    { title = "18 换皮肤", pain = "主题只能在设置里挑两三个，配色、底栏排布都不能自己定", run = scene_skin },
+    { title = "18 换皮肤", pain = "主题只能在设置里挑两三个，配色、按钮显隐都不能自己定", run = scene_skin },
     { title = "19 自己的工具条", pain = "想在顶栏/底栏加自己的按钮，扩展只能在网页里画", run = scene_toolbar },
     { title = "20 拆原生外壳", pain = "底栏、搜索框、工具抽屉都是写死的，想换成自己的布局没门", run = scene_surgery },
 }
@@ -862,7 +865,7 @@ end
 
 lemurx.timer.after(500, function()
     local info = lemurx.browser.info() or {}
-    log("boot", lemurx.version, info.channel, info.versionName, "privileged", lemurx.isPrivileged())
+    log("boot", lemurx.version, info.versionName, "privileged", lemurx.isPrivileged())
     if lemurx.storage.get(TUTORIAL.panel_key, "1") ~= "0" then
         state.open = false
         draw_panel()

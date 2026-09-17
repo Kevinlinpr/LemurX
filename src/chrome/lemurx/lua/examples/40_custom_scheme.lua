@@ -117,7 +117,7 @@ local function dash_html()
    document.getElementById('hist').innerHTML = rows.map(r =>
      '<li><a style="color:#9fb3c8" href="'+r.url+'">'+(r.title||r.url)+'</a></li>').join('');
  });
-</script>]]):format(esc(info.channel or "lemurx"), esc(info.versionName or ""), #tabs, os.date("%H:%M:%S"), table.concat(rows))
+</script>]]):format(esc("lemurx"), esc(info.versionName or ""), #tabs, os.date("%H:%M:%S"), table.concat(rows))
 end
 
 -- 每个 webview（含原生开的标签）都能响应 lua://

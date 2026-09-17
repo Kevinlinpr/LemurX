@@ -34,7 +34,7 @@
 -- lemurx.help([module])          -- 打印接口清单，module 如 "tabs"/"cdp"/"ui"
 -- lemurx.log(msg, ...)
 -- lemurx.toast(msg)
--- lemurx.browser.info()          -- {isLemurX, channel, experienceMode, versionName, versionCode}
+-- lemurx.browser.info()          -- {isLemurX, versionName, versionCode}
 -- lemurx.tabs.list()             -- [{id, url, title, incognito, loading, canGoBack, canGoForward, muted}, ...]
 -- lemurx.tabs.current()          -- 当前标签，或 nil
 -- lemurx.tabs.open(url[, opts])  -- opts: {background=true, hidden=true, incognito=true}
@@ -82,9 +82,6 @@
 -- lemurx.chrome.setMenuButtonVisible(false)
 -- lemurx.chrome.hideBottomToolbar(true)
 -- lemurx.chrome.hideButton("back"|"forward"|"home"|"tabs"|"tools"|"menu"|"search", true)
--- lemurx.chrome.barLayout() / barLayout("1-2-3-4-5") / barLayout({"home","tabs","search","tools","menu"})
---   槽位：1 home  2 tabs  3 search(地址栏占位)  4 tools  5 menu  6 back  7 forward
---   现行壳是 ToolbarPhoneLemur：按钮在地址栏左右两侧，不是独立 Duet 底栏
 -- lemurx.chrome.back() / forward() / info()
 -- lemurx.chrome.on("omnibox"|"back"|"menu", function(ev) end)
 -- lemurx.menu.add({id="grab", title="抓取", page="main"|"expand"|"second", onClick=function() end})
@@ -110,9 +107,6 @@
 -- lemurx.net.removeRule(id)
 -- lemurx.net.clearRules()
 -- lemurx.net.listRules()
--- lemurx.schema.launch(host, params)
---   host: webview / h5 / chat_ai / vip_center / login / extensions ...
--- lemurx.user.info()             -- {loggedIn, uid, nickname, vip}，不含 token
 -- lemurx.clipboard.set(text)
 -- lemurx.clipboard.get()
 -- lemurx.storage.get(key[, default])
@@ -148,7 +142,7 @@
 -- lemurx.theme.set({                -- 持久化皮肤，每次进浏览器自动重放，nil 值删除该项
 --   toolbar = "#FF1B5E20", statusBar = "#FF0D3B13", navBar = "#FF0D3B13", bottomBar = "#FF1B5E20",
 --   iconTint = "#FFFFFFFF", accent = "#FF00C853",  -- accent 给 button 默认底色
---   dark = true, bottomStyle = 0|1|2 或 barLayout="1-2-3-4-5" / {"home","tabs","search","tools","menu"},
+--   dark = true,
 --   hideButtons = {"extensions", "settings"}, urlBarHidden = false, bottomBarHidden = false,
 --   menuButton = true, pullRefresh = false,
 -- })
@@ -727,7 +721,6 @@ lemurx.catalog = {
             "setDarkMode(true) isDarkMode() setPullRefresh(false)",
             "setMenuButtonVisible(false) hideBottomToolbar(true)",
             "hideButton('back'|'forward'|'home'|'tabs'|'tools'|'menu'|'search', true)",
-            "barLayout() / barLayout('1-2-3-4-5') / barLayout({'home','tabs','search','tools','menu'})",
             "back() forward() info() on('omnibox'|'back'|'menu', fn)",
         },
     },
@@ -762,7 +755,7 @@ lemurx.catalog = {
         title = "外壳可编程：皮肤 / 挂载点 / 控件树",
         priv = false,
         apis = {
-            "theme.set({toolbar,statusBar,navBar,bottomBar,iconTint,accent,dark,bottomStyle/barLayout,",
+            "theme.set({toolbar,statusBar,navBar,bottomBar,iconTint,accent,dark,",
             "  hideButtons,urlBarHidden,bottomBarHidden,menuButton,pullRefresh})  -- 持久化，自动重放",
             "theme.get() theme.reset() theme.apply('forest'|'paper'|'midnight'|'sakura'[, extra])",
             "ui.slots()  -- toolbar.start/end bottom.start/bar page.top/bottom/center/float view:<id>",
@@ -784,13 +777,11 @@ lemurx.catalog = {
     },
     {
         name = "intent",
-        title = "系统 Intent / Schema",
+        title = "系统 Intent",
         priv = false,
         apis = {
             "startActivity({action,url,package,extras}) sendBroadcast({action,extras})",
             "UGC 仅 VIEW/SEND/SENDTO/WEB_SEARCH/MAIN 与 lemurx.*",
-            "lemurx.schema.launch(host, params)  -- webview/h5/chat_ai/vip_center/login/extensions",
-            "lemurx.user.info()  -- {loggedIn,uid,nickname,vip}，无 token",
         },
     },
     {

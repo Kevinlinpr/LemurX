@@ -188,8 +188,32 @@ function common.update_widgets_on_w(widgets, w, fn, ...)
 end
 
 -- 让一个工厂模块既能当函数调用（lousy.widget.uri(w)），又能带字段
+-- luakit 的状态栏控件构造器是无参的（rc.lua 里写 widgets.uri()），控件自己找
+-- 所属窗口。这里用 window.lua 在 emit "build" 期间登记的“正在构建的窗口”兜底：
+-- 传了 w 就用 w，没传就用 building_w。
+local building_w = nil
+
+function common.set_building(w)
+    building_w = w
+end
+
+function common.building()
+    return building_w
+end
+
 function common.callable(tbl, ctor)
-    return setmetatable(tbl, { __call = function(_, ...) return ctor(...) end })
+    return setmetatable(tbl, { __call = function(_, w, ...)
+        if type(w) == "table" or is_widget(w) then
+            -- 显式给了窗口表 / 控件（tablist(notebook, orientation)）：原样传下去
+            return ctor(w, ...)
+        end
+        if w ~= nil then
+            -- 第一个参数是别的东西（例如 tablist 的方向字符串）：补上正在构建的窗口
+            return ctor(building_w, w, ...)
+        end
+        -- 不在 build 期间且没给窗口：交给构造器自己处理（menu 等控件不需要窗口）
+        return ctor(building_w, ...)
+    end })
 end
 
 return common

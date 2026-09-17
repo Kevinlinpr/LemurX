@@ -98,14 +98,15 @@ require("domain_props")
 -- Status-bar widgets (left to right / right to left)
 window.add_signal("build", function (w)
     local widgets, l, r = require("lousy.widget"), w.sbar.l.layout, w.sbar.r.layout
-    l:pack(widgets.uri)
-    l:pack(widgets.hist)
-    l:pack(widgets.progress)
-    r:pack(widgets.buf)
-    r:pack(widgets.ssl)
-    r:pack(widgets.tabi)
-    r:pack(widgets.scroll)
-    r:pack(widgets.zoom)
+    -- lousy.widget.<name> 是构造器，要调用后才得到 widget
+    l:pack(widgets.uri())
+    l:pack(widgets.hist())
+    l:pack(widgets.progress())
+    r:pack(widgets.buf())
+    r:pack(widgets.ssl())
+    r:pack(widgets.tabi())
+    r:pack(widgets.scroll())
+    r:pack(widgets.zoom())
 end)
 
 -- Unique instance: a second launch hands its URIs to the running one.

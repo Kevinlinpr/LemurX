@@ -190,7 +190,7 @@ lemurx.timer.cancel(id)
 | `lemurx.help([module])` | 打印接口清单 |
 | `lemurx.isPrivileged()` | 是否本地特权脚本 |
 | `lemurx.open(url[, opts])` | `tabs.open` 别名 |
-| `lemurx.browser.info()` | `{isLemurX, channel, experienceMode, versionName, versionCode}` |
+| `lemurx.browser.info()` | `{isLemurX, versionName, versionCode}` |
 
 ### 4.2 标签与网页 `lemurx.tabs`
 
@@ -305,11 +305,8 @@ lemurx.chrome.setPullRefresh(false)               -- 关闭下拉刷新
 lemurx.chrome.setMenuButtonVisible(false)
 lemurx.chrome.hideBottomToolbar(true)             -- 藏地址栏左右两侧按钮组
 lemurx.chrome.hideButton("back"|"forward"|"home"|"tabs"|"tools"|"menu"|"search", true)
-lemurx.chrome.barLayout()                         -- {ok, layout="1-2-3-4-5", slots=[...]}
-lemurx.chrome.barLayout("6-2-3-4-5")              -- 1 home 2 tabs 3 search 4 tools 5 menu 6 back 7 forward
-lemurx.chrome.barLayout({ "home", "tabs", "search", "tools", "menu" })
 lemurx.chrome.back() / forward()
-lemurx.chrome.info()                              -- {controls, darkMode, urlBarText, urlBarFocused, barLayout}
+lemurx.chrome.info()                              -- {controls, darkMode, urlBarText, urlBarFocused}
 ```
 
 ### 4.8 底栏菜单 `lemurx.menu`
@@ -331,7 +328,6 @@ lemurx.theme.set({
     iconTint = "#FFE8F5E9",       -- 顶栏/底栏图标颜色
     accent = "#FF00C853",         -- ui.render 里 button 的默认底色
     dark = true,                  -- 暗色模式（切换会触发应用重启标记）
-    barLayout = "1-2-3-4-5",      -- 或 {"home","tabs","search","tools","menu"}；bottomStyle=0/1/2 仍可用
     hideButtons = { "tools" },
     urlBarHidden = false, bottomBarHidden = false, menuButton = true, pullRefresh = false,
 })
@@ -489,16 +485,13 @@ lemurx.input.key("enter"|"back"|"tab"|"space"|"esc"|"delete"[, tabId])
 
 坐标默认 dp、相对网页内容区。
 
-### 4.14 系统 Intent / LemurX Schema / 用户
+### 4.14 系统 Intent
 
 ```lua
 lemurx.intent.startActivity({ action = "android.intent.action.VIEW", url = "https://...",
                              package = "com.tencent.mm", extras = { k = "v" } })
 lemurx.intent.sendBroadcast({ action = "lemurx.example", extras = {...} })
 -- UGC 仅允许 VIEW / SEND / SENDTO / WEB_SEARCH / MAIN 与 lemurx.* action
-
-lemurx.schema.launch("webview"|"h5"|"chat_ai"|"vip_center"|"login"|"extensions", { url = "..." })
-lemurx.user.info()      -- {loggedIn, uid, nickname, vip}，不含 token
 ```
 
 ### 4.15 本地特权专区（UGC 不可用）

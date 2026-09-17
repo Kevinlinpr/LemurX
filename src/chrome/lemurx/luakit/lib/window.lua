@@ -300,7 +300,11 @@ function _M.build(w)
     w.binds = {}
     w.closed_tabs = w.closed_tabs or {}
 
+    -- build 期间让 lousy.widget.<name>() 这种无参构造器能找到 w（luakit rc.lua 写法）
+    local wcommon = lousy.widget and lousy.widget.common
+    if wcommon and wcommon.set_building then wcommon.set_building(w) end
     _M.emit_signal("build", w)
+    if wcommon and wcommon.set_building then wcommon.set_building(nil) end
 
     -- rc.lua 没有自己往状态栏塞控件时，放一套默认的
     for side, names in pairs(_M.default_sbar_widgets) do
