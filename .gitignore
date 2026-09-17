@@ -5,3 +5,4 @@
 /depot_tools/
 /out/
 *.log
+dist/
