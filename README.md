@@ -50,14 +50,45 @@ src/               overlay — files that do not exist upstream, mirrored at the
   chrome/android/java/.../lemurx/      Java hosts (shell, UI, widgets, moat)
   chrome/lemurx/lua/                   init.lua, tutorial, examples, docs
   chrome/lemurx/luakit/                luakit-compatible runtime: kernel/, lib/, lousy/, config/
+  chrome/lemurx/brand/                 Android branding: launcher icons, app_name, logo drawables
+  chrome/app/theme/lemurx/             BRANDING + product logos (branding_path_component)
+  components/resources/*/lemurx/       chrome://version logo
+  components/vector_icons/lemurx/      product.icon (QR code centre, etc.)
   third_party/lua/                     Lua 5.4.7
 patches/           unified diffs for the handful of upstream files we hook into
 tools/apply.py     lays src/ + patches/ over chromium/src
 tools/args.gn      default GN args (arm64, official, enable_extensions=false)
+tools/brand/       master logo + gen_brand_assets.py (regenerates everything above)
 ```
 
 Everything LemurX adds lives in `src/` and `patches/`; the Chromium tree is
 pristine upstream at the pinned tag. There is no fork.
+
+### Branding
+
+The shipped app is branded LemurX end to end without editing any upstream
+resource file:
+
+- `branding_path_component = "lemurx"` (in `tools/args.gn`) points Chromium's
+  own branding switch at `src/chrome/app/theme/lemurx/` (BRANDING → product
+  name/company in version info, `product_logo_*.png`, svg) and
+  `src/components/vector_icons/lemurx/product*.icon`.
+- `//chrome/lemurx/brand:brand_resources` is an `android_resources` target with
+  `resource_overlay = true`: aapt2 takes its launcher icons, `app_name` and every
+  drawable that upstream draws the Chrome logo with (`chrome_logo_24dp`,
+  `chrome_sync_logo`, `chromelogo16`, `chrome_logo_blue`, promo illustrations, …)
+  instead of the upstream resources of the same name.
+- `patches/tools_grit_grit_node_message.py.patch` rewrites "Chromium" /
+  "Chrome" / "Google Chrome" to "LemurX" in every emitted UI string, in every
+  language, at grit output time. Message ids are untouched so translations keep
+  matching; ChromeOS, Chromebook, Chromecast, Chrome Web Store, Chrome
+  Enterprise and lowercase `chrome://` URLs are left alone. The user agent is
+  unaffected (it is not a grit string).
+- Code identifiers (`org.chromium.*`, `chrome/` paths, `lemurx.chrome.*` Lua API)
+  keep their names; they are not user-visible.
+
+Regenerate all assets from the master logo with
+`python3 tools/brand/gen_brand_assets.py` (needs Pillow), then `tools/apply.py`.
 
 ## Build
 

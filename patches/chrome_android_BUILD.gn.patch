@@ -1,8 +1,20 @@
 diff --git a/chrome/android/BUILD.gn b/chrome/android/BUILD.gn
-index 2133a964d0..8b5881c963 100644
+index 2133a964d0..b18bf8f6aa 100644
 --- a/chrome/android/BUILD.gn
 +++ b/chrome/android/BUILD.gn
-@@ -1840,6 +1840,7 @@ if (_is_default_toolchain) {
+@@ -175,6 +175,11 @@ if (_is_default_toolchain) {
+     deps = [
+       ":chrome_base_module_resources",
+       ":ui_locale_string_resources",
++
++      # LemurX branding: resource_overlay target that replaces launcher icons,
++      # app_name and every Chrome-logo drawable by name. Must stay in the base
++      # module together with chrome_base_module_resources.
++      "//chrome/lemurx/brand:brand_resources",
+       "//chrome/android/webapk/libs/common:splash_resources",
+       "//chrome/app:java_strings_grd",
+       "//chrome/browser/actor/android:java_resources",
+@@ -1840,6 +1845,7 @@ if (_is_default_toolchain) {
    java_group("chrome_public_non_pak_assets") {
      deps = [
        "//chrome/android/webapk/libs/runtime_library:runtime_library_assets",
@@ -10,7 +22,7 @@ index 2133a964d0..8b5881c963 100644
        "//components/privacy_sandbox/privacy_sandbox_attestations/preload:privacy_sandbox_attestations_assets",
      ]
    }
-@@ -2990,6 +2991,7 @@ if (_is_default_toolchain) {
+@@ -2990,6 +2996,7 @@ if (_is_default_toolchain) {
  
    generate_jni("chrome_jni_headers") {
      sources = [
