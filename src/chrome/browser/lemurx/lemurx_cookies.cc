@@ -6,9 +6,10 @@
 
 #include "base/functional/bind.h"
 #include "base/json/json_writer.h"
-#include "base/synchronization/waitable_event.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "chrome/browser/lemurx/lemurx_sync_call.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -25,6 +26,10 @@
 #include "url/gurl.h"
 
 namespace {
+
+// Lua 线程阻塞等 cookie 回包的上限。以前是无限 Wait()：CookieManager 管道
+// 一断，回包永远不来，Lua 线程就永久卡死。
+constexpr base::TimeDelta kCookieTimeout = base::Seconds(8);
 
 network::mojom::CookieManager* CookieManagerForLastProfile() {
   Profile* profile = ProfileManager::GetLastUsedProfileIfLoaded();
@@ -46,45 +51,48 @@ std::string LemurXGetCookiesJson(const std::string& url_spec) {
     return "[]";
   }
 
-  std::string json = "[]";
-  base::WaitableEvent event;
+  // 结果放在堆上的 gate 里：CookieManager 的回包是异步的，而且管道断开时
+  // 回包永远不来——等待必须带超时，超时后回包再写也只写 gate 不写栈。
+  auto gate = base::MakeRefCounted<LemurXSyncGate>();
+  gate->result = "[]";
   content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(
-                     [](GURL url, std::string* json, base::WaitableEvent* event) {
-                       network::mojom::CookieManager* manager =
-                           CookieManagerForLastProfile();
-                       if (!manager) {
-                         event->Signal();
-                         return;
-                       }
-                       manager->GetCookieList(
-                           url, net::CookieOptions::MakeAllInclusive(),
-                           net::CookiePartitionKeyCollection::ContainsAll(),
-                           base::BindOnce(
-                               [](std::string* json, base::WaitableEvent* event,
-                                  const net::CookieAccessResultList& included,
-                                  const net::CookieAccessResultList&) {
-                                 base::ListValue list;
-                                 for (const auto& item : included) {
-                                   base::DictValue dict;
-                                   dict.Set("name", item.cookie.Name());
-                                   dict.Set("value", item.cookie.Value());
-                                   dict.Set("domain", item.cookie.Domain());
-                                   dict.Set("path", item.cookie.Path());
-                                   dict.Set("httpOnly",
-                                            item.cookie.IsHttpOnly());
-                                   dict.Set("secure",
-                                            item.cookie.SecureAttribute());
-                                   list.Append(std::move(dict));
-                                 }
-                                 base::JSONWriter::Write(list, json);
-                                 event->Signal();
-                               },
-                               json, event));
-                     },
-                     url, &json, &event));
-  event.Wait();
-  return json.empty() ? "[]" : json;
+      FROM_HERE,
+      base::BindOnce(
+          [](GURL url, scoped_refptr<LemurXSyncGate> gate) {
+            network::mojom::CookieManager* manager =
+                CookieManagerForLastProfile();
+            if (!manager) {
+              gate->Signal();
+              return;
+            }
+            manager->GetCookieList(
+                url, net::CookieOptions::MakeAllInclusive(),
+                net::CookiePartitionKeyCollection::ContainsAll(),
+                base::BindOnce(
+                    [](scoped_refptr<LemurXSyncGate> gate,
+                       const net::CookieAccessResultList& included,
+                       const net::CookieAccessResultList&) {
+                      base::ListValue list;
+                      for (const auto& item : included) {
+                        base::DictValue dict;
+                        dict.Set("name", item.cookie.Name());
+                        dict.Set("value", item.cookie.Value());
+                        dict.Set("domain", item.cookie.Domain());
+                        dict.Set("path", item.cookie.Path());
+                        dict.Set("httpOnly", item.cookie.IsHttpOnly());
+                        dict.Set("secure", item.cookie.SecureAttribute());
+                        list.Append(std::move(dict));
+                      }
+                      base::JSONWriter::Write(list, &gate->result);
+                      gate->Signal();
+                    },
+                    gate));
+          },
+          url, gate));
+  if (!gate->Wait(kCookieTimeout)) {
+    return "[]";
+  }
+  return gate->result.empty() ? "[]" : gate->result;
 }
 
 bool LemurXSetCookie(const std::string& url_spec,
@@ -94,39 +102,40 @@ bool LemurXSetCookie(const std::string& url_spec,
     return false;
   }
 
-  bool ok = false;
-  base::WaitableEvent event;
+  auto gate = base::MakeRefCounted<LemurXSyncGate>();
   content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(
-                     [](GURL url, std::string cookie_line, bool* ok,
-                        base::WaitableEvent* event) {
-                       network::mojom::CookieManager* manager =
-                           CookieManagerForLastProfile();
-                       if (!manager) {
-                         event->Signal();
-                         return;
-                       }
-                       net::CookieInclusionStatus status;
-                       std::unique_ptr<net::CanonicalCookie> cookie =
-                           net::CanonicalCookie::Create(
-                               url, cookie_line, base::Time::Now(),
-                               std::nullopt, std::nullopt,
-                               net::CookieSourceType::kOther, &status);
-                       if (!cookie) {
-                         event->Signal();
-                         return;
-                       }
-                       manager->SetCanonicalCookie(
-                           *cookie, url, net::CookieOptions::MakeAllInclusive(),
-                           base::BindOnce(
-                               [](bool* ok, base::WaitableEvent* event,
-                                  net::CookieAccessResult result) {
-                                 *ok = result.status.IsInclude();
-                                 event->Signal();
-                               },
-                               ok, event));
-                     },
-                     url, cookie_line, &ok, &event));
-  event.Wait();
-  return ok;
+      FROM_HERE,
+      base::BindOnce(
+          [](GURL url, std::string cookie_line,
+             scoped_refptr<LemurXSyncGate> gate) {
+            network::mojom::CookieManager* manager =
+                CookieManagerForLastProfile();
+            if (!manager) {
+              gate->Signal();
+              return;
+            }
+            net::CookieInclusionStatus status;
+            std::unique_ptr<net::CanonicalCookie> cookie =
+                net::CanonicalCookie::Create(
+                    url, cookie_line, base::Time::Now(), std::nullopt,
+                    std::nullopt, net::CookieSourceType::kOther, &status);
+            if (!cookie) {
+              gate->Signal();
+              return;
+            }
+            manager->SetCanonicalCookie(
+                *cookie, url, net::CookieOptions::MakeAllInclusive(),
+                base::BindOnce(
+                    [](scoped_refptr<LemurXSyncGate> gate,
+                       net::CookieAccessResult result) {
+                      gate->ok = result.status.IsInclude();
+                      gate->Signal();
+                    },
+                    gate));
+          },
+          url, cookie_line, gate));
+  if (!gate->Wait(kCookieTimeout)) {
+    return false;
+  }
+  return gate->ok;
 }

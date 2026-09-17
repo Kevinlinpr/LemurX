@@ -12,6 +12,8 @@ source_set("lemurx") {
     "lemurx_cookies.h",
     "lemurx_net_rules.cc",
     "lemurx_net_rules.h",
+    "lemurx_sync_call.cc",
+    "lemurx_sync_call.h",
     "lemurx_url_loader_throttle.cc",
     "lemurx_url_loader_throttle.h",
     "lemurx_url_pattern.cc",

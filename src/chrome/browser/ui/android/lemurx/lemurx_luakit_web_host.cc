@@ -18,13 +18,14 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
-#include "base/synchronization/waitable_event.h"
 #include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "chrome/browser/lemurx/lemurx_sync_call.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_cdp.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_luakit_native.h"
 #include "content/public/browser/browser_thread.h"
@@ -118,7 +119,7 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
           mojo::PendingReceiver<lemurx::mojom::LuakitWebHost> receiver)
       : process_id_(process_id), receiver_(this, std::move(receiver)) {
     receiver_.set_disconnect_handler(
-        base::BindOnce(&WebHost::OnDisconnect, base::Unretained(this)));
+        base::BindOnce(&WebHost::OnDisconnect, weak_factory_.GetWeakPtr()));
   }
   ~WebHost() override = default;
 
@@ -149,6 +150,10 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
 
   // lemurx::mojom::LuakitWebHost
   void Ready() override {
+    if (ext_.is_bound() || disconnected_) {
+      // 渲染进程重复发 Ready：再次 BindNewPipeAndPassReceiver 会 CHECK
+      return;
+    }
     content::RenderProcessHost* rph =
         content::RenderProcessHost::FromID(process_id_);
     if (!rph) {
@@ -156,7 +161,7 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
     }
     rph->BindReceiver(ext_.BindNewPipeAndPassReceiver());
     ext_.set_disconnect_handler(
-        base::BindOnce(&WebHost::OnDisconnect, base::Unretained(this)));
+        base::BindOnce(&WebHost::OnDisconnect, weak_factory_.GetWeakPtr()));
     EnsureEnv();
     std::vector<std::string> modules;
     std::string env;
@@ -264,19 +269,40 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
   }
 
  private:
+  // receiver_ 与 ext_ 两条管道都挂了这个回调；渲染进程退出时两条几乎同时断。
+  // 只处理第一次：先把两端都 reset（不会再有第二次回调），再把删除自己
+  // 延后到下一个任务——不在 mojo 的回调栈上 delete this。
   void OnDisconnect() {
+    if (disconnected_) {
+      return;
+    }
+    disconnected_ = true;
+    ready_ = false;
+    receiver_.reset();
+    ext_.reset();
     base::DictValue d;
     d.Set("ev", "destroyed");
     d.Set("pid", process_id_);
     LemurXLuakitDispatch("webext", process_id_, ToJson(d), 0);
-    Hosts().erase(process_id_);  // 删自己
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(
+                       [](int pid) {
+                         auto it = Hosts().find(pid);
+                         // 同一 pid 若已被新的 Host 顶替，不能误删新的
+                         if (it != Hosts().end() && it->second->disconnected_) {
+                           Hosts().erase(it);
+                         }
+                       },
+                       process_id_));
   }
 
   const int process_id_;
   bool ready_ = false;
+  bool disconnected_ = false;
   mojo::Receiver<lemurx::mojom::LuakitWebHost> receiver_;
   mojo::Remote<lemurx::mojom::LuakitWebExtension> ext_;
   std::vector<std::pair<FrameRef, int>> pending_pages_;
+  base::WeakPtrFactory<WebHost> weak_factory_{this};
 };
 
 // ===== UI 线程操作 =====
@@ -288,7 +314,7 @@ bool MainFrameOf(int tab_id, int* pid, FrameRef* rid) {
     return false;
   }
   content::RenderFrameHost* rfh = wc->GetPrimaryMainFrame();
-  if (!rfh) {
+  if (!rfh || !rfh->GetProcess()) {
     return false;
   }
   *pid = rfh->GetProcess()->GetDeprecatedID();
@@ -427,22 +453,12 @@ int WebScroll(lua_State* L) {
   return 0;
 }
 
-// __luakit.web_processes() -> { pid, ... }（同步问 UI 线程）
-void RunAndSignal(base::OnceClosure c, base::WaitableEvent* ev) {
-  std::move(c).Run();
-  ev->Signal();
-}
-
+// __luakit.web_processes() -> { pid, ... }（同步问 UI 线程；超时返回空表，
+// 且超时后 UI 侧闭包不会再执行——pids 在栈上）
 int WebProcesses(lua_State* L) {
   std::vector<int> pids;
-  if (content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
-    ProcessesOnUi(&pids);
-  } else {
-    base::WaitableEvent ev;
-    PostUi(base::BindOnce(&RunAndSignal,
-                          base::BindOnce(&ProcessesOnUi, &pids), &ev));
-    ev.TimedWait(base::Seconds(5));
-  }
+  LemurXRunOnUiSync(base::BindOnce(&ProcessesOnUi, &pids), base::Seconds(5),
+                    "luakit web_processes");
   lua_newtable(L);
   lua_Integer i = 1;
   for (int pid : pids) {
@@ -477,7 +493,7 @@ void LemurXLuakitBindWebHost(
 
 void LemurXLuakitWebNotifyPage(content::RenderFrameHost* main_frame,
                               int tab_id) {
-  if (!main_frame) {
+  if (!main_frame || !main_frame->GetProcess()) {
     return;
   }
   int pid = main_frame->GetProcess()->GetDeprecatedID();

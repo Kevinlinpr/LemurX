@@ -25,6 +25,7 @@ struct lua_State;
 
 namespace blink {
 class URLLoaderThrottle;
+class WebLocalFrame;
 }  // namespace blink
 
 namespace content {
@@ -133,6 +134,9 @@ class LuakitWebExtension : public mojom::LuakitWebExtension {
   // ContextFor 需要调用方已建 HandleScope。
   v8::Isolate* IsolateFor(int routing_id);
   v8::Local<v8::Context> ContextFor(int routing_id);
+  // page 对应的、既没 detach 也不是 provisional 的 WebLocalFrame；否则 nullptr。
+  // 任何要碰 WebDocument / V8 的地方都必须经它取帧。
+  static blink::WebLocalFrame* LiveWebFrame(const Page* page);
 
   // C++ → Lua：调全局 __luakit_web_dispatch(kind, ...)，参数已在栈上（n 个）
   void Dispatch(const char* kind, int nargs);

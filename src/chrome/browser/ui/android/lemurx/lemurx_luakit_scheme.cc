@@ -71,6 +71,8 @@ bool IsBuiltinScheme(const std::string& s) {
       "blob",  "about",  "javascript", "chrome", "chrome-untrusted",
       "devtools", "view-source", "filesystem", "content", "intent",
       "chrome-native", "chrome-error", "chrome-extension",
+      // ChildProcessSecurityPolicy 里的 pseudo scheme：再注册一次会 panic
+      "googlechrome", "chrome-search",
   };
   for (const char* b : kBuiltin) {
     if (s == b) {
@@ -81,8 +83,14 @@ bool IsBuiltinScheme(const std::string& s) {
 }
 
 void RegisterWebSafeOnUi(const std::string& scheme) {
-  content::ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
-      scheme);
+  // 154 的 ChildProcessSecurityPolicy 对同一 scheme 注册两次会 DCHECK / Rust
+  // 侧直接 panic（正式包里就是 abort）。Chromium 自己或上一轮脚本可能已经
+  // 注册过（例如 rc.lua 重跑、两个模块都注册同一 scheme），这里必须先查。
+  auto* policy = content::ChildProcessSecurityPolicy::GetInstance();
+  if (policy->IsWebSafeScheme(scheme)) {
+    return;
+  }
+  policy->RegisterWebSafeScheme(scheme);
 }
 
 // ===== 单个请求：URLLoader 实现 =====
@@ -144,6 +152,11 @@ class SchemeLoader : public network::mojom::URLLoader {
 
   // Lua 回复：data + mime（可带 "; charset=…"）
   void Reply(std::string data, std::string mime, int status_code) {
+    if (replied_) {
+      // Lua 对同一请求回了两次：第二次 OnReceiveResponse 会被网络栈判为
+      // bad message，直接丢弃。
+      return;
+    }
     timeout_.Stop();
     if (mime.empty()) {
       mime = "text/html";
@@ -199,21 +212,32 @@ class SchemeLoader : public network::mojom::URLLoader {
       return;
     }
 
+    // 从这里开始响应头已发出，后续只能走 OnBodyWritten 收尾
+    replied_ = true;
     body_size_ = data.size();
     client_->OnReceiveResponse(std::move(head), std::move(consumer),
                                std::nullopt);
 
     producer_ = std::make_unique<mojo::DataPipeProducer>(std::move(producer));
+    // producer_ 归 this 所有，~DataPipeProducer 会取消未完成的回调，
+    // 所以 Abort/Fail 先 delete this 时 OnBodyWritten 不会再到；WeakPtr 再兜一层。
     producer_->Write(
         std::make_unique<mojo::StringDataSource>(
             std::move(data),
             mojo::StringDataSource::AsyncWritingMode::
                 STRING_STAYS_VALID_UNTIL_COMPLETION),
-        base::BindOnce(&SchemeLoader::OnBodyWritten, base::Unretained(this)));
+        base::BindOnce(&SchemeLoader::OnBodyWritten,
+                       weak_factory_.GetWeakPtr()));
   }
 
   void Fail(int net_error) {
     timeout_.Stop();
+    if (replied_) {
+      // 已经发了响应头、正在写 body：只能等 OnBodyWritten 收尾，不能再发
+      // OnComplete，也不能在这里 delete this（producer 还在用 data）。
+      return;
+    }
+    replied_ = true;
     if (client_.is_bound()) {
       client_->OnComplete(network::URLLoaderCompletionStatus(net_error));
     }
@@ -256,7 +280,9 @@ class SchemeLoader : public network::mojom::URLLoader {
   mojo::Remote<network::mojom::URLLoaderClient> client_;
   std::unique_ptr<mojo::DataPipeProducer> producer_;
   size_t body_size_ = 0;
+  bool replied_ = false;
   base::OneShotTimer timeout_;
+  base::WeakPtrFactory<SchemeLoader> weak_factory_{this};
 };
 
 // ===== 工厂 =====
@@ -345,12 +371,16 @@ int SchemeRegister(lua_State* L) {
     lua_pushstring(L, "builtin scheme");
     return 2;
   }
+  bool inserted = false;
   {
     base::AutoLock lock(GetRegistry().lock);
-    GetRegistry().schemes.insert(scheme);
+    inserted = GetRegistry().schemes.insert(scheme).second;
   }
-  content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(&RegisterWebSafeOnUi, scheme));
+  if (inserted) {
+    // 同名 scheme 只向 ChildProcessSecurityPolicy 注册一次
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&RegisterWebSafeOnUi, scheme));
+  }
   lua_pushboolean(L, true);
   return 1;
 }

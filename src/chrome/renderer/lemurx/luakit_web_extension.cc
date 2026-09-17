@@ -487,7 +487,9 @@ int PPageUri(lua_State* L) {
     lua_pushnil(L);
     return 1;
   }
-  GURL url(p->frame->GetWebFrame()->GetDocument().Url());
+  // 帧已 detach / 仍是 provisional 时 GetDocument() 为空，Url() 会解空指针
+  blink::WebLocalFrame* wf = LuakitWebExtension::LiveWebFrame(p);
+  GURL url = wf ? GURL(wf->GetDocument().Url()) : GURL();
   std::string s = url.is_valid() ? url.spec() : "about:blank";
   lua_pushlstring(L, s.data(), s.size());
   return 1;
@@ -946,6 +948,11 @@ void LuakitWebExtension::EnsureState() {
     return;
   }
   L_ = luaL_newstate();
+  if (!L_) {
+    // 内存不足：Lua 层整体禁用，渲染进程照常工作（inited_ 永远为 false）。
+    LOG(ERROR) << "luakit-web: luaL_newstate failed";
+    return;
+  }
   luaL_openlibs(L_);
   lua_newtable(L_);
   RegisterPrimitives();
@@ -1055,6 +1062,11 @@ class LuakitRequestThrottle : public blink::URLLoaderThrottle {
 std::unique_ptr<blink::URLLoaderThrottle>
 LuakitWebExtension::MaybeCreateURLLoaderThrottle(
     const blink::LocalFrameToken& frame_token) {
+  // kFrame 类型的 provider 只在主线程用；lua_State / pages_ 都不是线程安全的，
+  // 万一被别的序列调到，宁可少一个节流器也不能碰它们。
+  if (!content::RenderThread::IsMainThread()) {
+    return nullptr;
+  }
   auto* ext = Get();
   if (!ext || !ext->inited_) {
     return nullptr;
@@ -1164,6 +1176,9 @@ bool LuakitWebExtension::OnSendRequest(int routing_id,
 void LuakitWebExtension::Init(const std::string& env_json) {
   env_json_ = env_json;
   EnsureState();
+  if (!L_) {
+    return;
+  }
   lua_State* L = L_;
   int top = lua_gettop(L);
   lua_getglobal(L, "require");
@@ -1446,8 +1461,8 @@ void LuakitWebExtension::OnWindowObjectCleared(int routing_id) {
   int top = lua_gettop(L);
   lua_pushinteger(L, routing_id);
   std::string uri = "about:blank";
-  if (p->frame) {
-    GURL url(p->frame->GetWebFrame()->GetDocument().Url());
+  if (blink::WebLocalFrame* wf = LiveWebFrame(p)) {
+    GURL url(wf->GetDocument().Url());
     if (url.is_valid()) {
       uri = url.spec();
     }
@@ -1459,12 +1474,27 @@ void LuakitWebExtension::OnWindowObjectCleared(int routing_id) {
 
 // ---- 句柄表 ----
 
-v8::Isolate* LuakitWebExtension::IsolateFor(int routing_id) {
-  Page* p = PageByRouting(routing_id);
+// 只返回“活着且可以碰 V8”的主框架：
+//  * RenderFrame 已 detach 时 WebLocalFrameImpl 的 core frame 为空，
+//    GetDocument() 返回空 WebDocument；此时 GetAgentGroupScheduler() /
+//    IsProvisional() / MainWorldScriptContext() 内部都会解空指针。
+//  * provisional 帧（RenderDocument 下每次跨文档导航都会先建一个）没有主世界
+//    context，MainWorldScriptContext() 在正式包里会对空 ScriptState 解引用。
+// 新标签页首屏导航正好同时处于这两种状态，所以必须先在这里挡掉。
+// static
+blink::WebLocalFrame* LuakitWebExtension::LiveWebFrame(const Page* p) {
   if (!p || !p->frame) {
     return nullptr;
   }
   blink::WebLocalFrame* wf = p->frame->GetWebFrame();
+  if (!wf || wf->GetDocument().IsNull() || wf->IsProvisional()) {
+    return nullptr;
+  }
+  return wf;
+}
+
+v8::Isolate* LuakitWebExtension::IsolateFor(int routing_id) {
+  blink::WebLocalFrame* wf = LiveWebFrame(PageByRouting(routing_id));
   if (!wf || !wf->GetAgentGroupScheduler()) {
     return nullptr;
   }
@@ -1472,11 +1502,7 @@ v8::Isolate* LuakitWebExtension::IsolateFor(int routing_id) {
 }
 
 v8::Local<v8::Context> LuakitWebExtension::ContextFor(int routing_id) {
-  Page* p = PageByRouting(routing_id);
-  if (!p || !p->frame) {
-    return v8::Local<v8::Context>();
-  }
-  blink::WebLocalFrame* wf = p->frame->GetWebFrame();
+  blink::WebLocalFrame* wf = LiveWebFrame(PageByRouting(routing_id));
   if (!wf) {
     return v8::Local<v8::Context>();
   }
@@ -1525,9 +1551,11 @@ bool LuakitWebExtension::LookupValue(int handle,
   }
   *routing_id = it->second.routing_id;
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
-  if (isolate) {
-    *out = it->second.value.Get(isolate);
+  if (!isolate || it->second.value.IsEmpty()) {
+    // 没有 isolate 就拿不到 Local；不能返回 true 让调用方解引用空 Local
+    return false;
   }
+  *out = it->second.value.Get(isolate);
   return true;
 }
 

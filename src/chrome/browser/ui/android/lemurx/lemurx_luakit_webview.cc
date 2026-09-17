@@ -25,6 +25,7 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
+#include "chrome/browser/lemurx/lemurx_sync_call.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_cdp.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_luakit_native.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_luakit_web_host.h"
@@ -59,24 +60,11 @@ namespace {
 // ===== UI 线程同步执行 =====
 // Lua 跑在线程池 sequence 上；WebContents 只能在 UI 线程碰。
 // UI 线程从不反过来等 Lua，所以这里阻塞等待不会死锁；仍然设超时兜底。
-
-void RunClosureAndSignal(base::OnceClosure closure, base::WaitableEvent* ev) {
-  std::move(closure).Run();
-  ev->Signal();
-}
+// 下面各 *OnUi 闭包都绑了调用方栈上的 &ok / &json，超时后闭包绝不能再执行，
+// 这一点由 LemurXRunOnUiSync 保证（见 lemurx_sync_call.h）。
 
 void RunOnUiSync(base::OnceClosure closure) {
-  if (content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
-    std::move(closure).Run();
-    return;
-  }
-  base::WaitableEvent ev(base::WaitableEvent::ResetPolicy::MANUAL,
-                         base::WaitableEvent::InitialState::NOT_SIGNALED);
-  content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(&RunClosureAndSignal, std::move(closure), &ev));
-  if (!ev.TimedWait(base::Seconds(8))) {
-    LOG(WARNING) << "luakit webview: UI op timed out";
-  }
+  LemurXRunOnUiSync(std::move(closure), base::Seconds(8), "luakit webview");
 }
 
 std::string ToJson(const base::DictValue& dict) {
@@ -368,10 +356,14 @@ class Throttle : public content::NavigationThrottle {
 
   void Reply(bool allow) {
     timeout_.Stop();
-    if (nav_id_) {
-      PendingThrottles().erase(nav_id_);
-      nav_id_ = 0;
+    // 只有当前仍处于 DEFER 状态（nav_id_ != 0）才能 Resume / Cancel。
+    // 对一个没在 defer 的节流器调 Resume，上游 NavigationThrottleRegistry
+    // 直接 CHECK；超时定时器与 Lua 回包同时到达时必须只处理一次。
+    if (!nav_id_) {
+      return;
     }
+    PendingThrottles().erase(nav_id_);
+    nav_id_ = 0;
     if (allow) {
       Resume();
     } else {
@@ -382,6 +374,12 @@ class Throttle : public content::NavigationThrottle {
  private:
   ThrottleCheckResult Ask(bool redirect) {
     content::NavigationHandle* h = navigation_handle();
+    if (nav_id_) {
+      // 上一轮（如 WillStartRequest）尚未回复就进入下一轮：先清掉旧登记，
+      // 旧 id 的回包按“已过期”忽略。
+      PendingThrottles().erase(nav_id_);
+      timeout_.Stop();
+    }
     nav_id_ = g_next_nav_id++;
     PendingThrottles()[nav_id_] = weak_factory_.GetWeakPtr();
 

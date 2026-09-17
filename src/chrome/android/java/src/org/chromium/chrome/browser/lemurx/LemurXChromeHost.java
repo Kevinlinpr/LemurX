@@ -1306,18 +1306,33 @@ public class LemurXChromeHost {
                             @TabLaunchType int type,
                             @TabCreationState int creationState,
                             boolean markedForSelection) {
-                        LemurXBridge.notifyTabEvent("created", tab, tab.getUrl());
+                        safeNotify("created", tab);
                     }
 
                     @Override
                     public void willCloseTab(Tab tab, boolean didCloseAlone) {
-                        LemurXBridge.notifyTabEvent("closed", tab, tab.getUrl());
+                        safeNotify("closed", tab);
                     }
 
                     @Override
                     public void didSelectTab(Tab tab, @TabSelectionType int type, int lastId) {
-                        LemurXBridge.notifyTabEvent("selected", tab, tab.getUrl());
-                        LemurXWidgetHost.onNativeTabSelected(tab.getId());
+                        safeNotify("selected", tab);
+                        if (tab != null) {
+                            LemurXWidgetHost.onNativeTabSelected(tab.getId());
+                        }
+                    }
+
+                    // 这些回调跑在 TabModel 观察者遍历里：LemurX 这边的任何异常都
+                    // 不能抛回 Chromium，否则整个 Activity 崩掉。
+                    private void safeNotify(String name, Tab tab) {
+                        if (tab == null) {
+                            return;
+                        }
+                        try {
+                            LemurXBridge.notifyTabEvent(name, tab, tab.getUrl());
+                        } catch (Throwable e) {
+                            logi("tab observer", name, e.toString());
+                        }
                     }
                 };
     }

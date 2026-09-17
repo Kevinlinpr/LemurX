@@ -24,6 +24,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "chrome/browser/lemurx/lemurx_sync_call.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_api.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"

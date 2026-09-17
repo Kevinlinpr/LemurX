@@ -515,7 +515,13 @@ __lk.dispatchers.webview = function(tab_id, json, nav_id)
     elseif kind == "audio" then
         object.property_signal(view, "is_playing_audio")
     elseif kind == "navigation-request" then
-        local ret = object.emit_signal(view, "navigation-request", ev.uri, ev.reason)
+        -- 原生侧的导航正 DEFER 等这个答复；脚本抛错也必须回话，否则每次导航
+        -- 都要等 4 秒超时才放行
+        local ok, ret = pcall(object.emit_signal, view, "navigation-request", ev.uri, ev.reason)
+        if not ok then
+            msg.warn("navigation-request handler error: %s", tostring(ret))
+            ret = nil
+        end
         N.wv_navigation_reply(ev.id, ret ~= false)
     elseif kind == "opened-url" then
         if ev.new_tab then
