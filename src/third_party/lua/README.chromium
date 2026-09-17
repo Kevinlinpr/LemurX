@@ -1,0 +1,18 @@
+Name: Lua
+Short Name: lua
+URL: https://www.lua.org/
+Version: 5.4.7
+License: MIT
+License File: LICENSE
+Security Critical: yes
+Shipped: yes
+
+Description:
+Embedded Lua 5.4 interpreter used by LemurX to expose native browser APIs to
+Lua scripts. Standalone interpreter sources (lua.c / luac.c) are not compiled.
+
+The following standard libraries are compiled but not opened at runtime:
+io, os, debug, package. Scripts only get base/table/string/math/utf8/coroutine.
+
+Local Modifications:
+- None. Interpreter binaries (lua.c, luac.c) are omitted from the build.

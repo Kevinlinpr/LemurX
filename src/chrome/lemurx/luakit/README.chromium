@@ -1,0 +1,16 @@
+Name: luakit Lua library (lib/, lousy/, config/, resources/)
+URL: https://github.com/luakit/luakit
+Revision: f796017791d53cfafd368b6e893137b0868daa9a
+Date: 2026-05-28 14:22:26 +0200
+License: GPL-3.0
+License File: COPYING.GPLv3
+Security Critical: no
+Shipped: yes
+
+Description:
+luakit 浏览器的纯 Lua 层（lib/*.lua、lousy/、默认 config/rc.lua、theme.lua、resources/），
+原样搬入，作为狐猴 luakit 兼容运行时的上层。luakit 的 C 代码一行未拷；
+对外接口由 kernel/ 下自研（BSD）内核在 lemurx.* 与 __luakit 原生原语之上实现。
+
+Local Modifications:
+见 kernel/ 与 patches/ 记录的少量 Android 适配（若有）。

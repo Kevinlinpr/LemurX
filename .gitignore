@@ -1,0 +1,7 @@
+# Chromium checkout lives here; only .gclient / fetch.sh are tracked.
+/chromium/*
+!/chromium/.gclient
+!/chromium/fetch.sh
+/depot_tools/
+/out/
+*.log

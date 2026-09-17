@@ -1,0 +1,22 @@
+# LemurX default build arguments (arm64 release).
+# gn gen out/lemurx --args="$(cat ../tools/args.gn)"   (run from chromium/src)
+target_os = "android"
+target_cpu = "arm64"
+is_debug = false
+is_java_debug = false
+is_component_build = false
+is_official_build = true
+treat_warnings_as_errors = false
+
+# LemurX: no extension system. Lua is the only extension surface.
+enable_extensions = false
+
+ffmpeg_branding = "Chrome"
+proprietary_codecs = true
+enable_widevine = true
+enable_remoting = false
+chrome_pgo_phase = 0
+android_channel = "stable"
+chrome_public_manifest_package = "org.lemurx.browser"
+android_override_version_name = "0.1.0"
+android_override_version_code = "1"

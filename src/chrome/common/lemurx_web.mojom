@@ -1,0 +1,59 @@
+// Copyright 2026 The LemurX Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+// luakit “web extension” 兼容层的浏览器 ⇄ 渲染进程通道。
+//
+// luakit 在每个 WebKit web process 里嵌一个 Lua 状态（extension/），UI 进程用
+// ipc_channel 与之通信。这里等价地在每个 Chromium 渲染进程里嵌一个 Lua 状态，
+// 用一对 Mojo 接口替代 luakit 的 socket IPC：
+//   LuakitWebExtension  浏览器 → 渲染进程（每个 RenderProcessHost 一个 Remote）
+//   LuakitWebHost       渲染进程 → 浏览器（每个渲染进程一个 Receiver）
+//
+// 所有 Lua 值都以 JSON 序列化传输；page 对象以 page.id（= 所属 Tab id）传递，
+// 与 luakit 里 page.id == webview.id 的约定一致。
+
+module lemurx.mojom;
+
+// 浏览器 → 渲染进程
+interface LuakitWebExtension {
+  // 渲染进程 Ready() 之后由浏览器调用：环境 JSON（install/config/data 目录、版本…）。
+  // 渲染进程在此之后创建 lua_State 并 require("lkw_init")。
+  Init(string env_json);
+
+  // require_web_module(name)：在渲染进程 Lua 里 require 该模块
+  RequireModule(string name);
+
+  // UI 侧 ipc_channel(channel):emit_signal([view,] signame, ...)
+  // page_id < 0 表示广播（渲染进程内所有页面，page 参数为 nil）
+  EmitSignal(string channel, int32 page_id, string signame, string args_json);
+
+  // 浏览器侧告知：routing_id 这个主框架属于 Tab page_id。渲染进程据此建 page 对象
+  // 并发 luakit "page-created" 信号。
+  PageCreated(int32 routing_id, int32 page_id);
+
+  // webview:eval_js() 的渲染进程执行路径（结果经 LuakitWebHost.EvalJsResult 回来）
+  EvalJs(int32 page_id, string script, string source, int32 callback_id);
+
+  // webview.scroll 写入
+  Scroll(int32 page_id, int32 x, int32 y);
+};
+
+// 渲染进程 → 浏览器
+interface LuakitWebHost {
+  // 渲染线程起来了；浏览器收到后绑 LuakitWebExtension 并 Init
+  Ready();
+
+  // 渲染进程 ipc_channel(channel):emit_signal(signame, ...)
+  EmitSignal(string channel, string signame, string args_json);
+
+  // require 搜索器：渲染进程沙箱读不到 app 目录，源码由浏览器提供
+  [Sync]
+  ResolveModule(string name) => (bool ok, string source, string chunkname);
+
+  // msg.* 日志（level: 0 fatal 1 warn 2 info 3 verbose 4 debug）
+  Log(int32 level, string group, string message);
+
+  // EvalJs 回包
+  EvalJsResult(int32 callback_id, string result_json, string? error);
+};

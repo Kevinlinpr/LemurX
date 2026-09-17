@@ -1,0 +1,16 @@
+-- 实战教程已经独立成 tutorial.lua。
+-- 安装后首次启动会复制到：
+--   /data/data/<package>/files/lua/00_tutorial.lua
+-- 打开浏览器，点底栏菜单第一项「Lua教程」。接口清单：lemurx.help()
+-- 右下角也会出现绿色按钮。
+--
+-- 若面板没出现：确认 00_tutorial.lua 存在，或把 lua_tutorial_panel 设回 1：
+--   lemurx.storage.set("lua_tutorial_panel", "1")
+-- 更新教程源文件后，删掉 filesDir 里那份再启动即可重新生成。
+--
+-- 想做自己的皮肤：新建 filesDir/lua/10_myskin.lua，写几行就够了（教程 18/19 页是活例子）：
+--   lemurx.theme.apply("forest", { bottomStyle = 2 })          -- 或 lemurx.theme.set({toolbar="#FF...", ...})
+--   local h = lemurx.ui.h
+--   lemurx.ui.render("toolbar.end", h("icon", { id = "my_btn", text = "译", onClick = function() ... end }))
+--   lemurx.ui.style({ id = "url_bar" }, { size = 16, bold = true })
+-- 还原：lemurx.theme.reset()  lemurx.ui.unmount("*")
