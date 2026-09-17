@@ -78,7 +78,13 @@ public class LemurXBridge {
     private static final String LUAKIT_INSTALL_DIR = "luakit";
     private static final String LUAKIT_KERNEL_ASSET = "luakit/kernel/init.lua";
     private static final String LUAKIT_STAMP_FILE = ".installed_version";
-    private static final int LUA_ISOLATED_WORLD_ID = 100;
+    // Lua 注入用的隔离世界。RenderFrameHostImpl::ExecuteJavaScriptInIsolatedWorld 是
+    // CHECK_GT(world_id, ISOLATED_WORLD_ID_GLOBAL) && CHECK_LE(world_id, ISOLATED_WORLD_ID_MAX)，
+    // 其中 ISOLATED_WORLD_ID_MAX = ISOLATED_WORLD_ID_CONTENT_END + 10 = 11；越界直接 SIGTRAP
+    // 打崩浏览器进程（真机复现：打开标签后教程脚本 inject → 崩）。之前的 100 就是这个死因。
+    // Chrome 自己用到 5（TRANSLATE/INDIGO/CHROME_INTERNAL/EXTENSIONS 起点），LemurX 关掉了
+    // 扩展系统，取 10 避开它们并留在合法范围内。
+    private static final int LUA_ISOLATED_WORLD_ID = 10;
     private static final String DB_NAME = "lemurx.db";
     private static final Set<String> ALLOWED_INTENT_ACTIONS =
             new HashSet<>(
