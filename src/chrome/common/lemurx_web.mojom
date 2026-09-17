@@ -15,6 +15,8 @@
 
 module lemurx.mojom;
 
+import "third_party/blink/public/mojom/tokens/tokens.mojom";
+
 // 浏览器 → 渲染进程
 interface LuakitWebExtension {
   // 渲染进程 Ready() 之后由浏览器调用：环境 JSON（install/config/data 目录、版本…）。
@@ -28,9 +30,9 @@ interface LuakitWebExtension {
   // page_id < 0 表示广播（渲染进程内所有页面，page 参数为 nil）
   EmitSignal(string channel, int32 page_id, string signame, string args_json);
 
-  // 浏览器侧告知：routing_id 这个主框架属于 Tab page_id。渲染进程据此建 page 对象
+  // 浏览器侧告知：frame_token 这个主框架属于 Tab page_id。渲染进程据此建 page 对象
   // 并发 luakit "page-created" 信号。
-  PageCreated(int32 routing_id, int32 page_id);
+  PageCreated(blink.mojom.LocalFrameToken frame_token, int32 page_id);
 
   // webview:eval_js() 的渲染进程执行路径（结果经 LuakitWebHost.EvalJsResult 回来）
   EvalJs(int32 page_id, string script, string source, int32 callback_id);

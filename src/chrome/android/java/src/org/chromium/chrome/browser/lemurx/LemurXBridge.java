@@ -1,3 +1,7 @@
+// Copyright 2026 The LemurX Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 package org.chromium.chrome.browser.lemurx;
 
 import android.app.Activity;
@@ -6,6 +10,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.net.Uri;
@@ -13,30 +18,29 @@ import android.text.TextUtils;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
+import org.chromium.base.version_info.VersionInfo;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.back_press.BackPressManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabHidingType;
 import org.chromium.chrome.browser.tab.TabLaunchType;
-import org.chromium.chrome.browser.tab.TabLoadIfNeededCaller;
 import org.chromium.chrome.browser.tab.TabSelectionType;
+import org.chromium.chrome.browser.tabmodel.TabClosureParams;
 import org.chromium.chrome.browser.tabmodel.TabList;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.lemurx.base.utils.LemurLogUtils;
-import org.chromium.chrome.lemurx.base.utils.SystemUtil;
-import org.chromium.chrome.lemurx.base.utils.ToastUtil;
-import org.chromium.chrome.lemurx.bean.UserBean;
-import org.chromium.chrome.lemurx.config.ConfigManager;
-import org.chromium.chrome.lemurx.schema.SchemaHost;
-import org.chromium.chrome.lemurx.utils.LemurChannelUtils;
-import org.chromium.chrome.lemurx.utils.UserSpManager;
+import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabObserver;
 import org.chromium.content_public.browser.ChildProcessImportance;
 import org.chromium.content_public.browser.JavaScriptCallback;
 import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.ui.widget.Toast;
+import org.chromium.url.GURL;
 import org.jni_zero.CalledByNative;
 import org.jni_zero.NativeMethods;
 import org.json.JSONArray;
@@ -49,12 +53,11 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -90,6 +93,9 @@ public class LemurXBridge {
                     Arrays.asList("http", "https", "content", "market", "lemurx", "mailto", "geo"));
     private static boolean sStarted;
     private static SQLiteDatabase sDb;
+    /** 页面生命周期事件（started / loaded / document）→ Lua；随窗口重建。 */
+    private static TabModelSelectorTabObserver sPageObserver;
+    private static ChromeTabbedActivity sPageObserverActivity;
 
     public static void start() {
         if (sStarted) {
@@ -109,11 +115,15 @@ public class LemurXBridge {
                     if ("0".equals(prefs().getString("lua_tutorial_hint", "1"))) {
                         return;
                     }
-                    ToastUtil.show("Lua教程入口：打开底栏菜单，第一项就是「Lua教程」");
+                    showToast("Lua教程入口：打开右上角三点菜单，底部有「Lua 教程」");
                 },
                 1800);
     }
 
+    /**
+     * ChromeTabbedActivity.finishNativeInitialization() 调用：
+     * 挂接各宿主、注册页面事件观察者和返回键拦截器（全部在 UI 线程）。
+     */
     public static void attachChrome(ChromeTabbedActivity activity) {
         ThreadUtils.postOnUiThread(
                 () -> {
@@ -121,12 +131,63 @@ public class LemurXBridge {
                     LemurXUiHost.reattach(activity);
                     LemurXSkinHost.reattach(activity);
                     LemurXWidgetHost.reattach(activity);
+                    ensurePageObserver(activity);
+                    // 返回键：BackPressManager 每次先问 Lua（未开启拦截时 consumeChromeBack 立即返回 false）
+                    BackPressManager.setLemurXInterceptor(LemurXBridge::consumeChromeBack);
                     if (sStarted) {
                         eval(
                                 "if lemurx and lemurx.tutorial and lemurx.tutorial.redraw then lemurx.tutorial.redraw() end",
                                 "chrome_ready");
                     }
                 });
+    }
+
+    /** 用 TabModelSelectorTabObserver 覆盖窗口里所有 Tab，发 started / loaded / document 三个事件。 */
+    private static void ensurePageObserver(@Nullable ChromeTabbedActivity activity) {
+        ThreadUtils.assertOnUiThread();
+        if (activity == null || activity.isDestroyed() || activity.isFinishing()) {
+            return;
+        }
+        if (sPageObserver != null && sPageObserverActivity == activity) {
+            return;
+        }
+        if (sPageObserver != null) {
+            sPageObserver.destroy();
+            sPageObserver = null;
+            sPageObserverActivity = null;
+        }
+        TabModelSelector selector = selectorOf(activity);
+        if (selector == null) {
+            // Tab 模型尚未就绪：等 supplier 有值再挂
+            activity.getTabModelSelectorSupplier()
+                    .addSyncObserverAndCallIfNonNull(
+                            ready -> {
+                                if (sPageObserver == null
+                                        && !activity.isDestroyed()
+                                        && !activity.isFinishing()) {
+                                    ensurePageObserver(activity);
+                                }
+                            });
+            return;
+        }
+        sPageObserverActivity = activity;
+        sPageObserver =
+                new TabModelSelectorTabObserver(selector) {
+                    @Override
+                    public void onPageLoadStarted(Tab tab, GURL url) {
+                        notifyTabEvent("started", tab, url);
+                    }
+
+                    @Override
+                    public void onPageLoadFinished(Tab tab, GURL url) {
+                        notifyTabEvent("loaded", tab, url);
+                    }
+
+                    @Override
+                    public void didFirstVisuallyNonEmptyPaint(Tab tab) {
+                        notifyTabEvent("document", tab, tab.getUrl());
+                    }
+                };
     }
 
     public static void openTutorial() {
@@ -140,12 +201,86 @@ public class LemurXBridge {
         ThreadUtils.postOnUiThread(
                 () -> {
                     LemurXUiHost.reattach(getActivity());
-                    ToastUtil.show("教程已打开，看屏幕右下角绿色按钮");
+                    showToast("教程已打开，看屏幕右下角绿色按钮");
                 });
     }
 
+    /** BackPressManager 的 LemurX 拦截器；Lua 未开启返回拦截时无副作用、立即返回 false。 */
     public static boolean consumeChromeBack() {
         return LemurXChromeHost.consumeBack();
+    }
+
+    /** UI 线程弹 Toast（可从任意线程调用）。 */
+    static void showToast(String message) {
+        if (TextUtils.isEmpty(message)) {
+            return;
+        }
+        ThreadUtils.runOnUiThread(
+                () -> {
+                    try {
+                        Toast.makeText(
+                                        ContextUtils.getApplicationContext(),
+                                        message,
+                                        Toast.LENGTH_SHORT)
+                                .show();
+                    } catch (Exception e) {
+                        logi("toast", e.getMessage());
+                    }
+                });
+    }
+
+    /** 日志统一走 org.chromium.base.Log，TAG=LemurX；各段用空格拼接。 */
+    static void logi(Object... parts) {
+        StringBuilder sb = new StringBuilder();
+        if (parts != null) {
+            for (Object part : parts) {
+                if (sb.length() > 0) {
+                    sb.append(' ');
+                }
+                sb.append(part);
+            }
+        }
+        Log.i(TAG, "%s", sb.toString());
+    }
+
+    static String versionName() {
+        try {
+            return VersionInfo.getProductVersion();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    static long versionCode() {
+        try {
+            Context ctx = ContextUtils.getApplicationContext();
+            PackageInfo info = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0);
+            return info.getLongVersionCode();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** 同步跑在 UI 线程；异常吞掉返回 fallback（154 没有 runOnUiThreadBlockingNoException 了）。 */
+    private static <T> T runUi(Callable<T> task, T fallback) {
+        try {
+            T value = ThreadUtils.runOnUiThreadBlocking(task);
+            return value == null ? fallback : value;
+        } catch (Exception e) {
+            logi("ui task", e.getMessage());
+            return fallback;
+        }
+    }
+
+    private static @Nullable TabModelSelector selectorOf(@Nullable ChromeTabbedActivity activity) {
+        if (activity == null || !activity.areTabModelsInitialized()) {
+            return null;
+        }
+        try {
+            return activity.getTabModelSelector();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public static void eval(String chunk, String name) {
@@ -173,14 +308,14 @@ public class LemurXBridge {
                 ContextUtils.getApplicationContext().getAssets().open(assetName)) {
             eval(readStream(in), assetName);
         } catch (Exception e) {
-            LemurLogUtils.i(TAG, "skip asset", assetName, e.getMessage());
+            logi("skip asset", assetName, e.getMessage());
         }
     }
 
     private static void evalUserScripts() {
         File dir = new File(ContextUtils.getApplicationContext().getFilesDir(), USER_SCRIPT_DIR);
         if (!dir.exists() && !dir.mkdirs()) {
-            LemurLogUtils.i(TAG, "cannot create lua dir", dir.getAbsolutePath());
+            logi("cannot create lua dir", dir.getAbsolutePath());
             return;
         }
         seedTutorialScript(dir);
@@ -191,13 +326,13 @@ public class LemurXBridge {
                 try (FileInputStream in = new FileInputStream(file)) {
                     eval(readStream(in), file.getName(), true);
                 } catch (Exception e) {
-                    LemurLogUtils.i(TAG, "load failed", file.getName(), e.getMessage());
+                    logi("load failed", file.getName(), e.getMessage());
                 }
             }
         }
         File ugcDir = new File(dir, "ugc");
         if (!ugcDir.exists() && !ugcDir.mkdirs()) {
-            LemurLogUtils.i(TAG, "cannot create lua/ugc dir", ugcDir.getAbsolutePath());
+            logi("cannot create lua/ugc dir", ugcDir.getAbsolutePath());
             return;
         }
         File[] ugcFiles = ugcDir.listFiles((d, name) -> name.endsWith(".lua"));
@@ -209,7 +344,7 @@ public class LemurXBridge {
             try (FileInputStream in = new FileInputStream(file)) {
                 eval(readStream(in), "ugc/" + file.getName(), false);
             } catch (Exception e) {
-                LemurLogUtils.i(TAG, "ugc load failed", file.getName(), e.getMessage());
+                logi("ugc load failed", file.getName(), e.getMessage());
             }
         }
     }
@@ -235,9 +370,9 @@ public class LemurXBridge {
             while ((n = in.read(buf)) != -1) {
                 os.write(buf, 0, n);
             }
-            LemurLogUtils.i(TAG, "seeded tutorial", out.getAbsolutePath());
+            logi("seeded tutorial", out.getAbsolutePath());
         } catch (Exception e) {
-            LemurLogUtils.i(TAG, "seed tutorial failed", e.getMessage());
+            logi("seed tutorial failed", e.getMessage());
         }
     }
 
@@ -253,7 +388,7 @@ public class LemurXBridge {
             updated = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0).lastUpdateTime;
         } catch (Exception ignored) {
         }
-        return SystemUtil.getVersionName() + "/" + SystemUtil.getVersionCode() + "/" + updated;
+        return versionName() + "/" + versionCode() + "/" + updated;
     }
 
     /** 把 assets/luakit/** 解包到 filesDir/luakit/。lib/kernel/resources 随版本覆盖，config 只补缺。 */
@@ -279,9 +414,9 @@ public class LemurXBridge {
             try (FileOutputStream os = new FileOutputStream(stampFile)) {
                 os.write(stamp.getBytes(StandardCharsets.UTF_8));
             }
-            LemurLogUtils.i(TAG, "luakit seeded", root.getAbsolutePath(), stamp);
+            logi("luakit seeded", root.getAbsolutePath(), stamp);
         } catch (Exception e) {
-            LemurLogUtils.i(TAG, "luakit seed failed", e.getMessage());
+            logi("luakit seed failed", e.getMessage());
         }
     }
 
@@ -331,12 +466,11 @@ public class LemurXBridge {
             o.put("files_dir", ctx.getFilesDir().getAbsolutePath());
             o.put("lua_dir", new File(ctx.getFilesDir(), USER_SCRIPT_DIR).getAbsolutePath());
             o.put("package", ctx.getPackageName());
-            o.put("version_name", SystemUtil.getVersionName());
-            o.put("version_code", SystemUtil.getVersionCode());
-            o.put("chromium_version",
-                    org.chromium.base.version_info.VersionInfo.getProductVersion());
+            o.put("version_name", versionName());
+            o.put("version_code", versionCode());
+            o.put("chromium_version", VersionInfo.getProductVersion());
             o.put("locale", Locale.getDefault().toString());
-            o.put("verbose", org.chromium.base.Log.isLoggable(TAG, android.util.Log.VERBOSE));
+            o.put("verbose", Log.isLoggable(TAG, android.util.Log.VERBOSE));
             JSONObject xdg = new JSONObject();
             xdg.put("desktop", pubDir(android.os.Environment.DIRECTORY_DOCUMENTS));
             xdg.put("documents", pubDir(android.os.Environment.DIRECTORY_DOCUMENTS));
@@ -376,23 +510,23 @@ public class LemurXBridge {
 
     @CalledByNative
     public static void log(String message) {
-        LemurLogUtils.i(TAG, message == null ? "" : message);
+        Log.i(TAG, "%s", message == null ? "" : message);
     }
 
     @CalledByNative
     public static void toast(String message) {
-        ThreadUtils.runOnUiThread(() -> ToastUtil.show(message));
+        showToast(message);
     }
 
+    /** {isLemurX, versionName, versionCode, chromiumVersion} */
     @CalledByNative
     public static String browserInfo() {
         try {
             JSONObject o = new JSONObject();
             o.put("isLemurX", true);
-            o.put("channel", LemurChannelUtils.getChannel());
-            o.put("experienceMode", ConfigManager.isExperienceMode());
-            o.put("versionName", SystemUtil.getVersionName());
-            o.put("versionCode", SystemUtil.getVersionCode());
+            o.put("versionName", versionName());
+            o.put("versionCode", versionCode());
+            o.put("chromiumVersion", VersionInfo.getProductVersion());
             return o.toString();
         } catch (Exception e) {
             return "{}";
@@ -401,39 +535,42 @@ public class LemurXBridge {
 
     @CalledByNative
     public static String listTabs() {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     JSONArray array = new JSONArray();
-                    ChromeTabbedActivity activity = getActivity();
-                    if (activity == null || activity.getTabModelSelector() == null) {
+                    TabModelSelector selector = selectorOf(getActivity());
+                    if (selector == null) {
                         return array.toString();
                     }
-                    TabModelSelector selector = activity.getTabModelSelector();
                     appendTabs(array, selector.getModel(false));
                     appendTabs(array, selector.getModel(true));
                     return array.toString();
-                });
+                },
+                "[]");
     }
 
     @CalledByNative
     public static String currentTab() {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
-                    ChromeTabbedActivity activity = getActivity();
-                    if (activity == null || activity.getTabModelSelector() == null) {
+                    TabModelSelector selector = selectorOf(getActivity());
+                    if (selector == null) {
                         return "";
                     }
-                    Tab tab = activity.getTabModelSelector().getCurrentTab();
+                    Tab tab = selector.getCurrentTab();
                     return tab == null ? "" : tabToJson(tab).toString();
-                });
+                },
+                "");
     }
 
     @CalledByNative
     public static int openTab(String url, String optionsJson) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     ChromeTabbedActivity activity = getActivity();
-                    if (activity == null || TextUtils.isEmpty(url)) {
+                    if (activity == null
+                            || !activity.areTabModelsInitialized()
+                            || TextUtils.isEmpty(url)) {
                         return Tab.INVALID_TAB_ID;
                     }
                     boolean background = false;
@@ -447,7 +584,7 @@ public class LemurXBridge {
                             hidden = options.optBoolean("hidden", false);
                         }
                     } catch (Exception e) {
-                        LemurLogUtils.i(TAG, "openTab options", e.getMessage());
+                        logi("openTab options", e.getMessage());
                     }
                     @TabLaunchType
                     int launchType =
@@ -457,52 +594,58 @@ public class LemurXBridge {
                     Tab tab = activity.getTabCreator(incognito).launchUrl(url, launchType);
                     if (tab != null && hidden) {
                         tab.hide(TabHidingType.CHANGED_TABS);
-                        WebContents webContents = tab.getWebContents();
-                        if (webContents != null) {
-                            webContents.setImportance(ChildProcessImportance.NORMAL);
-                        }
+                        setImportance(tab, ChildProcessImportance.NORMAL);
                     }
                     return tab == null ? Tab.INVALID_TAB_ID : tab.getId();
-                });
+                },
+                Tab.INVALID_TAB_ID);
     }
 
     @CalledByNative
     public static boolean closeTab(int tabId) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     ChromeTabbedActivity activity = getActivity();
                     Tab tab = findTab(activity, tabId);
-                    if (activity == null || tab == null) {
+                    TabModelSelector selector = selectorOf(activity);
+                    if (selector == null || tab == null) {
                         return false;
                     }
-                    return activity.getTabModelSelector()
-                            .getModel(tab.isIncognito())
-                            .closeTab(tab);
-                });
+                    // 154：TabModel.closeTab(Tab) 已移除，统一走 TabRemover + TabClosureParams
+                    selector.getModel(tab.isIncognito())
+                            .getTabRemover()
+                            .closeTabs(
+                                    TabClosureParams.closeTab(tab).allowUndo(false).build(),
+                                    /* allowDialog= */ false);
+                    return true;
+                },
+                false);
     }
 
     @CalledByNative
     public static boolean selectTab(int tabId) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     ChromeTabbedActivity activity = getActivity();
                     Tab tab = findTab(activity, tabId);
-                    if (activity == null || tab == null) {
+                    TabModelSelector selector = selectorOf(activity);
+                    if (selector == null || tab == null) {
                         return false;
                     }
-                    TabModel model = activity.getTabModelSelector().getModel(tab.isIncognito());
+                    TabModel model = selector.getModel(tab.isIncognito());
                     int index = model.indexOf(tab);
                     if (index == TabList.INVALID_TAB_INDEX) {
                         return false;
                     }
-                    model.setIndex(index, TabSelectionType.FROM_USER, false);
+                    model.setIndex(index, TabSelectionType.FROM_USER);
                     return true;
-                });
+                },
+                false);
     }
 
     @CalledByNative
     public static boolean navigateTab(int tabId, String url) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     Tab tab = findTab(getActivity(), tabId);
                     if (tab == null || TextUtils.isEmpty(url)) {
@@ -510,12 +653,13 @@ public class LemurXBridge {
                     }
                     tab.loadUrl(LemurXMoatHost.buildLoadUrl(tabId, url));
                     return true;
-                });
+                },
+                false);
     }
 
     @CalledByNative
     public static boolean reloadTab(int tabId) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     Tab tab = findTab(getActivity(), tabId);
                     if (tab == null) {
@@ -523,12 +667,13 @@ public class LemurXBridge {
                     }
                     tab.reload();
                     return true;
-                });
+                },
+                false);
     }
 
     @CalledByNative
     public static boolean goBack(int tabId) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     Tab tab = findTab(getActivity(), tabId);
                     if (tab == null || !tab.canGoBack()) {
@@ -536,12 +681,13 @@ public class LemurXBridge {
                     }
                     tab.goBack();
                     return true;
-                });
+                },
+                false);
     }
 
     @CalledByNative
     public static boolean goForward(int tabId) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     Tab tab = findTab(getActivity(), tabId);
                     if (tab == null || !tab.canGoForward()) {
@@ -549,7 +695,16 @@ public class LemurXBridge {
                     }
                     tab.goForward();
                     return true;
-                });
+                },
+                false);
+    }
+
+    /** 154：WebContents.setImportance 改为 setPrimaryPageImportance(主框架, 子框架)。 */
+    private static void setImportance(Tab tab, @ChildProcessImportance int importance) {
+        WebContents webContents = tab.getWebContents();
+        if (webContents != null && !webContents.isDestroyed()) {
+            webContents.setPrimaryPageImportance(importance, importance);
+        }
     }
 
     @CalledByNative
@@ -572,7 +727,7 @@ public class LemurXBridge {
                                     latch.countDown();
                                 });
                     } catch (Exception e) {
-                        LemurLogUtils.i(TAG, "eval js", e.getMessage());
+                        logi("eval js", e.getMessage());
                         latch.countDown();
                     }
                 });
@@ -606,7 +761,7 @@ public class LemurXBridge {
                                         latch.countDown();
                                     });
                         } catch (Exception e) {
-                            LemurLogUtils.i(TAG, "inject main", e.getMessage());
+                            logi("inject main", e.getMessage());
                             latch.countDown();
                         }
                         return;
@@ -648,7 +803,7 @@ public class LemurXBridge {
                                             values.put(row);
                                         }
                                     } catch (Exception e) {
-                                        LemurLogUtils.i(TAG, "inject frame", e.getMessage());
+                                        logi("inject frame", e.getMessage());
                                     }
                                     if (pending.decrementAndGet() <= 0) {
                                         result.set(values.toString());
@@ -668,7 +823,7 @@ public class LemurXBridge {
                                         script, LUA_ISOLATED_WORLD_ID, callback);
                             }
                         } catch (Exception e) {
-                            LemurLogUtils.i(TAG, "inject dispatch", e.getMessage());
+                            logi("inject dispatch", e.getMessage());
                             if (pending.decrementAndGet() <= 0) {
                                 result.set(values.toString());
                                 latch.countDown();
@@ -686,93 +841,49 @@ public class LemurXBridge {
 
     @CalledByNative
     public static boolean hideTab(int tabId) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     Tab tab = findTab(getActivity(), tabId);
                     if (tab == null) {
                         return false;
                     }
                     tab.hide(TabHidingType.CHANGED_TABS);
-                    WebContents webContents = tab.getWebContents();
-                    if (webContents != null) {
-                        webContents.setImportance(ChildProcessImportance.NORMAL);
-                    }
+                    setImportance(tab, ChildProcessImportance.NORMAL);
                     return true;
-                });
+                },
+                false);
     }
 
     @CalledByNative
     public static boolean showTab(int tabId) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     Tab tab = findTab(getActivity(), tabId);
                     if (tab == null) {
                         return false;
                     }
-                    tab.show(TabSelectionType.FROM_USER, TabLoadIfNeededCaller.OTHER);
-                    WebContents webContents = tab.getWebContents();
-                    if (webContents != null) {
-                        webContents.setImportance(ChildProcessImportance.IMPORTANT);
-                    }
+                    // 154：Tab.show 只剩 TabSelectionType 一个参数
+                    tab.show(TabSelectionType.FROM_USER);
+                    setImportance(tab, ChildProcessImportance.IMPORTANT);
                     return true;
-                });
+                },
+                false);
     }
 
     @CalledByNative
     public static boolean freezeTab(int tabId) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     Tab tab = findTab(getActivity(), tabId);
                     if (tab == null) {
                         return false;
                     }
                     tab.hide(TabHidingType.CHANGED_TABS);
-                    WebContents webContents = tab.getWebContents();
-                    if (webContents != null) {
-                        webContents.setImportance(ChildProcessImportance.NORMAL);
-                    }
+                    setImportance(tab, ChildProcessImportance.NORMAL);
                     tab.freezeNativePage();
                     return true;
-                });
-    }
-
-    @CalledByNative
-    public static boolean launchSchema(String host, String paramsJson) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
-                () -> {
-                    ChromeTabbedActivity activity = getActivity();
-                    if (activity == null || TextUtils.isEmpty(host)) {
-                        return false;
-                    }
-                    SchemaHost target = null;
-                    for (SchemaHost item : SchemaHost.values()) {
-                        if (TextUtils.equals(item.HOST, host)) {
-                            target = item;
-                            break;
-                        }
-                    }
-                    if (target == null) {
-                        return false;
-                    }
-                    target.launchWithParams(activity, jsonToMap(paramsJson));
-                    return true;
-                });
-    }
-
-    @CalledByNative
-    public static String userInfo() {
-        try {
-            JSONObject o = new JSONObject();
-            UserSpManager manager = UserSpManager.getInstance();
-            UserBean user = manager.getCurrentUser();
-            o.put("loggedIn", manager.isLogin());
-            o.put("uid", user == null ? "" : nullToEmpty(user.getId()));
-            o.put("nickname", user == null ? "" : nullToEmpty(user.getNickname()));
-            o.put("vip", manager.isVip());
-            return o.toString();
-        } catch (Exception e) {
-            return "{}";
-        }
+                },
+                false);
     }
 
     @CalledByNative
@@ -791,7 +902,7 @@ public class LemurXBridge {
 
     @CalledByNative
     public static String getClipboard() {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     ClipboardManager clipboard =
                             (ClipboardManager)
@@ -807,7 +918,8 @@ public class LemurXBridge {
                     CharSequence text = clip.getItemAt(0).coerceToText(
                             ContextUtils.getApplicationContext());
                     return text == null ? "" : text.toString();
-                });
+                },
+                "");
     }
 
     @CalledByNative
@@ -942,7 +1054,7 @@ public class LemurXBridge {
 
     @CalledByNative
     public static boolean startActivity(String optionsJson, boolean privileged) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     try {
                         Intent intent = buildIntent(optionsJson, privileged);
@@ -958,18 +1070,19 @@ public class LemurXBridge {
                         }
                         return true;
                     } catch (ActivityNotFoundException e) {
-                        LemurLogUtils.i(TAG, "startActivity not found", e.getMessage());
+                        logi("startActivity not found", e.getMessage());
                         return false;
                     } catch (Exception e) {
-                        LemurLogUtils.i(TAG, "startActivity", e.getMessage());
+                        logi("startActivity", e.getMessage());
                         return false;
                     }
-                });
+                },
+                false);
     }
 
     @CalledByNative
     public static boolean sendBroadcast(String optionsJson, boolean privileged) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     try {
                         Intent intent = buildIntent(optionsJson, privileged);
@@ -979,13 +1092,14 @@ public class LemurXBridge {
                         ContextUtils.getApplicationContext().sendBroadcast(intent);
                         return true;
                     } catch (Exception e) {
-                        LemurLogUtils.i(TAG, "sendBroadcast", e.getMessage());
+                        logi("sendBroadcast", e.getMessage());
                         return false;
                     }
-                });
+                },
+                false);
     }
 
-    public static void notifyTabEvent(String name, Tab tab, org.chromium.url.GURL url) {
+    public static void notifyTabEvent(String name, Tab tab, GURL url) {
         if (!sStarted || tab == null) {
             return;
         }
@@ -998,7 +1112,7 @@ public class LemurXBridge {
             LemurXMoatHost.onTabEvent(name, tab);
             dispatchTabEventNative(name, o.toString());
         } catch (Exception e) {
-            LemurLogUtils.i(TAG, "notifyTabEvent", e.getMessage());
+            logi("notifyTabEvent", e.getMessage());
         }
     }
 
@@ -1050,24 +1164,25 @@ public class LemurXBridge {
     static void selectTabForLuakit(int tabId) {
         ChromeTabbedActivity activity = getActivity();
         Tab tab = findTab(activity, tabId);
-        if (activity == null || tab == null) {
+        TabModelSelector selector = selectorOf(activity);
+        if (selector == null || tab == null) {
             return;
         }
-        TabModel model = activity.getTabModelSelector().getModel(tab.isIncognito());
+        TabModel model = selector.getModel(tab.isIncognito());
         int index = model.indexOf(tab);
         if (index == TabList.INVALID_TAB_INDEX || model.index() == index) {
             return;
         }
-        model.setIndex(index, TabSelectionType.FROM_USER, false);
+        model.setIndex(index, TabSelectionType.FROM_USER);
     }
 
     /** image:set_favicon_for_uri(uri)：找 URL 匹配的 Tab 拿它当前的 favicon。 */
     static android.graphics.Bitmap faviconForUri(String uri) {
         ChromeTabbedActivity activity = getActivity();
-        if (activity == null || TextUtils.isEmpty(uri)) {
+        TabModelSelector selector = selectorOf(activity);
+        if (selector == null || TextUtils.isEmpty(uri)) {
             return null;
         }
-        TabModelSelector selector = activity.getTabModelSelector();
         for (TabModel model : selector.getModels()) {
             for (int i = 0; i < model.getCount(); i++) {
                 Tab tab = model.getTabAt(i);
@@ -1148,7 +1263,7 @@ public class LemurXBridge {
                                 });
                         bridge.queryHistory(query == null ? "" : query, null);
                     } catch (Exception e) {
-                        LemurLogUtils.i(TAG, "queryHistory", e.getMessage());
+                        logi("queryHistory", e.getMessage());
                         latch.countDown();
                     }
                 });
@@ -1221,7 +1336,7 @@ public class LemurXBridge {
                         service.addDownloadObserver(observer);
                         service.getAllDownloads(null);
                     } catch (Exception e) {
-                        LemurLogUtils.i(TAG, "listDownloads", e.getMessage());
+                        logi("listDownloads", e.getMessage());
                         latch.countDown();
                     }
                 });
@@ -1235,21 +1350,17 @@ public class LemurXBridge {
 
     @CalledByNative
     public static boolean enqueueDownload(String url, int tabId) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return runUi(
                 () -> {
                     ChromeTabbedActivity activity = getActivity();
-                    Tab tab =
-                            tabId == 0
-                                    ? (activity == null
-                                            ? null
-                                            : activity.getTabModelSelector().getCurrentTab())
-                                    : findTab(activity, tabId);
+                    Tab tab = tabId == 0 ? currentTabOf(activity) : findTab(activity, tabId);
                     if (tab == null || TextUtils.isEmpty(url)) {
                         return false;
                     }
                     org.chromium.chrome.browser.download.DownloadController.downloadUrl(url, tab);
                     return true;
-                });
+                },
+                false);
     }
 
     private static JSONObject downloadToJson(
@@ -1286,16 +1397,21 @@ public class LemurXBridge {
         return null;
     }
 
-    private static Tab findTab(ChromeTabbedActivity activity, int tabId) {
-        if (activity == null || activity.getTabModelSelector() == null) {
+    private static @Nullable Tab findTab(@Nullable ChromeTabbedActivity activity, int tabId) {
+        TabModelSelector selector = selectorOf(activity);
+        if (selector == null) {
             return null;
         }
-        TabModelSelector selector = activity.getTabModelSelector();
         Tab tab = selector.getModel(false).getTabById(tabId);
         if (tab != null) {
             return tab;
         }
         return selector.getModel(true).getTabById(tabId);
+    }
+
+    private static @Nullable Tab currentTabOf(@Nullable ChromeTabbedActivity activity) {
+        TabModelSelector selector = selectorOf(activity);
+        return selector == null ? null : selector.getCurrentTab();
     }
 
     private static void appendTabs(JSONArray array, TabModel model) {
@@ -1328,28 +1444,6 @@ public class LemurXBridge {
             // 保持已写入字段
         }
         return o;
-    }
-
-    private static Map<String, Object> jsonToMap(String json) {
-        Map<String, Object> params = new HashMap<>();
-        if (TextUtils.isEmpty(json)) {
-            return params;
-        }
-        try {
-            JSONObject obj = new JSONObject(json);
-            Iterator<String> keys = obj.keys();
-            while (keys.hasNext()) {
-                String key = keys.next();
-                params.put(key, obj.get(key));
-            }
-        } catch (Exception e) {
-            LemurLogUtils.i(TAG, "schema params parse failed", e.getMessage());
-        }
-        return params;
-    }
-
-    private static String nullToEmpty(String value) {
-        return value == null ? "" : value;
     }
 
     private static SQLiteDatabase openDb() {
@@ -1430,7 +1524,7 @@ public class LemurXBridge {
         JSONObject options = new JSONObject(optionsJson);
         String action = options.optString("action", Intent.ACTION_VIEW);
         if (!privileged && !isAllowedIntentAction(action)) {
-            LemurLogUtils.i(TAG, "intent action rejected", action);
+            logi("intent action rejected", action);
             return null;
         }
         Intent intent = new Intent(action);
@@ -1438,7 +1532,7 @@ public class LemurXBridge {
         if (!TextUtils.isEmpty(url)) {
             Uri uri = Uri.parse(url);
             if (!privileged && !isAllowedUri(uri)) {
-                LemurLogUtils.i(TAG, "intent uri rejected", url);
+                logi("intent uri rejected", url);
                 return null;
             }
             String mime = options.optString("mime", options.optString("type", ""));
@@ -1573,11 +1667,6 @@ public class LemurXBridge {
     @CalledByNative
     public static boolean chromeHideButton(String name, boolean hidden) {
         return LemurXChromeHost.hideButton(name, hidden);
-    }
-
-    @CalledByNative
-    public static String chromeBarLayout(String orderJson) {
-        return LemurXChromeHost.barLayout(orderJson);
     }
 
     @CalledByNative

@@ -1,0 +1,16 @@
+diff --git a/chrome/renderer/BUILD.gn b/chrome/renderer/BUILD.gn
+index 94d46c0511..13d4d2d295 100644
+--- a/chrome/renderer/BUILD.gn
++++ b/chrome/renderer/BUILD.gn
+@@ -337,7 +337,10 @@ static_library("renderer") {
+       "wallet/boarding_pass_extractor.cc",
+       "wallet/boarding_pass_extractor.h",
+     ]
+-    deps += [ "//chrome/common/wallet:mojo_bindings" ]
++    deps += [
++      "//chrome/common/wallet:mojo_bindings",
++      "//chrome/renderer/lemurx",
++    ]
+   } else {
+     sources += [
+       "accessibility/ax_tree_distiller.cc",

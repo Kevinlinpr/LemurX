@@ -13,6 +13,7 @@ struct lua_State;
 namespace content {
 class NavigationHandle;
 class NavigationThrottle;
+class NavigationThrottleRegistry;
 class WebContents;
 }  // namespace content
 
@@ -30,8 +31,9 @@ void RegisterLemurXLuakitWebview(lua_State* L);
 
 // ChromeContentBrowserClient::CreateThrottlesForNavigation 调用：
 // 该 WebContents 若被 Lua 附着则返回节流器，否则 nullptr。
-std::unique_ptr<content::NavigationThrottle>
-LemurXLuakitMaybeCreateNavigationThrottle(content::NavigationHandle* handle);
+// 被 Lua 包成 webview 的 Tab 才挂节流器（navigation-request 否决）。
+void LemurXLuakitMaybeAddNavigationThrottle(
+    content::NavigationThrottleRegistry& registry);
 
 // ChromeContentBrowserClient::AllowCertificateError 调用：
 // luakit.allow_certificate(host, cert) 放行过的主机返回 true。

@@ -1,0 +1,13 @@
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index f261c72029..71882fd0b2 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -2502,6 +2502,8 @@ source_set("browser") {
+   if (is_android) {
+     deps += [
+       "//chrome/browser/android",
++      "//chrome/browser/lemurx",
++      "//chrome/browser/ui/android/lemurx",
+       "//components/webxr/android",
+ 
+       # Targets containing Android-specific implementations that have to be

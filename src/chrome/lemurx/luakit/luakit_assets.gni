@@ -1,6 +1,10 @@
 # Copyright 2026 The LemurX Authors
-# 由 chrome/lemurx/luakit/ 目录树生成：luakit 兼容运行时随 apk 打包的资产。
-# 重新生成：cd chrome/lemurx/luakit && ./gen_assets_gni.sh
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+#
+# Generated from the chrome/lemurx/luakit/ tree: assets of the luakit-compatible
+# runtime shipped inside the apk.  Regenerate:
+#   cd chrome/lemurx/luakit && ./gen_assets_gni.sh
 
 luakit_asset_sources = [
   "//chrome/lemurx/luakit/config/rc.lua",
@@ -64,7 +68,6 @@ luakit_asset_sources = [
   "//chrome/lemurx/luakit/lib/formfiller_wm.lua",
   "//chrome/lemurx/luakit/lib/go_input.lua",
   "//chrome/lemurx/luakit/lib/go_next_prev.lua",
-  "//chrome/lemurx/luakit/lib/gopher.lua",
   "//chrome/lemurx/luakit/lib/go_up.lua",
   "//chrome/lemurx/luakit/lib/help_chrome.lua",
   "//chrome/lemurx/luakit/lib/hide_scrollbars.lua",
@@ -106,6 +109,7 @@ luakit_asset_sources = [
   "//chrome/lemurx/luakit/lib/proxy.lua",
   "//chrome/lemurx/luakit/lib/quickmarks.lua",
   "//chrome/lemurx/luakit/lib/readline.lua",
+  "//chrome/lemurx/luakit/lib/referer_control.lua",
   "//chrome/lemurx/luakit/lib/referer_control_wm.lua",
   "//chrome/lemurx/luakit/lib/search.lua",
   "//chrome/lemurx/luakit/lib/select.lua",
@@ -129,21 +133,6 @@ luakit_asset_sources = [
   "//chrome/lemurx/luakit/lib/webview.lua",
   "//chrome/lemurx/luakit/lib/webview_wm.lua",
   "//chrome/lemurx/luakit/lib/window.lua",
-  "//chrome/lemurx/luakit/resources/icons/COPYING",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-chrome@2x.png",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-chrome.png",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-crash@2x.png",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-crash.png",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-error@2x.png",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-error.png",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-page@2x.png",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-page.png",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-private@2x.png",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-private.png",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-security-error@2x.png",
-  "//chrome/lemurx/luakit/resources/icons/tab-icon-security-error.png",
-  "//chrome/lemurx/luakit/COPYING.GPLv3",
-  "//chrome/lemurx/luakit/AUTHORS",
 ]
 
 luakit_asset_destinations = [
@@ -208,7 +197,6 @@ luakit_asset_destinations = [
   "luakit/lib/formfiller_wm.lua",
   "luakit/lib/go_input.lua",
   "luakit/lib/go_next_prev.lua",
-  "luakit/lib/gopher.lua",
   "luakit/lib/go_up.lua",
   "luakit/lib/help_chrome.lua",
   "luakit/lib/hide_scrollbars.lua",
@@ -250,6 +238,7 @@ luakit_asset_destinations = [
   "luakit/lib/proxy.lua",
   "luakit/lib/quickmarks.lua",
   "luakit/lib/readline.lua",
+  "luakit/lib/referer_control.lua",
   "luakit/lib/referer_control_wm.lua",
   "luakit/lib/search.lua",
   "luakit/lib/select.lua",
@@ -273,19 +262,4 @@ luakit_asset_destinations = [
   "luakit/lib/webview.lua",
   "luakit/lib/webview_wm.lua",
   "luakit/lib/window.lua",
-  "luakit/resources/icons/COPYING",
-  "luakit/resources/icons/tab-icon-chrome@2x.png",
-  "luakit/resources/icons/tab-icon-chrome.png",
-  "luakit/resources/icons/tab-icon-crash@2x.png",
-  "luakit/resources/icons/tab-icon-crash.png",
-  "luakit/resources/icons/tab-icon-error@2x.png",
-  "luakit/resources/icons/tab-icon-error.png",
-  "luakit/resources/icons/tab-icon-page@2x.png",
-  "luakit/resources/icons/tab-icon-page.png",
-  "luakit/resources/icons/tab-icon-private@2x.png",
-  "luakit/resources/icons/tab-icon-private.png",
-  "luakit/resources/icons/tab-icon-security-error@2x.png",
-  "luakit/resources/icons/tab-icon-security-error.png",
-  "luakit/COPYING.GPLv3",
-  "luakit/AUTHORS",
 ]

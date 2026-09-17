@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "base/containers/contains.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 
@@ -112,26 +111,23 @@ const char* LemurXNetRules::ActionName(Action action) {
 }
 
 void LemurXNetRules::CompilePattern(Rule* rule) {
-  rule->pattern = URLPattern(URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS |
-                             URLPattern::SCHEME_WS | URLPattern::SCHEME_WSS);
+  rule->pattern = lemurx::UrlPattern();
   std::string match = rule->match;
   if (match.empty() || match == "*" || match == "<all_urls>") {
-    rule->pattern_valid =
-        rule->pattern.Parse("<all_urls>") == URLPattern::ParseResult::kSuccess;
+    rule->pattern_valid = rule->pattern.Parse("<all_urls>");
     return;
   }
-  if (rule->pattern.Parse(match) == URLPattern::ParseResult::kSuccess) {
+  if (rule->pattern.Parse(match)) {
     rule->pattern_valid = true;
     return;
   }
   if (match.find("://") == std::string::npos) {
-    std::string wrapped = "*://*." + match + "/*";
-    if (rule->pattern.Parse(wrapped) == URLPattern::ParseResult::kSuccess) {
+    // Bare host: "example.com" -> the domain and all its subdomains.
+    if (rule->pattern.Parse("*://*." + match + "/*")) {
       rule->pattern_valid = true;
       return;
     }
-    wrapped = "*://" + match + "/*";
-    if (rule->pattern.Parse(wrapped) == URLPattern::ParseResult::kSuccess) {
+    if (rule->pattern.Parse("*://" + match + "/*")) {
       rule->pattern_valid = true;
       return;
     }
@@ -144,8 +140,8 @@ bool LemurXNetRules::Rule::Matches(
     network::mojom::RequestDestination destination) const {
   if (!types.empty()) {
     const std::string dest = DestinationName(destination);
-    if (!base::Contains(types, dest) &&
-        !(dest == "xmlhttprequest" && base::Contains(types, "fetch"))) {
+    if (!std::ranges::contains(types, dest) &&
+        !(dest == "xmlhttprequest" && std::ranges::contains(types, "fetch"))) {
       return false;
     }
   }

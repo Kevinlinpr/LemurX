@@ -15,6 +15,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
+#include "third_party/jni_zero/jni_zero.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/json/json_reader.h"
@@ -83,7 +84,7 @@ int PushJson(lua_State* L, const std::string& json) {
     lua_pushnil(L);
     return 1;
   }
-  std::optional<base::Value> value = base::JSONReader::Read(json);
+  std::optional<base::Value> value = base::JSONReader::Read(json, base::JSON_PARSE_RFC);
   if (!value) {
     lua_pushlstring(L, json.data(), json.size());
     return 1;
@@ -111,7 +112,7 @@ base::Value LuaTableToValue(lua_State* L, int index) {
   }
 
   if (is_array && expected > 1) {
-    base::Value::List list;
+    base::ListValue list;
     lua_pushnil(L);
     while (lua_next(L, index) != 0) {
       list.Append(LuaToValue(L, -1));
@@ -120,7 +121,7 @@ base::Value LuaTableToValue(lua_State* L, int index) {
     return base::Value(std::move(list));
   }
 
-  base::Value::Dict dict;
+  base::DictValue dict;
   lua_pushnil(L);
   while (lua_next(L, index) != 0) {
     std::string key;
@@ -170,7 +171,7 @@ std::string LuaToJson(lua_State* L, int index) {
 }
 
 std::string JavaString(JNIEnv* env,
-                       const base::android::ScopedJavaLocalRef<jstring>& jstr) {
+                       const jni_zero::ScopedJavaLocalRef<jstring>& jstr) {
   if (jstr.is_null()) {
     return "";
   }
@@ -479,9 +480,9 @@ int LuaNetClearRules(lua_State* L) {
 }
 
 int LuaNetListRules(lua_State* L) {
-  base::Value::List list;
+  base::ListValue list;
   for (const auto& rule : LemurXNetRules::Get()->List()) {
-    base::Value::Dict dict;
+    base::DictValue dict;
     dict.Set("id", rule.id);
     dict.Set("match", rule.match);
     dict.Set("action", LemurXNetRules::ActionName(rule.action));
@@ -489,7 +490,7 @@ int LuaNetListRules(lua_State* L) {
       dict.Set("redirectUrl", rule.redirect_url.spec());
     }
     if (!rule.replace_body.empty()) {
-      base::Value::Dict body;
+      base::DictValue body;
       for (const auto& item : rule.replace_body) {
         body.Set(item.first, item.second);
       }
@@ -500,27 +501,6 @@ int LuaNetListRules(lua_State* L) {
   std::string json;
   base::JSONWriter::Write(list, &json);
   return PushJson(L, json);
-}
-
-int LuaSchemaLaunch(lua_State* L) {
-  const char* host = luaL_checkstring(L, 1);
-  std::string params = "{}";
-  if (lua_istable(L, 2)) {
-    params = LuaToJson(L, 2);
-  } else if (lua_isstring(L, 2)) {
-    params = lua_tostring(L, 2);
-  }
-  JNIEnv* env = base::android::AttachCurrentThread();
-  lua_pushboolean(
-      L, Java_LemurXBridge_launchSchema(
-             env, base::android::ConvertUTF8ToJavaString(env, host),
-             base::android::ConvertUTF8ToJavaString(env, params)));
-  return 1;
-}
-
-int LuaUserInfo(lua_State* L) {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  return PushJson(L, JavaString(env, Java_LemurXBridge_userInfo(env)));
 }
 
 int LuaClipboardSet(lua_State* L) {
@@ -794,8 +774,8 @@ int LuaUiOp(lua_State* L, const char* action) {
   if (lua_istable(L, 1)) {
     options = LuaToJson(L, 1);
     if (lua_isstring(L, 2) && strcmp(action, "settext") == 0) {
-      std::optional<base::Value> parsed = base::JSONReader::Read(options);
-      base::Value::Dict dict;
+      std::optional<base::Value> parsed = base::JSONReader::Read(options, base::JSON_PARSE_RFC);
+      base::DictValue dict;
       if (parsed && parsed->is_dict()) {
         dict = std::move(parsed->GetDict());
       }
@@ -803,8 +783,8 @@ int LuaUiOp(lua_State* L, const char* action) {
       base::JSONWriter::Write(base::Value(std::move(dict)), &options);
     } else if (lua_isboolean(L, 2)
                && (strcmp(action, "visible") == 0 || strcmp(action, "enabled") == 0)) {
-      std::optional<base::Value> parsed = base::JSONReader::Read(options);
-      base::Value::Dict dict;
+      std::optional<base::Value> parsed = base::JSONReader::Read(options, base::JSON_PARSE_RFC);
+      base::DictValue dict;
       if (parsed && parsed->is_dict()) {
         dict = std::move(parsed->GetDict());
       }
@@ -812,7 +792,7 @@ int LuaUiOp(lua_State* L, const char* action) {
       base::JSONWriter::Write(base::Value(std::move(dict)), &options);
     }
   } else if (lua_isstring(L, 1)) {
-    base::Value::Dict dict;
+    base::DictValue dict;
     dict.Set("text", lua_tostring(L, 1));
     if (lua_isstring(L, 2) && strcmp(action, "settext") == 0) {
       dict.Set("value", lua_tostring(L, 2));
@@ -899,11 +879,11 @@ void CollectUiHandlers(lua_State* L, int index, int* counter) {
 }
 
 void UnrefUiIds(lua_State* L, const std::string& json) {
-  std::optional<base::Value> parsed = base::JSONReader::Read(json);
+  std::optional<base::Value> parsed = base::JSONReader::Read(json, base::JSON_PARSE_RFC);
   if (!parsed || !parsed->is_dict()) {
     return;
   }
-  const base::Value::List* ids = parsed->GetDict().FindList("ids");
+  const base::ListValue* ids = parsed->GetDict().FindList("ids");
   if (!ids) {
     return;
   }
@@ -922,7 +902,7 @@ int LuaUiRender(lua_State* L) {
   luaL_checktype(L, 2, LUA_TTABLE);
   int counter = 0;
   CollectUiHandlers(L, 2, &counter);
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("slot", slot);
   dict.Set("tree", LuaToValue(L, 2));
   std::string json;
@@ -932,7 +912,7 @@ int LuaUiRender(lua_State* L) {
 
 int LuaUiUnmount(lua_State* L) {
   const char* slot = luaL_optstring(L, 1, "*");
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("slot", slot);
   std::string json;
   base::JSONWriter::Write(base::Value(std::move(dict)), &json);
@@ -946,11 +926,11 @@ int LuaUiUnmount(lua_State* L) {
 }
 
 int LuaUiStyle(lua_State* L) {
-  base::Value::Dict dict;
+  base::DictValue dict;
   if (lua_istable(L, 1)) {
     dict.Set("query", LuaToValue(L, 1));
   } else if (lua_isstring(L, 1)) {
-    base::Value::Dict query;
+    base::DictValue query;
     query.Set("text", lua_tostring(L, 1));
     dict.Set("query", std::move(query));
   }
@@ -965,8 +945,8 @@ int LuaUiStyle(lua_State* L) {
 int LuaUiSlots(lua_State* L) { return CallUiOp(L, "slots", "{}"); }
 
 // query 参数：table 直接用；字符串当 text 匹配
-base::Value::Dict QueryArg(lua_State* L, int index) {
-  base::Value::Dict query;
+base::DictValue QueryArg(lua_State* L, int index) {
+  base::DictValue query;
   if (lua_istable(L, index)) {
     base::Value v = LuaToValue(L, index);
     if (v.is_dict()) {
@@ -983,7 +963,7 @@ int LuaUiSurgery(lua_State* L, const char* action) {
   luaL_checktype(L, 2, LUA_TTABLE);
   int counter = 0;
   CollectUiHandlers(L, 2, &counter);
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("query", QueryArg(L, 1));
   dict.Set("tree", LuaToValue(L, 2));
   if (lua_istable(L, 3)) {
@@ -998,7 +978,7 @@ int LuaUiReplace(lua_State* L) { return LuaUiSurgery(L, "replace"); }
 int LuaUiInsert(lua_State* L) { return LuaUiSurgery(L, "insert"); }
 
 int LuaUiQueryOp(lua_State* L, const char* action) {
-  base::Value::Dict dict;
+  base::DictValue dict;
   if (lua_istable(L, 1) || lua_isstring(L, 1)) {
     dict.Set("query", QueryArg(L, 1));
   }
@@ -1013,7 +993,7 @@ int LuaUiChildren(lua_State* L) { return LuaUiQueryOp(L, "children"); }
 
 // lemurx.ui.move(query, {parent=query, index=n, before=query, after=query, width, height, weight})
 int LuaUiMove(lua_State* L) {
-  base::Value::Dict dict;
+  base::DictValue dict;
   if (lua_istable(L, 2)) {
     base::Value v = LuaToValue(L, 2);
     if (v.is_dict()) {
@@ -1038,7 +1018,7 @@ int LuaUiOn(lua_State* L) {
   int ref = luaL_ref(L, LUA_REGISTRYINDEX);
   UnrefUiClick(L, key);
   g_ui_click_refs[key] = MakeCb(L, ref);
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("query", QueryArg(L, 1));
   dict.Set("event", event);
   dict.Set("key", key);
@@ -1065,7 +1045,7 @@ int LuaUiOff(lua_State* L) {
   } else {
     UnrefUiClick(L, key);
   }
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("key", key);
   std::string json;
   base::JSONWriter::Write(base::Value(std::move(dict)), &json);
@@ -1115,7 +1095,7 @@ int LuaUiDialog(lua_State* L) {
                env, base::android::ConvertUTF8ToJavaString(env, "dialog"),
                base::android::ConvertUTF8ToJavaString(env, options)));
   std::string id;
-  std::optional<base::Value> parsed = base::JSONReader::Read(json);
+  std::optional<base::Value> parsed = base::JSONReader::Read(json, base::JSON_PARSE_RFC);
   if (parsed && parsed->is_dict()) {
     if (const std::string* value = parsed->GetDict().FindString("id")) {
       id = *value;
@@ -1322,11 +1302,11 @@ int LuaImportedCall(lua_State* L) {
   }
   lua_State* ML = it->second.L;
   int nargs = lua_gettop(L);
-  base::Value::List args;
+  base::ListValue args;
   for (int i = 1; i <= nargs; ++i) {
     args.Append(LuaToValue(L, i));
   }
-  base::Value::List results;
+  base::ListValue results;
   std::string error;
   {
     // 作用域必须在 luaL_error 之前结束：Lua 用 longjmp，跳过 C++ 析构
@@ -1538,21 +1518,6 @@ int LuaChromeHideButton(lua_State* L) {
              env, base::android::ConvertUTF8ToJavaString(env, name),
              lua_toboolean(L, 2)));
   return 1;
-}
-
-int LuaChromeBarLayout(lua_State* L) {
-  base::Value::Dict dict;
-  if (lua_istable(L, 1)) {
-    dict.Set("slots", LuaToValue(L, 1));
-  } else if (lua_isstring(L, 1)) {
-    dict.Set("layout", lua_tostring(L, 1));
-  }
-  std::string json;
-  base::JSONWriter::Write(base::Value(std::move(dict)), &json);
-  JNIEnv* env = base::android::AttachCurrentThread();
-  return PushJson(
-      L, JavaString(env, Java_LemurXBridge_chromeBarLayout(
-                             env, base::android::ConvertUTF8ToJavaString(env, json))));
 }
 
 int LuaChromeBack(lua_State* L) {
@@ -1895,7 +1860,7 @@ int LuaInputTap(lua_State* L) {
   if (lua_istable(L, 1)) {
     options = LuaToJson(L, 1);
   } else {
-    base::Value::Dict dict;
+    base::DictValue dict;
     dict.Set("x", luaL_checknumber(L, 1));
     dict.Set("y", luaL_checknumber(L, 2));
     if (lua_isnumber(L, 3)) {
@@ -1918,7 +1883,7 @@ int LuaInputSwipe(lua_State* L) {
   if (lua_istable(L, 1)) {
     options = LuaToJson(L, 1);
   } else {
-    base::Value::Dict dict;
+    base::DictValue dict;
     dict.Set("x1", luaL_checknumber(L, 1));
     dict.Set("y1", luaL_checknumber(L, 2));
     dict.Set("x2", luaL_checknumber(L, 3));
@@ -2010,8 +1975,8 @@ int LuaCdpSend(lua_State* L) {
     lua_pop(L, 1);
     lua_getfield(L, method_index + 2, "sessionId");
     if (lua_isstring(L, -1)) {
-      std::optional<base::Value> parsed = base::JSONReader::Read(params);
-      base::Value::Dict dict;
+      std::optional<base::Value> parsed = base::JSONReader::Read(params, base::JSON_PARSE_RFC);
+      base::DictValue dict;
       if (parsed && parsed->is_dict()) {
         dict = std::move(parsed->GetDict());
       }
@@ -2087,8 +2052,8 @@ int LuaCdpHost(lua_State* L) {
     lua_pop(L, 1);
     lua_getfield(L, 4, "sessionId");
     if (lua_isstring(L, -1)) {
-      std::optional<base::Value> parsed = base::JSONReader::Read(params);
-      base::Value::Dict dict;
+      std::optional<base::Value> parsed = base::JSONReader::Read(params, base::JSON_PARSE_RFC);
+      base::DictValue dict;
       if (parsed && parsed->is_dict()) {
         dict = std::move(parsed->GetDict());
       }
@@ -2341,14 +2306,6 @@ void RegisterLemurXApi(lua_State* L) {
   lua_setfield(L, -2, "http");
 
   lua_newtable(L);
-  SetCFunction(L, "launch", LuaSchemaLaunch);
-  lua_setfield(L, -2, "schema");
-
-  lua_newtable(L);
-  SetCFunction(L, "info", LuaUserInfo);
-  lua_setfield(L, -2, "user");
-
-  lua_newtable(L);
   SetCFunction(L, "set", LuaClipboardSet);
   SetCFunction(L, "get", LuaClipboardGet);
   lua_setfield(L, -2, "clipboard");
@@ -2439,7 +2396,6 @@ void RegisterLemurXApi(lua_State* L) {
   SetCFunction(L, "setMenuButtonVisible", LuaChromeSetMenuButtonVisible);
   SetCFunction(L, "hideBottomToolbar", LuaChromeHideBottomToolbar);
   SetCFunction(L, "hideButton", LuaChromeHideButton);
-  SetCFunction(L, "barLayout", LuaChromeBarLayout);
   SetCFunction(L, "back", LuaChromeBack);
   SetCFunction(L, "forward", LuaChromeForward);
   SetCFunction(L, "info", LuaChromeInfo);
@@ -2551,7 +2507,7 @@ void LemurXDispatchHttpResult(int request_id, const std::string& json) {
 
 std::string LemurXLuakitEnvJson() {
   JNIEnv* env = base::android::AttachCurrentThread();
-  base::android::ScopedJavaLocalRef<jstring> js =
+  jni_zero::ScopedJavaLocalRef<jstring> js =
       Java_LemurXBridge_luakitEnv(env);
   if (js.is_null()) {
     return std::string();
@@ -2563,7 +2519,7 @@ std::string LemurXLuakitWidgetOp(const std::string& op,
                                    int id,
                                    const std::string& json) {
   JNIEnv* env = base::android::AttachCurrentThread();
-  base::android::ScopedJavaLocalRef<jstring> js =
+  jni_zero::ScopedJavaLocalRef<jstring> js =
       Java_LemurXBridge_luakitWidget(
           env, base::android::ConvertUTF8ToJavaString(env, op), id,
           base::android::ConvertUTF8ToJavaString(env, json));
@@ -2575,7 +2531,7 @@ std::string LemurXLuakitWidgetOp(const std::string& op,
 
 content::WebContents* LemurXWebContentsForTab(int tab_id) {
   JNIEnv* env = base::android::AttachCurrentThread();
-  base::android::ScopedJavaLocalRef<jobject> jwc =
+  jni_zero::ScopedJavaLocalRef<jobject> jwc =
       Java_LemurXBridge_webContentsForTab(env, tab_id);
   if (jwc.is_null()) {
     return nullptr;
@@ -2589,8 +2545,8 @@ static void JNI_LemurXBridge_Start(JNIEnv* env) {
 
 static void JNI_LemurXBridge_Eval(
     JNIEnv* env,
-    const base::android::JavaParamRef<jstring>& jchunk,
-    const base::android::JavaParamRef<jstring>& jname,
+    const jni_zero::JavaRef<jstring>& jchunk,
+    const jni_zero::JavaRef<jstring>& jname,
     jboolean privileged) {
   LemurXEngine::Get()->Eval(
       base::android::ConvertJavaStringToUTF8(env, jchunk),
@@ -2599,8 +2555,8 @@ static void JNI_LemurXBridge_Eval(
 
 static void JNI_LemurXBridge_DispatchUiClick(
     JNIEnv* env,
-    const base::android::JavaParamRef<jstring>& joverlay_id,
-    const base::android::JavaParamRef<jstring>& jjson) {
+    const jni_zero::JavaRef<jstring>& joverlay_id,
+    const jni_zero::JavaRef<jstring>& jjson) {
   LemurXDispatchUiClick(
       base::android::ConvertJavaStringToUTF8(env, joverlay_id),
       jjson.is_null() ? "{}"
@@ -2609,8 +2565,8 @@ static void JNI_LemurXBridge_DispatchUiClick(
 
 static void JNI_LemurXBridge_DispatchTabEvent(
     JNIEnv* env,
-    const base::android::JavaParamRef<jstring>& jname,
-    const base::android::JavaParamRef<jstring>& jjson) {
+    const jni_zero::JavaRef<jstring>& jname,
+    const jni_zero::JavaRef<jstring>& jjson) {
   LemurXDispatchTabEvent(
       base::android::ConvertJavaStringToUTF8(env, jname),
       base::android::ConvertJavaStringToUTF8(env, jjson));
@@ -2619,7 +2575,7 @@ static void JNI_LemurXBridge_DispatchTabEvent(
 static void JNI_LemurXBridge_DispatchLuakitWidget(
     JNIEnv* env,
     jint id,
-    const base::android::JavaParamRef<jstring>& jjson) {
+    const jni_zero::JavaRef<jstring>& jjson) {
   LemurXLuakitDispatch(
       "widget", id,
       jjson.is_null() ? "{}" : base::android::ConvertJavaStringToUTF8(env, jjson),
@@ -2639,7 +2595,7 @@ void ReplyLuakitWidgetSync(int token, const std::string& verdict) {
 static void JNI_LemurXBridge_DispatchLuakitWidgetSync(
     JNIEnv* env,
     jint id,
-    const base::android::JavaParamRef<jstring>& jjson,
+    const jni_zero::JavaRef<jstring>& jjson,
     jint token) {
   LemurXLuakitDispatchWithReply(
       "widget", id,
@@ -2650,9 +2606,12 @@ static void JNI_LemurXBridge_DispatchLuakitWidgetSync(
 static void JNI_LemurXBridge_DispatchHttpResult(
     JNIEnv* env,
     jint request_id,
-    const base::android::JavaParamRef<jstring>& jjson) {
+    const jni_zero::JavaRef<jstring>& jjson) {
   LemurXDispatchHttpResult(
       request_id,
       jjson.is_null() ? "{\"ok\":false,\"error\":\"no result\"}"
                       : base::android::ConvertJavaStringToUTF8(env, jjson));
 }
+
+// jni_zero (Chromium 154): 生成 Java->native 入口，必须在 JNI_LemurXBridge_* 定义之后调用。
+DEFINE_JNI(LemurXBridge)

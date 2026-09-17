@@ -36,7 +36,11 @@ _M.scroll_step = nil
 _M.zoom_step = nil
 local function step() return tonumber(_M.scroll_step) or tonumber(get_setting("window.scroll_step", 40)) or 40 end
 local function zstep() return tonumber(_M.zoom_step) or tonumber(get_setting("window.zoom_step", 0.1)) or 0.1 end
-local function count(m) return (m and tonumber(m.count)) or 1 end
+local function count(m) return (type(m) == "table" and tonumber(m.count)) or 1 end
+
+-- 缓冲序列绑定的回调在 luakit 里是 fn(w, buffer, opts)，而 lousy.bind 也可能
+-- 统一成 fn(w, opts, args)。这里取第一个是表的参数当作 opts，两种都兼容。
+local function bufmeta(b, m) if type(b) == "table" then return b end return m end
 
 -- 兼容包装
 function _M.add_binds(...)
@@ -206,6 +210,7 @@ modes.add_binds("normal", {
     { "<KP_Home>",   "Scroll to the top.",       function(w) w:scroll({ y = 0 }) end },
     { "<KP_End>",    "Scroll to the bottom.",    function(w) w:scroll({ y = -1 }) end },
     { "gg", "Scroll to the top, or to N percent with a count.", function(w, b, m)
+        m = bufmeta(b, m)
         if m and m.count then w:scroll({ ypct = m.count }) else w:scroll({ y = 0 }) end
     end },
     { "G", "Scroll to the bottom, or to N percent with a count.", function(w, m)
@@ -217,8 +222,8 @@ modes.add_binds("normal", {
     { "+",  "Zoom in.",         function(w, m) w:zoom_in(zstep() * count(m)) end },
     { "-",  "Zoom out.",        function(w, m) w:zoom_out(zstep() * count(m)) end },
     { "=",  "Reset zoom.",      function(w) w:zoom_set() end },
-    { "zi", "Zoom in.",         function(w, b, m) w:zoom_in(zstep() * count(m)) end },
-    { "zo", "Zoom out.",        function(w, b, m) w:zoom_out(zstep() * count(m)) end },
+    { "zi", "Zoom in.",         function(w, b, m) w:zoom_in(zstep() * count(bufmeta(b, m))) end },
+    { "zo", "Zoom out.",        function(w, b, m) w:zoom_out(zstep() * count(bufmeta(b, m))) end },
     { "zz", "Reset zoom.",      function(w) w:zoom_set() end },
 
     { "<F11>", "Toggle fullscreen.", function(w) w.win.fullscreen = not w.win.fullscreen end },
@@ -264,9 +269,10 @@ modes.add_binds("normal", {
     { "J",  "Next tab.",      function(w, m) w:next_tab(count(m)) end },
     { "K",  "Previous tab.",  function(w, m) w:prev_tab(count(m)) end },
     { "gt", "Next tab, or tab N with a count.", function(w, b, m)
+        m = bufmeta(b, m)
         if m and m.count then w:goto_tab(m.count) else w:next_tab() end
     end },
-    { "gT", "Previous tab.",  function(w, b, m) w:prev_tab(count(m)) end },
+    { "gT", "Previous tab.",  function(w, b, m) w:prev_tab(count(bufmeta(b, m))) end },
     { "g0", "First tab.",     function(w) w:goto_tab(1) end },
     { "g$", "Last tab.",      function(w) w:goto_tab(-1) end },
     { "<Control-t>", "Open a new tab.",   function(w) w:new_tab(home_page()) end },

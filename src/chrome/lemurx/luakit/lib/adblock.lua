@@ -686,7 +686,8 @@ wm:add_signal("ready", function(_, pid)
     sync()
 end)
 
-settings.add_signal("setting-changed", function(_, ev)
+settings.add_signal("setting-changed", function(a, b)
+    local ev = type(a) == "table" and a or b -- C 组 settings 是模块信号：handler(ev)；也兼容 (obj, ev)
     if ev and ev.key == "adblock.enabled" then
         wm:emit_signal("enable", ev.value and true or false)
         _M.emit_signal("enabled-changed", ev.value and true or false)

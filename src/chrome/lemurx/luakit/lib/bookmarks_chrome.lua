@@ -153,8 +153,8 @@ modes.add_cmds({
 
 modes.add_binds("normal", {
     { "B", "Open the bookmarks page in a new tab.", function(w) w:new_tab(M.chrome_page) end },
-    { "^gb$", "Open the bookmarks page in the current tab.", function(w) w:navigate(M.chrome_page) end },
-    { "^gB$", "Open the bookmarks page in a new tab.", function(w) w:new_tab(M.chrome_page) end },
+    { "gb", "Open the bookmarks page in the current tab.", function(w) w:navigate(M.chrome_page) end },
+    { "gB", "Open the bookmarks page in a new tab.", function(w) w:new_tab(M.chrome_page) end },
     { "a", "Bookmark the current page, prompting for tags.", function(w)
         local uri = w.view and w.view.uri or ""
         w:enter_cmd(":bookmark " .. uri .. " ")

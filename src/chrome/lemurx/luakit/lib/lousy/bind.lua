@@ -151,6 +151,20 @@ local function split_bracket(inner)
     return parts, rest
 end
 
+--- 展开 luakit 的方括号简写：`c[lose]` → `close`, `c`；`qma[rk]` → `qmark`, `qma`。
+-- 没有方括号时原样追加。结果追加进 `out`（可省略）并返回。
+function M.expand_cmd(name, out)
+    out = out or {}
+    local head, opt = name:match("^([^%[%]]+)%[([^%[%]]+)%]$")
+    if head then
+        out[#out + 1] = head .. opt
+        out[#out + 1] = head
+    else
+        out[#out + 1] = name
+    end
+    return out
+end
+
 function M.parse_bind(str)
     if type(str) ~= "string" or str == "" then
         error("lousy.bind.parse_bind: trigger must be a non-empty string", 2)
@@ -189,7 +203,7 @@ function M.parse_bind(str)
             if tok:sub(1, 1) ~= ":" or #tok < 2 then
                 error(("lousy.bind.parse_bind: bad command trigger %q"):format(str), 2)
             end
-            cmds[#cmds + 1] = tok:sub(2)
+            M.expand_cmd(tok:sub(2), cmds)
         end
         b.type = "cmd"
         b.cmds = cmds
@@ -454,11 +468,8 @@ function M.hit(object, binds, mods, key, args)
     local a = util.table.clone(args)
     if count then a.count = count end
 
-    if M.match_any(object, binds, a) then return true, "" end
-    if M.match_key(object, binds, modstr, key, a) then return true, "" end
-
-    if args.enable_buffer and modstr == "" and utf8.len(key) == 1 then
-        local newbuf = buffer .. key
+    -- 缓冲匹配：newbuf 命中 → true,""；只是前缀 → true,newbuf；都不是 → nil
+    local function try_buffer(newbuf)
         if #newbuf > BUFFER_LIMIT then return false, "" end
         local matched, partial = M.match_buf(object, binds, newbuf, a)
         if matched then return true, "" end
@@ -476,7 +487,25 @@ function M.hit(object, binds, mods, key, args)
             end
         end
         if partial then return true, newbuf end
-        return false, ""
+        return nil
+    end
+
+    local bufferable = args.enable_buffer and modstr == "" and utf8.len(key) == 1
+
+    -- luakit 语义：缓冲进行中（"g" 已按下）时，先尝试用续接后的缓冲匹配 buf 绑定；
+    -- 只有续接不成立才回落到单键（否则 "gT" 永远会被单键 "T" 抢走）
+    if bufferable and buffer ~= "" then
+        local handled, newbuf = try_buffer(buffer .. key)
+        if handled ~= nil then return handled, newbuf end
+    end
+
+    if M.match_any(object, binds, a) then return true, "" end
+    if M.match_key(object, binds, modstr, key, a) then return true, "" end
+
+    if bufferable then
+        -- 缓冲为空时从头开始；缓冲续接失败时也从这个键重新开始
+        local handled, newbuf = try_buffer(key)
+        if handled ~= nil then return handled, newbuf end
     end
 
     return false, ""
@@ -615,10 +644,10 @@ function M.cmd(cmds, desc, func, opts)
     local list = {}
     if type(cmds) == "string" then
         for tok in cmds:gmatch("[^,%s]+") do
-            list[#list + 1] = (tok:gsub("^:", ""))
+            M.expand_cmd((tok:gsub("^:", "")), list)
         end
     elseif type(cmds) == "table" then
-        for _, c in ipairs(cmds) do list[#list + 1] = (tostring(c):gsub("^:", "")) end
+        for _, c in ipairs(cmds) do M.expand_cmd((tostring(c):gsub("^:", "")), list) end
     end
     if #list == 0 then error("lousy.bind.cmd: no command names given", 2) end
     local b = { __bind = true, type = "cmd", cmds = list }

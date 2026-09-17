@@ -34,6 +34,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/navigation_throttle.h"
+#include "content/public/browser/navigation_throttle_registry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/ssl_status.h"
@@ -78,7 +79,7 @@ void RunOnUiSync(base::OnceClosure closure) {
   }
 }
 
-std::string ToJson(const base::Value::Dict& dict) {
+std::string ToJson(const base::DictValue& dict) {
   std::string out;
   base::JSONWriter::Write(dict, &out);
   return out;
@@ -185,15 +186,15 @@ class TabObserver : public content::WebContentsObserver {
 
   int tab_id() const { return tab_id_; }
 
-  void Emit(base::Value::Dict dict) {
+  void Emit(base::DictValue dict) {
     dict.Set("tab", tab_id_);
     LemurXLuakitDispatch("webview", tab_id_, ToJson(dict), 0);
   }
 
   void EmitLoadStatus(const std::string& status,
                       const std::string& uri = std::string(),
-                      std::optional<base::Value::Dict> err = std::nullopt) {
-    base::Value::Dict d;
+                      std::optional<base::DictValue> err = std::nullopt) {
+    base::DictValue d;
     d.Set("ev", "load-status");
     d.Set("status", status);
     if (!uri.empty()) {
@@ -206,7 +207,7 @@ class TabObserver : public content::WebContentsObserver {
   }
 
   void EmitProperty(const std::string& name) {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "property");
     d.Set("name", name);
     Emit(std::move(d));
@@ -242,13 +243,13 @@ class TabObserver : public content::WebContentsObserver {
     net::Error code = handle->GetNetErrorCode();
     if (code == net::ERR_ABORTED) {
       // luakit：stop() 之后 load-failed 的 reason 是 "cancelled"
-      base::Value::Dict err;
+      base::DictValue err;
       err.Set("code", static_cast<int>(code));
       err.Set("message", "cancelled");
       EmitLoadStatus("failed", handle->GetURL().spec(), std::move(err));
       return;
     }
-    base::Value::Dict err;
+    base::DictValue err;
     err.Set("code", static_cast<int>(code));
     err.Set("message", net::ErrorToShortString(code));
     EmitLoadStatus("failed", handle->GetURL().spec(), std::move(err));
@@ -262,7 +263,7 @@ class TabObserver : public content::WebContentsObserver {
   }
 
   void LoadProgressChanged(double progress) override {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "progress");
     d.Set("progress", progress);
     Emit(std::move(d));
@@ -274,13 +275,14 @@ class TabObserver : public content::WebContentsObserver {
 
   void DidUpdateFaviconURL(
       content::RenderFrameHost* rfh,
-      const std::vector<blink::mojom::FaviconURLPtr>& candidates) override {
+      const std::vector<blink::mojom::FaviconURLPtr>& candidates,
+      blink::mojom::FaviconUpdateReason reason) override {
     if (!rfh->IsInPrimaryMainFrame()) {
       return;
     }
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "favicon");
-    base::Value::List list;
+    base::ListValue list;
     for (const auto& c : candidates) {
       list.Append(c->icon_url.spec());
     }
@@ -290,14 +292,14 @@ class TabObserver : public content::WebContentsObserver {
 
   void PrimaryMainFrameRenderProcessGone(
       base::TerminationStatus status) override {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "crashed");
     d.Set("status", static_cast<int>(status));
     Emit(std::move(d));
   }
 
   void OnAudioStateChanged(bool audible) override {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "audio");
     d.Set("audible", audible);
     Emit(std::move(d));
@@ -313,7 +315,7 @@ class TabObserver : public content::WebContentsObserver {
                            ui::PageTransition transition,
                            bool started_from_context_menu,
                            bool renderer_initiated) override {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "opened-url");
     d.Set("uri", url.spec());
     d.Set("reason", ReasonFor(transition));
@@ -325,7 +327,7 @@ class TabObserver : public content::WebContentsObserver {
   }
 
   void WebContentsDestroyed() override {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "destroyed");
     Emit(std::move(d));
     TabIds().erase(web_contents());
@@ -350,8 +352,8 @@ int g_next_nav_id = 1;
 
 class Throttle : public content::NavigationThrottle {
  public:
-  Throttle(content::NavigationHandle* handle, int tab_id)
-      : content::NavigationThrottle(handle), tab_id_(tab_id) {}
+  Throttle(content::NavigationThrottleRegistry& registry, int tab_id)
+      : content::NavigationThrottle(registry), tab_id_(tab_id) {}
   ~Throttle() override {
     if (nav_id_) {
       PendingThrottles().erase(nav_id_);
@@ -383,7 +385,7 @@ class Throttle : public content::NavigationThrottle {
     nav_id_ = g_next_nav_id++;
     PendingThrottles()[nav_id_] = weak_factory_.GetWeakPtr();
 
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "navigation-request");
     d.Set("id", nav_id_);
     d.Set("uri", h->GetURL().spec());
@@ -462,7 +464,7 @@ void LoadStringOnUi(int tab_id, std::string html, std::string uri) {
   GURL shown(uri);
   if (shown.is_valid()) {
     params.base_url_for_data_url = shown;
-    params.virtual_url_for_data_url = shown;
+    params.virtual_url_for_special_cases = shown;  // 154: virtual_url_for_data_url 改名
   }
   params.transition_type = ui::PAGE_TRANSITION_TYPED;
   wc->GetController().LoadURLWithParams(params);
@@ -501,12 +503,12 @@ void HistoryOnUi(int tab_id, std::string* json) {
     return;
   }
   content::NavigationController& c = wc->GetController();
-  base::Value::Dict d;
+  base::DictValue d;
   d.Set("index", c.GetCurrentEntryIndex() + 1);  // luakit 是 1-based
-  base::Value::List items;
+  base::ListValue items;
   for (int i = 0; i < c.GetEntryCount(); ++i) {
     content::NavigationEntry* e = c.GetEntryAtIndex(i);
-    base::Value::Dict item;
+    base::DictValue item;
     item.Set("uri", e->GetVirtualURL().spec());
     item.Set("title", base::UTF16ToUTF8(e->GetTitle()));
     items.Append(std::move(item));
@@ -520,12 +522,12 @@ void RestoreOnUi(int tab_id, std::string state) {
   if (!wc) {
     return;
   }
-  std::optional<base::Value> v = base::JSONReader::Read(state);
+  std::optional<base::Value> v = base::JSONReader::Read(state, base::JSON_PARSE_RFC);
   if (!v || !v->is_dict()) {
     return;
   }
-  const base::Value::Dict& d = v->GetDict();
-  const base::Value::List* items = d.FindList("items");
+  const base::DictValue& d = v->GetDict();
+  const base::ListValue* items = d.FindList("items");
   int index = d.FindInt("index").value_or(0);
   if (!items || items->empty()) {
     return;
@@ -533,7 +535,7 @@ void RestoreOnUi(int tab_id, std::string state) {
   if (index < 1 || index > static_cast<int>(items->size())) {
     index = static_cast<int>(items->size());
   }
-  const base::Value::Dict* cur = (*items)[index - 1].GetIfDict();
+  const base::DictValue* cur = (*items)[index - 1].GetIfDict();
   if (!cur) {
     return;
   }
@@ -579,7 +581,7 @@ void InfoOnUi(int tab_id, std::string* json) {
   if (!wc) {
     return;
   }
-  base::Value::Dict d;
+  base::DictValue d;
   d.Set("uri", wc->GetVisibleURL().spec());
   d.Set("title", base::UTF16ToUTF8(wc->GetTitle()));
   d.Set("is_loading", wc->IsLoading());
@@ -589,7 +591,7 @@ void InfoOnUi(int tab_id, std::string* json) {
   d.Set("can_go_forward", wc->GetController().CanGoForward());
   content::RenderFrameHost* rfh = wc->GetPrimaryMainFrame();
   if (rfh && rfh->GetProcess()) {
-    d.Set("process_id", rfh->GetProcess()->GetID());
+    d.Set("process_id", rfh->GetProcess()->GetDeprecatedID());
     d.Set("os_pid", static_cast<int>(rfh->GetProcess()->GetProcess().Pid()));
   }
   d.Set("incognito", wc->GetBrowserContext() &&
@@ -678,7 +680,7 @@ int WvHistory(lua_State* L) {
     lua_pushnil(L);
     return 1;
   }
-  std::optional<base::Value> v = base::JSONReader::Read(json);
+  std::optional<base::Value> v = base::JSONReader::Read(json, base::JSON_PARSE_RFC);
   if (!v) {
     lua_pushnil(L);
     return 1;
@@ -726,7 +728,7 @@ int WvInfo(lua_State* L) {
     lua_pushnil(L);
     return 1;
   }
-  std::optional<base::Value> v = base::JSONReader::Read(json);
+  std::optional<base::Value> v = base::JSONReader::Read(json, base::JSON_PARSE_RFC);
   if (!v) {
     lua_pushnil(L);
     return 1;
@@ -780,17 +782,14 @@ void SetFn(lua_State* L, const char* name, lua_CFunction fn) {
 
 }  // namespace
 
-std::unique_ptr<content::NavigationThrottle>
-LemurXLuakitMaybeCreateNavigationThrottle(content::NavigationHandle* handle) {
-  if (!handle) {
-    return nullptr;
-  }
-  content::WebContents* wc = handle->GetWebContents();
+void LemurXLuakitMaybeAddNavigationThrottle(
+    content::NavigationThrottleRegistry& registry) {
+  content::WebContents* wc = registry.GetNavigationHandle().GetWebContents();
   auto it = TabIds().find(wc);
   if (it == TabIds().end()) {
-    return nullptr;
+    return;
   }
-  return std::make_unique<Throttle>(handle, it->second);
+  registry.AddThrottle(std::make_unique<Throttle>(registry, it->second));
 }
 
 bool LemurXLuakitIsCertificateAllowed(const std::string& host) {

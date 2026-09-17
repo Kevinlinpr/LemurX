@@ -1,3 +1,7 @@
+// Copyright 2026 The LemurX Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 package org.chromium.chrome.browser.lemurx;
 
 import android.app.Activity;
@@ -20,9 +24,9 @@ import android.widget.PopupWindow;
 import android.widget.TextView;
 
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
-import org.chromium.chrome.lemurx.base.utils.LemurLogUtils;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -34,6 +38,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 
 /**
  * 原生覆盖层。每个控件一块 WRAP_CONTENT 的 PopupWindow，避免全屏窗口把浏览器点死。
@@ -46,8 +51,22 @@ class LemurXUiHost {
     private static final Map<String, PopupWindow> sPopups = new HashMap<>();
     private static int sNextId = 1;
 
+    /**
+     * 在 UI 线程同步跑一个 Callable，失败返回 null。Chromium 154 去掉了
+     * ThreadUtils.runOnUiThreadBlockingNoException，runOnUiThreadBlocking(Callable) 会把
+     * 任务里的异常包成 RuntimeException 抛出，这里兜住以维持旧的“出错返回 null”语义。
+     */
+    private static <T> T uiBlocking(Callable<T> task) {
+        try {
+            return ThreadUtils.runOnUiThreadBlocking(task);
+        } catch (RuntimeException e) {
+            Log.i(TAG, "ui thread task failed: %s", e.toString());
+            return null;
+        }
+    }
+
     static String show(String optionsJson) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return uiBlocking(
                 () -> {
                     Activity activity = hostActivity();
                     if (activity == null) {
@@ -59,7 +78,7 @@ class LemurXUiHost {
                                 ? new JSONObject()
                                 : new JSONObject(optionsJson);
                     } catch (Exception e) {
-                        LemurLogUtils.i(TAG, "ui.show parse", e.getMessage());
+                        Log.i(TAG, "ui.show parse: %s", e.getMessage());
                         return "";
                     }
                     String id = options.optString("id", "");
@@ -72,11 +91,13 @@ class LemurXUiHost {
     }
 
     static boolean remove(String id) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
-                () -> {
-                    sOverlayJson.remove(id);
-                    return removeView(id);
-                });
+        Boolean removed =
+                uiBlocking(
+                        () -> {
+                            sOverlayJson.remove(id);
+                            return removeView(id);
+                        });
+        return removed != null && removed;
     }
 
     static void clear() {
@@ -153,7 +174,7 @@ class LemurXUiHost {
             try {
                 addView(activity, item.getKey(), new JSONObject(item.getValue()));
             } catch (Exception e) {
-                LemurLogUtils.i(TAG, "reattach overlay", item.getKey(), e.getMessage());
+                Log.i(TAG, "reattach overlay %s: %s", item.getKey(), e.getMessage());
             }
         }
     }
@@ -206,7 +227,7 @@ class LemurXUiHost {
                             popup.showAtLocation(decor, gravity, x, y);
                         }
                     } catch (Exception e) {
-                        LemurLogUtils.i(TAG, "popup show failed", id, e.getMessage());
+                        Log.i(TAG, "popup show failed %s: %s", id, e.getMessage());
                     }
                 };
         if (token != null && token.isAttachedToWindow()) {
@@ -293,7 +314,7 @@ class LemurXUiHost {
 
     private static String dump(String json) {
         String result =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             JSONObject out = new JSONObject();
                             try {
@@ -337,7 +358,7 @@ class LemurXUiHost {
 
     private static String find(String json) {
         String result =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             JSONObject out = new JSONObject();
                             try {
@@ -369,7 +390,7 @@ class LemurXUiHost {
 
     private static String click(String json, boolean longClick) {
         String result =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             JSONObject out = new JSONObject();
                             try {
@@ -400,7 +421,7 @@ class LemurXUiHost {
 
     private static String setText(String json) {
         String result =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             JSONObject out = new JSONObject();
                             try {
@@ -438,7 +459,7 @@ class LemurXUiHost {
 
     private static String getText(String json) {
         String result =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             JSONObject out = new JSONObject();
                             try {
@@ -490,7 +511,7 @@ class LemurXUiHost {
 
     private static String mutateView(String json, ViewMutator mutator) {
         String result =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             JSONObject out = new JSONObject();
                             try {
@@ -606,7 +627,7 @@ class LemurXUiHost {
                                 });
                         builder.show();
                     } catch (Exception e) {
-                        LemurLogUtils.i(TAG, "ui.dialog", e.getMessage());
+                        Log.i(TAG, "ui.dialog: %s", e.getMessage());
                     }
                 });
         JSONObject out = new JSONObject();
@@ -688,7 +709,7 @@ class LemurXUiHost {
                 }
             }
         } catch (Exception e) {
-            LemurLogUtils.i(TAG, "window roots", e.getMessage());
+            Log.i(TAG, "window roots: %s", e.getMessage());
         }
         Activity activity = hostActivity();
         if (activity != null && activity.getWindow() != null) {

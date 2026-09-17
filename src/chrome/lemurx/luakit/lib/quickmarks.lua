@@ -150,7 +150,7 @@ modes.add_binds("normal", {
 })
 
 modes.add_cmds({
-    { ":qma[rk]", "Set a quickmark: :qmark <token> <uri> [uri ...]",
+    { ":qmark, :qma", "Set a quickmark: :qmark <token> <uri> [uri ...]",
         function(w, o)
             local arg = (o and o.arg) or ""
             local token, rest = arg:match("^%s*(%w)%s+(.+)$")
@@ -171,7 +171,7 @@ modes.add_cmds({
             end
             w:enter_cmd((":qmark %s %s"):format(token, table.concat(uris, " ")))
         end },
-    { ":delqm[arks]", "Delete quickmarks: :delqmarks <token> [token ...] (all when omitted).",
+    { ":delqmarks, :delqm", "Delete quickmarks: :delqmarks <token> [token ...] (all when omitted).",
         function(w, o)
             local arg = (o and o.arg) or ""
             local any = false

@@ -1,0 +1,31 @@
+diff --git a/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java b/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java
+index 79cabb0027..dfc0ccc680 100644
+--- a/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java
++++ b/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java
+@@ -91,6 +91,14 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
+         sMetricsMap = map;
+     }
+ 
++    // LemurX: consulted first on every back press; returns true when consumed.
++    private static java.util.function.@Nullable BooleanSupplier sLemurXInterceptor;
++
++    public static void setLemurXInterceptor(
++            java.util.function.@Nullable BooleanSupplier interceptor) {
++        sLemurXInterceptor = interceptor;
++    }
++
+     public @Nullable Boolean processEscapeKeyEvent() {
+         boolean failed = false;
+         for (BackPressHandler handler : mHandlers) {
+@@ -138,6 +146,11 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
+         @Override
+         public void handleOnBackPressed() {
+             mLastCalledHandlerType = -1;
++            // LemurX: Lua may claim the back press before any built-in handler
++            // (luakit "back" binds, custom overlays, ...).
++            if (sLemurXInterceptor != null && sLemurXInterceptor.getAsBoolean()) {
++                return;
++            }
+             if (mActiveHandler != null) {
+                 Boolean enabled = mActiveHandler.getHandleBackPressChangedSupplier().get();
+                 if (enabled != null && enabled) {

@@ -2,10 +2,11 @@ LemurX bundles third-party code under its own licenses:
 
   * Chromium            BSD-3-Clause        chromium/src/LICENSE
   * Lua 5.4.7           MIT                 src/third_party/lua/LICENSE
-  * luakit lib/ lousy/  GPL-3.0             src/chrome/lemurx/luakit/COPYING.GPLv3
-    (shipped verbatim as Lua source files; LemurX's own kernel that hosts them
-     — src/chrome/lemurx/luakit/kernel/, the C++ and Java hosts — is BSD-3-Clause
-     and was written independently against the luakit API documentation.)
-  * luakit icons        see src/chrome/lemurx/luakit/resources/icons/COPYING
+  * markdown.lua        MIT                 src/chrome/lemurx/luakit/lib/markdown.lua
+    (Niklas Frykholm's Markdown-to-HTML converter, used by the luakit://help page)
 
-Everything else in this repository is © The LemurX Authors, BSD-3-Clause (LICENSE).
+The luakit-compatible runtime under src/chrome/lemurx/luakit/ (kernel/, lib/,
+lousy/, config/) is an independent re-implementation of the public Lua API
+documented at https://luakit.github.io/. It contains no luakit source code
+(neither C nor Lua) and no luakit artwork; it is © The LemurX Authors,
+BSD-3-Clause, like everything else in this repository (LICENSE).

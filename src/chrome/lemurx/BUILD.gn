@@ -1,0 +1,48 @@
+# Copyright 2026 The LemurX Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/android/rules.gni")
+import("//chrome/lemurx/luakit/luakit_assets.gni")
+
+assert(is_android)
+
+# Lua shipped inside the apk under assets/lua/ and assets/luakit/.
+# LemurXBridge.seedLuakit() copies them into the app's files dir on first run
+# (and on every update in dev builds).
+android_assets("lemurx_assets") {
+  renaming_sources = [
+    "//chrome/lemurx/lua/scripts/init.lua",
+    "//chrome/lemurx/lua/scripts/tutorial.lua",
+    "//chrome/lemurx/lua/scripts/example.lua",
+  ]
+  renaming_destinations = [
+    "lua/init.lua",
+    "lua/tutorial.lua",
+    "lua/example.lua",
+  ]
+
+  # Showcase scripts, reachable from the tutorial page.
+  renaming_sources += [
+    "//chrome/lemurx/lua/examples/10_shell_remix.lua",
+    "//chrome/lemurx/lua/examples/20_renderer_dom_lua.lua",
+    "//chrome/lemurx/lua/examples/30_request_surgeon.lua",
+    "//chrome/lemurx/lua/examples/40_custom_scheme.lua",
+    "//chrome/lemurx/lua/examples/50_native_widget_shell.lua",
+    "//chrome/lemurx/lua/examples/60_navigation_gatekeeper.lua",
+    "//chrome/lemurx/lua/examples/70_cdp_lab.lua",
+  ]
+  renaming_destinations += [
+    "lua/examples/10_shell_remix.lua",
+    "lua/examples/20_renderer_dom_lua.lua",
+    "lua/examples/30_request_surgeon.lua",
+    "lua/examples/40_custom_scheme.lua",
+    "lua/examples/50_native_widget_shell.lua",
+    "lua/examples/60_navigation_gatekeeper.lua",
+    "lua/examples/70_cdp_lab.lua",
+  ]
+
+  # luakit-compatible runtime: kernel + library + default config.
+  renaming_sources += luakit_asset_sources
+  renaming_destinations += luakit_asset_destinations
+}

@@ -1,0 +1,33 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java b/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
+index 9ef575c93d..d8d765e09f 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
+@@ -109,6 +109,8 @@ import org.chromium.chrome.browser.auxiliary_search.AuxiliarySearchMetrics;
+ import org.chromium.chrome.browser.auxiliary_search.module.AuxiliarySearchModuleBuilder;
+ import org.chromium.chrome.browser.back_press.BackPressManager;
+ import org.chromium.chrome.browser.back_press.MinimizeAppAndCloseTabBackPressHandler;
++import org.chromium.chrome.browser.lemurx.LemurXBridge;
++import org.chromium.chrome.browser.lemurx.LemurXChromeHost;
+ import org.chromium.chrome.browser.back_press.MinimizeAppAndCloseTabBackPressHandler.MinimizeAppAndCloseTabType;
+ import org.chromium.chrome.browser.bookmarks.BookmarkModel;
+ import org.chromium.chrome.browser.bookmarks.BookmarkPane;
+@@ -1657,6 +1659,10 @@ public class ChromeTabbedActivity extends ChromeActivity implements PreAttachInt
+ 
+             super.finishNativeInitialization();
+ 
++            // LemurX: attach the Lua runtime to this window and run init.lua.
++            LemurXBridge.attachChrome(this);
++            LemurXBridge.start();
++
+             TabbedStartupWindowPolicyDelegate.getInstance().initializeWithNative(profile);
+ 
+             if (!ChromeFeatureList.sAndroidStartupImprovements.isEnabled()) {
+@@ -4342,6 +4348,8 @@ public class ChromeTabbedActivity extends ChromeActivity implements PreAttachInt
+             boolean fromMenu,
+             @Nullable Bundle menuItemData,
+             @Nullable MotionEventInfo triggeringMotion) {
++        // LemurX: Lua-added menu items and Lua-intercepted stock items are consumed here.
++        if (LemurXChromeHost.handleAppMenuClick(id)) return true;
+         final Tab currentTab = getActivityTab();
+         boolean currentTabIsNtp = isTabNtp(currentTab);
+         if (id == R.id.new_tab_menu_id) {

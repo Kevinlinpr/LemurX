@@ -80,7 +80,8 @@ class LuakitWebExtension : public mojom::LuakitWebExtension {
                   int32_t page_id,
                   const std::string& signame,
                   const std::string& args_json) override;
-  void PageCreated(int32_t routing_id, int32_t page_id) override;
+  void PageCreated(const blink::LocalFrameToken& frame_token,
+                   int32_t page_id) override;
   void EvalJs(int32_t page_id,
               const std::string& script,
               const std::string& source,
@@ -91,13 +92,16 @@ class LuakitWebExtension : public mojom::LuakitWebExtension {
 
   struct Page {
     content::RenderFrame* frame = nullptr;
-    int routing_id = 0;
+    int routing_id = 0;  // 渲染进程内的帧句柄（LocalFrameToken 的整数别名，Lua 侧的 page 句柄）
     int page_id = -1;   // Tab id；未知为 -1
     bool created_emitted = false;
   };
 
   // 由 routing_id / page_id 找页面
   Page* PageByRouting(int routing_id);
+  // LocalFrameToken → 渲染进程内整数句柄（首次见到时分配）
+  int RidFor(const blink::LocalFrameToken& token);
+  int RidFor(content::RenderFrame* frame);
   Page* PageById(int page_id);
   content::RenderFrame* FrameForPage(int page_id);
 
@@ -160,6 +164,8 @@ class LuakitWebExtension : public mojom::LuakitWebExtension {
 
   // routing_id → Page（主框架）
   std::map<int, Page> pages_;
+  std::map<blink::LocalFrameToken, int> rid_by_token_;
+  int next_rid_ = 1;
   // 浏览器先于帧到达的 PageCreated
   std::map<int, int> pending_page_ids_;
   // Init 前收到的 RequireModule

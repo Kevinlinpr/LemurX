@@ -136,7 +136,9 @@ end
 _M.apply_settings = apply_settings
 
 if settings and settings.add_signal then
-    pcall(settings.add_signal, "setting-changed", function(_, e)
+    -- settings 可能以 fn(event) 或 lousy.signal 风格 fn(module, event) 回调
+    pcall(settings.add_signal, "setting-changed", function(a, b)
+        local e = (type(b) == "table") and b or a
         if type(e) ~= "table" then return end
         local name = tostring(e.key or ""):match("^webview%.(.+)$")
         if not name then return end
@@ -266,7 +268,9 @@ local function navigate(view, arg)
     if type(arg) == "table" then
         if arg.session_state then
             local ok = pcall(function() view.session_state = arg.session_state end)
-            if ok then return end
+            -- 会话状态恢复成功且已经带出了 URI 就结束；否则退回到直接加载 uri
+            local cur = ok and view.uri or nil
+            if ok and cur and cur ~= "" and cur ~= "about:blank" then return end
         end
         if arg.uri then view.uri = arg.uri end
         return

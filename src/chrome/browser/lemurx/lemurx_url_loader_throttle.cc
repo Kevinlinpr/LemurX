@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+#include "base/containers/span.h"
+#include "base/strings/string_view_util.h"
 #include "base/functional/bind.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/single_thread_task_runner.h"
@@ -29,6 +31,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/url_request/redirect_info.h"
 #include "services/network/public/cpp/data_element.h"
+#include "services/network/public/cpp/http_request_headers_update_params.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/resource_request_body.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
@@ -90,10 +93,10 @@ class LemurXBodyRewriter : public network::mojom::URLLoaderClient,
     MaybeSendOnComplete();
   }
 
+  // Chromium 154: FollowRedirect takes HttpRequestHeadersUpdateParams and
+  // Pause/ResumeReadingBodyFromNet no longer exist on URLLoader.
   void FollowRedirect(
-      const std::vector<std::string>& removed_headers,
-      const net::HttpRequestHeaders& modified_headers,
-      const net::HttpRequestHeaders& modified_cors_exempt_headers,
+      network::HttpRequestHeadersUpdateParams headers_update_params,
       const std::optional<GURL>& new_url) override {}
   void SetPriority(net::RequestPriority priority,
                    int32_t intra_priority_value) override {
@@ -101,18 +104,10 @@ class LemurXBodyRewriter : public network::mojom::URLLoaderClient,
       source_url_loader_->SetPriority(priority, intra_priority_value);
     }
   }
-  void PauseReadingBodyFromNet() override {
-    if (source_url_loader_) {
-      source_url_loader_->PauseReadingBodyFromNet();
-    }
-  }
-  void ResumeReadingBodyFromNet() override {
-    if (source_url_loader_) {
-      source_url_loader_->ResumeReadingBodyFromNet();
-    }
-  }
 
-  void OnDataAvailable(const void* data, size_t num_bytes) override {
+  // 154: DataPipeDrainer::Client::OnDataAvailable 改为 span 形参
+  void OnDataAvailable(base::span<const uint8_t> data) override {
+    const size_t num_bytes = data.size();
     if (data_.size() >= kHardMaxBodyBytes) {
       skip_replace_ = true;
       return;
@@ -125,7 +120,7 @@ class LemurXBodyRewriter : public network::mojom::URLLoaderClient,
     if (data_.size() + num_bytes > kMaxRewriteBodyBytes) {
       skip_replace_ = true;
     }
-    data_.append(static_cast<const char*>(data), to_copy);
+    data_.append(base::as_string_view(data.first(to_copy)));
   }
   void OnDataComplete() override {
     data_drainer_.reset();
@@ -217,8 +212,9 @@ void LemurXURLLoaderThrottle::WillStartRequest(
 
   if (rule->NeedsRequestBodyRewrite()) {
     if (!rule->request_body.empty()) {
-      request->request_body = network::ResourceRequestBody::CreateFromBytes(
-          rule->request_body.data(), rule->request_body.size());
+      request->request_body =
+          network::ResourceRequestBody::CreateFromCopyOfBytes(
+              base::as_byte_span(rule->request_body));
     } else if (request->request_body && request->request_body->elements()) {
       std::string body;
       bool all_bytes = true;
@@ -228,13 +224,14 @@ void LemurXURLLoaderThrottle::WillStartRequest(
           break;
         }
         const auto& bytes = element.As<network::DataElementBytes>();
-        body.append(bytes.AsStringPiece().data(), bytes.AsStringPiece().size());
+        body.append(bytes.AsStringView());
       }
       if (all_bytes) {
         LemurXNetRules::ApplyBodyReplacements(&body,
                                                 rule->replace_request_body);
-        request->request_body = network::ResourceRequestBody::CreateFromBytes(
-            body.data(), body.size());
+        request->request_body =
+            network::ResourceRequestBody::CreateFromCopyOfBytes(
+                base::as_byte_span(body));
       }
     }
   }

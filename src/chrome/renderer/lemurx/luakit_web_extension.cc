@@ -212,7 +212,7 @@ base::Value LuaToValue(lua_State* L, int idx, int depth) {
         }
       }
       if (is_array) {
-        base::Value::List list;
+        base::ListValue list;
         for (lua_Integer i = 1; i <= n; ++i) {
           lua_rawgeti(L, idx, i);
           list.Append(LuaToValue(L, -1, depth + 1));
@@ -220,7 +220,7 @@ base::Value LuaToValue(lua_State* L, int idx, int depth) {
         }
         return base::Value(std::move(list));
       }
-      base::Value::Dict dict;
+      base::DictValue dict;
       lua_pushnil(L);
       while (lua_next(L, idx)) {
         std::string key;
@@ -248,28 +248,33 @@ class FrameObserver : public content::RenderFrameObserver {
   explicit FrameObserver(content::RenderFrame* frame)
       : content::RenderFrameObserver(frame) {
     if (auto* ext = LuakitWebExtension::Get()) {
+      rid_ = ext->RidFor(frame);
       ext->OnFrameReady(frame);
     }
   }
 
   void DidClearWindowObject() override {
     if (auto* ext = LuakitWebExtension::Get()) {
-      ext->OnWindowObjectCleared(routing_id());
+      ext->OnWindowObjectCleared(ext->RidFor(render_frame()));
     }
   }
 
   void DidDispatchDOMContentLoadedEvent() override {
     if (auto* ext = LuakitWebExtension::Get()) {
-      ext->OnDocumentLoaded(routing_id());
+      ext->OnDocumentLoaded(ext->RidFor(render_frame()));
     }
   }
 
   void OnDestruct() override {
     if (auto* ext = LuakitWebExtension::Get()) {
-      ext->OnFrameDestroyed(routing_id());
+      // render_frame() 可能已经为空：用构造时记下的句柄
+      ext->OnFrameDestroyed(rid_);
     }
     delete this;
   }
+
+ private:
+  int rid_ = 0;
 };
 
 // ===== V8 → Lua 回调（监听器 / Lua 函数包装 / 暴露函数）=====
@@ -458,7 +463,7 @@ int PJsonEncode(lua_State* L) {
 int PJsonDecode(lua_State* L) {
   size_t len = 0;
   const char* s = luaL_checklstring(L, 1, &len);
-  std::optional<base::Value> v = base::JSONReader::Read(std::string_view(s, len));
+  std::optional<base::Value> v = base::JSONReader::Read(std::string_view(s, len), base::JSON_PARSE_RFC);
   if (!v) {
     lua_pushnil(L);
     return 1;
@@ -828,7 +833,7 @@ int PUriParse(lua_State* L) {
     return 1;
   }
   lua_newtable(L);
-  auto set = [&](const char* k, const std::string& v) {
+  auto set = [&](const char* k, std::string_view v) {
     if (!v.empty()) {
       lua_pushlstring(L, v.data(), v.size());
       lua_setfield(L, -2, k);
@@ -836,7 +841,7 @@ int PUriParse(lua_State* L) {
   };
   set("scheme", url.scheme());
   set("host", url.host());
-  set("path", url.path().empty() ? "/" : url.path());
+  set("path", url.path().empty() ? std::string_view("/") : url.path());
   set("query", url.query());
   set("fragment", url.ref());
   set("user", url.username());
@@ -1068,11 +1073,12 @@ LuakitWebExtension::MaybeCreateURLLoaderThrottle(
   if (!rf) {
     return nullptr;
   }
-  Page* p = ext->PageByRouting(rf->GetRoutingID());
+  int rid = ext->RidFor(top_local->GetLocalFrameToken());
+  Page* p = ext->PageByRouting(rid);
   if (!p || !p->created_emitted) {
     return nullptr;
   }
-  return std::make_unique<LuakitRequestThrottle>(rf->GetRoutingID());
+  return std::make_unique<LuakitRequestThrottle>(rid);
 }
 
 bool LuakitWebExtension::OnSendRequest(int routing_id,
@@ -1228,7 +1234,9 @@ void LuakitWebExtension::EmitSignal(const std::string& channel,
   lua_settop(L, top);
 }
 
-void LuakitWebExtension::PageCreated(int32_t routing_id, int32_t page_id) {
+void LuakitWebExtension::PageCreated(const blink::LocalFrameToken& frame_token,
+                                     int32_t page_id) {
+  int routing_id = RidFor(frame_token);
   auto it = pages_.find(routing_id);
   if (it == pages_.end()) {
     pending_page_ids_[routing_id] = page_id;
@@ -1305,8 +1313,23 @@ content::RenderFrame* LuakitWebExtension::FrameForPage(int page_id) {
   return p ? p->frame : nullptr;
 }
 
+int LuakitWebExtension::RidFor(const blink::LocalFrameToken& token) {
+  auto it = rid_by_token_.find(token);
+  if (it != rid_by_token_.end()) {
+    return it->second;
+  }
+  int rid = next_rid_++;
+  rid_by_token_[token] = rid;
+  return rid;
+}
+
+int LuakitWebExtension::RidFor(content::RenderFrame* frame) {
+  blink::WebLocalFrame* wf = frame ? frame->GetWebFrame() : nullptr;
+  return wf ? RidFor(wf->GetLocalFrameToken()) : 0;
+}
+
 void LuakitWebExtension::OnFrameReady(content::RenderFrame* frame) {
-  int rid = frame->GetRoutingID();
+  int rid = RidFor(frame);
   Page& p = pages_[rid];
   p.frame = frame;
   p.routing_id = rid;
@@ -1560,7 +1583,7 @@ v8::Local<v8::Value> LuakitWebExtension::LuaToV8(lua_State* L,
                                                  int idx,
                                                  v8::Local<v8::Context> ctx,
                                                  int routing_id) {
-  v8::Isolate* isolate = ctx->GetIsolate();
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();  // 154: Context::GetIsolate 已移除
   idx = lua_absindex(L, idx);
   switch (lua_type(L, idx)) {
     case LUA_TNIL:
@@ -1647,7 +1670,7 @@ void LuakitWebExtension::V8ToLua(lua_State* L,
                                  v8::Local<v8::Context> ctx,
                                  int routing_id,
                                  int depth) {
-  v8::Isolate* isolate = ctx->GetIsolate();
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();  // 154: Context::GetIsolate 已移除
   if (value.IsEmpty() || value->IsNullOrUndefined()) {
     lua_pushnil(L);
     return;

@@ -1,3 +1,7 @@
+// Copyright 2026 The LemurX Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 package org.chromium.chrome.browser.lemurx;
 
 import android.app.Activity;
@@ -18,6 +22,7 @@ import android.view.View;
 import android.view.Window;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.browsing_data.BrowsingDataBridge;
@@ -27,9 +32,8 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileManager;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.lemurx.base.utils.LemurLogUtils;
 import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridge;
-import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.components.content_settings.ContentSetting;
 import org.chromium.components.content_settings.ContentSettingsType;
 import org.chromium.components.prefs.PrefService;
 import org.chromium.components.user_prefs.UserPrefs;
@@ -58,6 +62,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -76,6 +81,26 @@ class LemurXMoatHost {
     private static final int PRIV_FETCH_MAX = 8 * 1024 * 1024;
     private static final Map<Integer, Map<String, String>> sTabHeaders = new ConcurrentHashMap<>();
     private static final Map<Integer, String> sTabUserAgents = new ConcurrentHashMap<>();
+
+    /**
+     * 在 UI 线程同步跑一个 Callable，失败返回 null。Chromium 154 去掉了
+     * ThreadUtils.runOnUiThreadBlockingNoException，runOnUiThreadBlocking(Callable) 会把
+     * 任务里的异常包成 RuntimeException 抛出，这里兜住以维持旧的“出错返回 null”语义。
+     */
+    private static <T> T uiBlocking(Callable<T> task) {
+        try {
+            return ThreadUtils.runOnUiThreadBlocking(task);
+        } catch (RuntimeException e) {
+            Log.i(TAG, "ui thread task failed: %s", e.toString());
+            return null;
+        }
+    }
+
+    /** 同上，但把 null 当 false，供返回 boolean 的接口用。 */
+    private static boolean uiBlockingBool(Callable<Boolean> task) {
+        Boolean value = uiBlocking(task);
+        return value != null && value;
+    }
 
     static String httpFetch(String url, String optionsJson, boolean privileged) {
         JSONObject result = new JSONObject();
@@ -211,7 +236,7 @@ class LemurXMoatHost {
             }
             return true;
         } catch (Exception e) {
-            LemurLogUtils.i(TAG, "fs.write", e.getMessage());
+            Log.i(TAG, "fs.write: %s", e.getMessage());
             return false;
         }
     }
@@ -233,7 +258,7 @@ class LemurXMoatHost {
                 array.put(row);
             }
         } catch (Exception e) {
-            LemurLogUtils.i(TAG, "fs.list", e.getMessage());
+            Log.i(TAG, "fs.list: %s", e.getMessage());
         }
         return array.toString();
     }
@@ -268,7 +293,7 @@ class LemurXMoatHost {
         try {
             JSONObject opt = parseObject(optionsJson);
             CaptureTarget target =
-                    ThreadUtils.runOnUiThreadBlockingNoException(() -> CaptureTarget.from(tabId));
+                    uiBlocking(() -> CaptureTarget.from(tabId));
             if (target == null || target.view == null || target.activity == null) {
                 result.put("ok", false);
                 result.put("error", "no tab view");
@@ -279,7 +304,7 @@ class LemurXMoatHost {
             Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
             boolean copied = copyViewPixels(target.activity, target.view, target.location, bitmap);
             if (!copied) {
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             Canvas canvas = new Canvas(bitmap);
                             target.view.draw(canvas);
@@ -316,7 +341,7 @@ class LemurXMoatHost {
     }
 
     static boolean mute(int tabId, boolean muted) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return uiBlockingBool(
                 () -> {
                     Tab tab = resolveTab(tabId);
                     WebContents webContents = tab == null ? null : tab.getWebContents();
@@ -330,7 +355,7 @@ class LemurXMoatHost {
 
     static boolean isMuted(int tabId) {
         Boolean value =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             Tab tab = resolveTab(tabId);
                             WebContents webContents = tab == null ? null : tab.getWebContents();
@@ -340,7 +365,7 @@ class LemurXMoatHost {
     }
 
     static boolean stop(int tabId) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return uiBlockingBool(
                 () -> {
                     Tab tab = resolveTab(tabId);
                     WebContents webContents = tab == null ? null : tab.getWebContents();
@@ -353,13 +378,7 @@ class LemurXMoatHost {
     }
 
     static String html(int tabId) {
-        Tab tabHolder[] = new Tab[1];
-        ThreadUtils.runOnUiThreadBlockingNoException(
-                () -> {
-                    tabHolder[0] = resolveTab(tabId);
-                    return true;
-                });
-        Tab tab = tabHolder[0];
+        Tab tab = uiBlocking(() -> resolveTab(tabId));
         if (tab == null) {
             return "";
         }
@@ -432,7 +451,7 @@ class LemurXMoatHost {
     }
 
     static boolean tap(String optionsJson) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return uiBlockingBool(
                 () -> {
                     JSONObject opt = parseObject(optionsJson);
                     Tab tab = resolveTab(opt.optInt("tab", 0));
@@ -446,7 +465,7 @@ class LemurXMoatHost {
     }
 
     static boolean swipe(String optionsJson) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return uiBlockingBool(
                 () -> {
                     JSONObject opt = parseObject(optionsJson);
                     Tab tab = resolveTab(opt.optInt("tab", 0));
@@ -478,7 +497,7 @@ class LemurXMoatHost {
     }
 
     static boolean key(String name, int tabId) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return uiBlockingBool(
                 () -> {
                     Tab tab = resolveTab(tabId);
                     View view = tab == null ? null : tab.getView();
@@ -497,7 +516,7 @@ class LemurXMoatHost {
     }
 
     static boolean permSet(String origin, String type, String value) {
-        return ThreadUtils.runOnUiThreadBlockingNoException(
+        return uiBlockingBool(
                 () -> {
                     Integer settingType = permType(type);
                     Integer setting = permValue(value);
@@ -517,7 +536,7 @@ class LemurXMoatHost {
 
     static String permGet(String origin, String type) {
         String value =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             Integer settingType = permType(type);
                             if (settingType == null || TextUtils.isEmpty(origin)) {
@@ -536,7 +555,7 @@ class LemurXMoatHost {
 
     static String navHistory(int tabId) {
         String json =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             JSONObject result = new JSONObject();
                             try {
@@ -586,7 +605,7 @@ class LemurXMoatHost {
 
     static boolean navGo(int tabId, int index) {
         Boolean ok =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             Tab tab = resolveTab(tabId);
                             WebContents wc = tab == null ? null : tab.getWebContents();
@@ -603,7 +622,7 @@ class LemurXMoatHost {
 
     static boolean navOffset(int tabId, int offset) {
         Boolean ok =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             Tab tab = resolveTab(tabId);
                             WebContents wc = tab == null ? null : tab.getWebContents();
@@ -620,7 +639,7 @@ class LemurXMoatHost {
 
     static boolean reloadBypassCache(int tabId) {
         Boolean ok =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             Tab tab = resolveTab(tabId);
                             WebContents wc = tab == null ? null : tab.getWebContents();
@@ -637,7 +656,7 @@ class LemurXMoatHost {
 
     static String frames(int tabId) {
         String json =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             JSONObject result = new JSONObject();
                             try {
@@ -677,7 +696,7 @@ class LemurXMoatHost {
 
     static String prefsGet(String name, String type) {
         String json =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             JSONObject result = new JSONObject();
                             try {
@@ -714,7 +733,7 @@ class LemurXMoatHost {
 
     static boolean prefsSet(String name, String type, String value) {
         Boolean ok =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             try {
                                 if (TextUtils.isEmpty(name)) {
@@ -739,7 +758,7 @@ class LemurXMoatHost {
                                 }
                                 return true;
                             } catch (Exception e) {
-                                LemurLogUtils.i(TAG, "prefs.set failed", name, e.getMessage());
+                                Log.i(TAG, "prefs.set failed %s: %s", name, e.getMessage());
                                 return false;
                             }
                         });
@@ -748,7 +767,7 @@ class LemurXMoatHost {
 
     static boolean prefsClear(String name) {
         Boolean ok =
-                ThreadUtils.runOnUiThreadBlockingNoException(
+                uiBlocking(
                         () -> {
                             try {
                                 if (TextUtils.isEmpty(name)) {
@@ -784,7 +803,7 @@ class LemurXMoatHost {
                                         types,
                                         period);
                     } catch (Exception e) {
-                        LemurLogUtils.i(TAG, "data.clear failed", e.getMessage());
+                        Log.i(TAG, "data.clear failed: %s", e.getMessage());
                         latch.countDown();
                     }
                 });
@@ -931,7 +950,7 @@ class LemurXMoatHost {
         int tabId;
         int width;
         int height;
-        int[] location = new int[2];
+        final int[] location = new int[2];
 
         static CaptureTarget from(int tabId) {
             Tab tab = resolveTab(tabId);
@@ -1110,27 +1129,27 @@ class LemurXMoatHost {
             case "allow":
             case "grant":
             case "true":
-                return ContentSettingValues.ALLOW;
+                return ContentSetting.ALLOW;
             case "block":
             case "deny":
             case "false":
-                return ContentSettingValues.BLOCK;
+                return ContentSetting.BLOCK;
             case "ask":
             case "default":
-                return ContentSettingValues.ASK;
+                return ContentSetting.ASK;
             default:
                 return null;
         }
     }
 
     private static String permName(int setting) {
-        if (setting == ContentSettingValues.ALLOW) {
+        if (setting == ContentSetting.ALLOW) {
             return "allow";
         }
-        if (setting == ContentSettingValues.BLOCK) {
+        if (setting == ContentSetting.BLOCK) {
             return "block";
         }
-        if (setting == ContentSettingValues.ASK) {
+        if (setting == ContentSetting.ASK) {
             return "ask";
         }
         return "default";

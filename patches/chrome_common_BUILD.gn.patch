@@ -1,0 +1,12 @@
+diff --git a/chrome/common/BUILD.gn b/chrome/common/BUILD.gn
+index 8f287e2353..cb0aa02347 100644
+--- a/chrome/common/BUILD.gn
++++ b/chrome/common/BUILD.gn
+@@ -688,6 +688,7 @@ mojom("mojo_bindings") {
+     "actor.mojom",
+     "chrome_render_frame.mojom",
+     "google_accounts_private_api_extension.mojom",
++    "lemurx_web.mojom",
+     "media/webrtc_logging.mojom",
+     "net/net_error_page_support.mojom",
+     "net_benchmarking.mojom",

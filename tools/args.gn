@@ -8,6 +8,14 @@ is_component_build = false
 is_official_build = true
 treat_warnings_as_errors = false
 
+# Distributed build on the self-hosted REAPI cluster (see chromium/.gclient
+# custom_vars and tools/rbe/backend.star). Siso talks to the cluster directly;
+# reclient is not used. The cluster is plaintext gRPC, so run
+# `autoninja -C out/lemurx -reapi_insecure ...` (or export RBE_service_no_security=true).
+use_remoteexec = true
+use_siso = true
+use_reclient = false
+
 # LemurX: no extension system. Lua is the only extension surface.
 enable_extensions = false
 

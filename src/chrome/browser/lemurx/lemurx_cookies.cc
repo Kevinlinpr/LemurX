@@ -59,14 +59,14 @@ std::string LemurXGetCookiesJson(const std::string& url_spec) {
                        }
                        manager->GetCookieList(
                            url, net::CookieOptions::MakeAllInclusive(),
-                           net::CookiePartitionKeyCollection::Todo(),
+                           net::CookiePartitionKeyCollection::ContainsAll(),
                            base::BindOnce(
                                [](std::string* json, base::WaitableEvent* event,
                                   const net::CookieAccessResultList& included,
                                   const net::CookieAccessResultList&) {
-                                 base::Value::List list;
+                                 base::ListValue list;
                                  for (const auto& item : included) {
-                                   base::Value::Dict dict;
+                                   base::DictValue dict;
                                    dict.Set("name", item.cookie.Name());
                                    dict.Set("value", item.cookie.Value());
                                    dict.Set("domain", item.cookie.Domain());

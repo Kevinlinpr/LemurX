@@ -136,21 +136,21 @@ class LemurXCdpClient : public content::DevToolsAgentHostClient {
     MaybeEnable(method);
     int id = ++next_id_;
     waiters_[id] = pending;
-    base::Value::Dict msg;
+    base::DictValue msg;
     msg.Set("id", id);
     msg.Set("method", method);
     if (!session_id.empty()) {
       msg.Set("sessionId", session_id);
     }
     if (!params_json.empty() && params_json != "{}" && params_json != "null") {
-      std::optional<base::Value> params = base::JSONReader::Read(params_json);
+      std::optional<base::Value> params = base::JSONReader::Read(params_json, base::JSON_PARSE_RFC);
       if (params) {
         msg.Set("params", std::move(*params));
       }
     }
     std::string json;
     base::JSONWriter::Write(msg, &json);
-    host_->DispatchProtocolMessage(this, base::as_bytes(base::make_span(json)));
+    host_->DispatchProtocolMessage(this, base::as_byte_span(json));
     return true;
   }
 
@@ -172,11 +172,11 @@ class LemurXCdpClient : public content::DevToolsAgentHostClient {
                                base::span<const uint8_t> message) override {
     std::string raw(reinterpret_cast<const char*>(message.data()),
                     message.size());
-    std::optional<base::Value> parsed = base::JSONReader::Read(raw);
+    std::optional<base::Value> parsed = base::JSONReader::Read(raw, base::JSON_PARSE_RFC);
     if (!parsed || !parsed->is_dict()) {
       return;
     }
-    base::Value::Dict& dict = parsed->GetDict();
+    base::DictValue& dict = parsed->GetDict();
     std::optional<int> id = dict.FindInt("id");
     if (!id) {
       const std::string* method = dict.FindString("method");
@@ -184,13 +184,13 @@ class LemurXCdpClient : public content::DevToolsAgentHostClient {
         return;
       }
       std::string params = "{}";
-      if (base::Value::Dict* p = dict.FindDict("params")) {
+      if (base::DictValue* p = dict.FindDict("params")) {
         base::JSONWriter::Write(*p, &params);
       }
-      base::Value::Dict ev;
+      base::DictValue ev;
       ev.Set("method", *method);
       ev.Set("tab", tab_id_);
-      if (base::Value::Dict* p = dict.FindDict("params")) {
+      if (base::DictValue* p = dict.FindDict("params")) {
         ev.Set("params", p->Clone());
       }
       std::string ev_json;
@@ -242,16 +242,16 @@ class LemurXCdpClient : public content::DevToolsAgentHostClient {
       return;
     }
     int id = ++next_id_;
-    base::Value::Dict msg;
+    base::DictValue msg;
     msg.Set("id", id);
     msg.Set("method", method);
-    std::optional<base::Value> parsed = base::JSONReader::Read(params);
+    std::optional<base::Value> parsed = base::JSONReader::Read(params, base::JSON_PARSE_RFC);
     if (parsed) {
       msg.Set("params", std::move(*parsed));
     }
     std::string json;
     base::JSONWriter::Write(msg, &json);
-    host_->DispatchProtocolMessage(this, base::as_bytes(base::make_span(json)));
+    host_->DispatchProtocolMessage(this, base::as_byte_span(json));
   }
 
   void MaybeEnable(const std::string& method) {
@@ -308,7 +308,7 @@ void SplitSessionId(std::string* params, std::string* session_id) {
   if (!params || params->empty() || *params == "{}" || *params == "null") {
     return;
   }
-  std::optional<base::Value> parsed = base::JSONReader::Read(*params);
+  std::optional<base::Value> parsed = base::JSONReader::Read(*params, base::JSON_PARSE_RFC);
   if (!parsed || !parsed->is_dict()) {
     return;
   }
@@ -448,13 +448,13 @@ std::string LemurXCdpTargets() {
   auto pending = base::MakeRefCounted<Pending>();
   content::GetUIThreadTaskRunner({})->PostTask(
       FROM_HERE, base::BindOnce([](scoped_refptr<Pending> pending) {
-        base::Value::Dict root;
-        base::Value::List list;
+        base::DictValue root;
+        base::ListValue list;
         for (const auto& host : content::DevToolsAgentHost::GetOrCreateAll()) {
           if (!host) {
             continue;
           }
-          base::Value::Dict item;
+          base::DictValue item;
           item.Set("id", host->GetId());
           item.Set("type", host->GetType());
           item.Set("title", host->GetTitle());
@@ -513,7 +513,7 @@ void LemurXCdpDetach(int tab_id) {
 }
 
 std::string LemurXCdpVersion() {
-  return content::DevToolsAgentHost::GetProtocolVersion();
+  return std::string(content::DevToolsAgentHost::GetProtocolVersion());
 }
 
 bool LemurXCdpInspect(int tab_id, int x, int y) {

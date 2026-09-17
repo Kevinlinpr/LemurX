@@ -1,3 +1,7 @@
+// Copyright 2026 The LemurX Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 package org.chromium.chrome.browser.lemurx;
 
 import android.app.Activity;
@@ -38,11 +42,15 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
-import org.chromium.chrome.lemurx.base.utils.LemurLogUtils;
-import org.chromium.chrome.lemurx.dialog.BottomToolbarStyleManger;
-import org.chromium.chrome.lemurx.utils.LemurThemeUtils;
+import org.chromium.chrome.browser.night_mode.GlobalNightModeStateProviderHolder;
+import org.chromium.chrome.browser.night_mode.NightModeStateProvider;
+import org.chromium.chrome.browser.theme.ThemeUtils;
+import org.chromium.chrome.browser.toolbar.ToolbarManager;
+import org.chromium.chrome.browser.toolbar.ToolbarProgressBar;
+import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -114,6 +122,7 @@ public class LemurXSkinHost {
     private static JSONObject sTheme = new JSONObject();
     private static boolean sThemeLoaded;
     private static boolean sStyleListenerAdded;
+    private static NightModeStateProvider.Observer sNightModeObserver;
     private static Drawable sBottomBarOriginalBg;
     private static boolean sBottomBarCaptured;
     private static WeakReference<Activity> sActivity = new WeakReference<>(null);
@@ -123,19 +132,75 @@ public class LemurXSkinHost {
         "page.top", "page.bottom", "page.center", "page.float", "view:<id>"
     };
 
+    /**
+     * 外壳逻辑名 -> stock Chromium 的 View 资源名（这是 Lua 侧的公开 API，逻辑名保持稳定）。
+     * 列：group / 逻辑名 / 候选资源名（多个用 | 分隔，按顺序取第一个找到的；空串 = stock 无等价） / 说明。
+     * 特殊值 "android:content" 表示 android.R.id.content。
+     */
+    static final String[][] SHELL = {
+        {"bar", "bar", "toolbar", "顶栏根（ToolbarPhone / ToolbarTablet）"},
+        {"bar", "bar.container", "toolbar_container", "顶栏容器"},
+        {"bar", "controls", "control_container", "顶部浏览器控件容器"},
+        {"bar", "bar.start", "toolbar_tablet_layout", "地址栏左侧按钮组（stock 手机顶栏无此容器，仅平板）"},
+        {"bar", "buttons", "toolbar_buttons|toolbar_tablet_layout", "地址栏右侧按钮组"},
+        {"bar", "home", "home_button", "主页"},
+        {"bar", "tabs", "tab_switcher_button", "标签"},
+        {"bar", "back", "back_button", "后退"},
+        {"bar", "forward", "forward_button", "前进（仅平板顶栏）"},
+        {"bar", "reload", "refresh_button", "刷新（仅平板顶栏）"},
+        {"bar", "menu", "menu_button", "主菜单按钮"},
+        {"bar", "menu.wrapper", "menu_button_wrapper", "主菜单按钮容器"},
+        {"bar", "optional", "optional_toolbar_button", "可选动作按钮（分享 / 语音等）"},
+        {"bar", "tools", "", "工具抽屉（stock 无等价）"},
+        {"bar", "menu.drawer", "", "主菜单抽屉（stock 无等价）"},
+        {"bar", "progress", "toolbar_progress_bar", "加载进度条（找不到 id 时按 ToolbarProgressBar 类兜底）"},
+        {"bar", "hairline", "toolbar_hairline", "顶栏底部分割线"},
+        {"search", "location", "location_bar", "地址栏整体"},
+        {"search", "urlbar", "url_bar", "地址栏输入框"},
+        {"search", "status", "location_bar_status", "地址栏安全状态区"},
+        {"search", "status.icon", "location_bar_status_icon", "地址栏安全状态图标"},
+        {"search", "bookmark", "bookmark_button", "地址栏收藏按钮"},
+        {"search", "mic", "mic_button", "地址栏语音按钮"},
+        {"search", "lens", "lens_camera_button", "地址栏 Lens 按钮"},
+        {"search", "clear", "delete_button", "地址栏清除按钮"},
+        {"bottom", "bottom", "bottom_container", "底部容器（Snackbar / InfoBar 宿主）"},
+        {"bottom", "bottom.controls", "bottom_controls_wrapper", "底部控件条（标签组栏，按需 inflate）"},
+        {"bottom", "bottom.slot", "bottom_container_slot", "底部控件槽（按需 inflate）"},
+        {"bottom", "bottom.bar", "", "可定制底栏（stock 无等价）"},
+        {"page", "coordinator", "coordinator", "Activity 根协调布局"},
+        {"page", "compositor", "compositor_view_holder", "网页合成层容器"},
+        {"page", "content", "android:content", "窗口内容根"},
+        {"page", "find", "find_toolbar", "页内查找条（按需 inflate）"},
+        {"page", "statusbar", "", "系统状态栏（不是 View，用 theme.statusBar 改色）"},
+        {"ntp", "ntp.search", "search_box", "新标签页搜索框"},
+        {"ntp", "ntp.search.text", "search_box_text", "新标签页搜索文字"},
+        {"ntp", "ntp.logo", "search_provider_logo", "新标签页 Logo"},
+        {"ntp", "ntp.favorites", "mv_tiles_layout", "新标签页常访问站点"},
+    };
+
+    /** 依赖旧版可定制底栏、stock 里没有对应物的 theme 键：只持久化，不再生效。 */
+    static final String[] UNSUPPORTED_THEME_KEYS = {"bottomStyle", "barLayout"};
+
     // ---------------------------------------------------------------- 入口
 
     static String op(String action, String json) {
-        String result =
-                ThreadUtils.runOnUiThreadBlockingNoException(
-                        () -> {
-                            try {
-                                return opOnUi(action, LemurXUiHost.parseJson(json)).toString();
-                            } catch (Exception e) {
-                                LemurLogUtils.i(TAG, "skin op failed", action, e.getMessage());
-                                return error(e.getMessage());
-                            }
-                        });
+        String result;
+        try {
+            result =
+                    ThreadUtils.runOnUiThreadBlocking(
+                            () -> {
+                                try {
+                                    return opOnUi(action, LemurXUiHost.parseJson(json))
+                                            .toString();
+                                } catch (Exception e) {
+                                    Log.i(TAG, "skin op failed: %s %s", action, e.getMessage());
+                                    return error(e.getMessage());
+                                }
+                            });
+        } catch (RuntimeException e) {
+            Log.i(TAG, "skin op could not reach ui thread: %s", e.getMessage());
+            result = null;
+        }
         return result == null ? "{\"ok\":false,\"error\":\"ui thread\"}" : result;
     }
 
@@ -169,7 +234,10 @@ public class LemurXSkinHost {
             case "theme_get": {
                 out.put("ok", true);
                 out.put("theme", new JSONObject(sTheme.toString()));
-                out.put("dark", LemurThemeUtils.isDarkMode());
+                out.put("dark", isDarkMode());
+                out.put(
+                        "unsupported",
+                        new JSONArray(java.util.Arrays.asList(UNSUPPORTED_THEME_KEYS)));
                 return out;
             }
             case "theme_reset": {
@@ -419,38 +487,36 @@ public class LemurXSkinHost {
                 if (activity == null) {
                     return errorObj("no activity");
                 }
-                String[][] catalog = {
-                    {"bar", "toolbar", "顶栏根（ToolbarPhoneLemur）"},
-                    {"bar", "toolbar_buttons_left", "地址栏左侧按钮组"},
-                    {"bar", "toolbar_buttons", "地址栏右侧按钮组"},
-                    {"bar", "home_button", "主页"},
-                    {"bar", "tab_switcher_button", "标签"},
-                    {"bar", "tab_back_button", "后退"},
-                    {"bar", "tab_forward_button", "前进"},
-                    {"bar", "menu_tools", "工具抽屉"},
-                    {"bar", "menu_button_lemur", "主菜单抽屉"},
-                    {"search", "location_bar", "地址栏整体"},
-                    {"search", "url_bar", "地址栏输入框"},
-                    {"ntp", "search_box", "新标签页搜索框"},
-                    {"ntp", "search_box_text", "新标签页搜索文字"},
-                    {"ntp", "ivLogo", "新标签页 Logo"},
-                    {"ntp", "ntp_favorites", "新标签页收藏"},
-                };
+                // 逻辑名表见 SHELL：id 给出 stock 资源名，supported=false 表示 stock 无等价物
                 JSONArray views = new JSONArray();
-                for (String[] row : catalog) {
+                JSONArray unsupported = new JSONArray();
+                for (String[] row : SHELL) {
                     JSONObject item = new JSONObject();
                     item.put("group", row[0]);
-                    item.put("id", row[1]);
-                    item.put("title", row[2]);
-                    View view = LemurXUiHost.findByIdName(row[1]);
+                    item.put("name", row[1]);
+                    boolean supported = !TextUtils.isEmpty(row[2]);
+                    item.put("supported", supported);
+                    item.put("title", row[3]);
+                    View view = supported ? findByName(activity, row[1]) : null;
+                    String resolved = view == null ? firstCandidate(row[2])
+                            : LemurXUiHost.resourceEntryName(view);
+                    if (TextUtils.isEmpty(resolved)) {
+                        resolved = firstCandidate(row[2]);
+                    }
+                    item.put("id", resolved);
                     item.put("found", view != null);
                     if (view != null) {
                         item.put("view", LemurXUiHost.describe(view, false));
+                    }
+                    if (!supported) {
+                        unsupported.put(row[1]);
                     }
                     views.put(item);
                 }
                 out.put("ok", true);
                 out.put("views", views);
+                out.put("unsupported", unsupported);
+                out.put("tablet", findByName(activity, "toolbar_tablet_layout") != null);
                 out.put("windows", LemurXUiHost.allWindowRoots().size());
                 return out;
             }
@@ -586,7 +652,7 @@ public class LemurXSkinHost {
                     d.parent.addView(d.view, clampIndex(d.parent, d.index), d.lp);
                     count++;
                 } catch (Exception e) {
-                    LemurLogUtils.i(TAG, "restore failed", e.getMessage());
+                    Log.i(TAG, "restore failed: %s", e.getMessage());
                 }
             }
         }
@@ -901,7 +967,7 @@ public class LemurXSkinHost {
                 }
             }
         } catch (Exception e) {
-            LemurLogUtils.i(TAG, "skin replay failed", e.getMessage());
+            Log.i(TAG, "skin replay failed: %s", e.getMessage());
         }
     }
 
@@ -928,11 +994,13 @@ public class LemurXSkinHost {
             return;
         }
         sStyleListenerAdded = true;
-        // 底栏切换样式时会 removeAllViews，我们挂在里面的树得重新塞回去
-        BottomToolbarStyleManger.addOnStyleChangeListener(
-                style -> {
+        // stock 外壳没有「底栏样式切换」这回事；能让外壳整体换皮的是夜间模式切换
+        // （通常伴随 Activity 重建，reattach 会重放；这里再兜一手：同一 Activity 内切换时
+        // 重放皮肤并把我们挂的树塞回去）。
+        sNightModeObserver =
+                () -> {
                     Activity activity = sActivity.get();
-                    if (activity == null) {
+                    if (activity == null || activity.isDestroyed()) {
                         return;
                     }
                     View decor =
@@ -940,9 +1008,37 @@ public class LemurXSkinHost {
                                     ? null
                                     : activity.getWindow().getDecorView();
                     if (decor != null) {
-                        decor.post(() -> remountAll(activity));
+                        decor.post(
+                                () -> {
+                                    if (activity.isDestroyed() || activity.isFinishing()) {
+                                        return;
+                                    }
+                                    if (sTheme.length() > 0) {
+                                        applyTheme(activity, sTheme);
+                                    }
+                                    remountAll(activity);
+                                });
                     }
-                });
+                };
+        try {
+            GlobalNightModeStateProviderHolder.getInstance().addObserver(sNightModeObserver);
+        } catch (Exception e) {
+            Log.i(TAG, "night mode observer failed: %s", e.getMessage());
+        }
+    }
+
+    private static boolean isDarkMode() {
+        try {
+            return GlobalNightModeStateProviderHolder.getInstance().isInNightMode();
+        } catch (Exception e) {
+            Activity activity = sActivity.get();
+            if (activity == null) {
+                return false;
+            }
+            int mask = activity.getResources().getConfiguration().uiMode
+                    & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+            return mask == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        }
     }
 
     // ---------------------------------------------------------------- 主题
@@ -971,8 +1067,10 @@ public class LemurXSkinHost {
 
     /**
      * 支持的键：toolbar / statusBar / navBar / bottomBar（颜色），iconTint（图标色），
-     * dark（bool），bottomStyle（0/1/2），hideButtons（数组），urlBarHidden / bottomBarHidden /
+     * dark（bool），hideButtons（数组），urlBarHidden / bottomBarHidden /
      * menuButton / pullRefresh（bool）。
+     * bottomStyle（0/1/2）/ barLayout 依赖旧版可定制底栏，stock 无对应物：只持久化、不生效
+     * （见 {@link #UNSUPPORTED_THEME_KEYS}）。
      */
     private static boolean applyTheme(Activity activity, JSONObject theme) {
         boolean any = false;
@@ -980,7 +1078,7 @@ public class LemurXSkinHost {
                 activity instanceof ChromeTabbedActivity ? (ChromeTabbedActivity) activity : null;
         if (theme.has("dark")) {
             boolean dark = theme.optBoolean("dark", false);
-            if (dark != LemurThemeUtils.isDarkMode()) {
+            if (dark != isDarkMode()) {
                 LemurXChromeHost.setDarkMode(dark);
             }
             any = true;
@@ -1000,7 +1098,8 @@ public class LemurXSkinHost {
             any = true;
         }
         if (theme.has("bottomBar")) {
-            View bottom = findByName(activity, "bottom_toolbar_browsing");
+            // stock 没有可定制底栏：有标签组底栏时给它上色，否则退化到 bottom_container
+            View bottom = bottomBarView(activity);
             if (bottom != null) {
                 captureBottomBar(bottom);
                 bottom.setBackgroundColor(
@@ -1012,23 +1111,9 @@ public class LemurXSkinHost {
             ColorStateList tint =
                     ColorStateList.valueOf(
                             LemurXUiHost.parseColor(theme.optString("iconTint"), Color.GRAY));
-            any |= tintContainer(activity, "toolbar_buttons_left", tint);
-            any |= tintContainer(activity, "toolbar_buttons", tint);
-            any |= tintContainer(activity, "bottom_toolbar_browsing", tint);
+            any |= tintShellIcons(activity, tint);
         }
-        if (theme.has("bottomStyle") || theme.has("barLayout")) {
-            Object layout = theme.has("barLayout") ? theme.opt("barLayout") : theme.opt("bottomStyle");
-            if (layout instanceof String) {
-                LemurXChromeHost.setBarLayout((String) layout);
-            } else {
-                int n = theme.optInt("bottomStyle", 1);
-                // 旧 0/1/2 映射到现行 5 槽：1=home 2=tabs 3=search 4=tools 5=menu 6=back 7=forward
-                String mapped = n == 0 ? "6-2-1-4-5" : n == 2 ? "1-2-3-4-5" : "6-2-3-4-5";
-                LemurXChromeHost.setBarLayout(mapped);
-                BottomToolbarStyleManger.onStyleChange(n);
-            }
-            any = true;
-        }
+        // bottomStyle / barLayout：旧版可定制底栏的布局，stock 无对应物，跳过
         if (tabbed != null) {
             JSONArray hidden = theme.optJSONArray("hideButtons");
             if (hidden != null) {
@@ -1056,22 +1141,19 @@ public class LemurXSkinHost {
     private static void restoreTheme(Activity activity, JSONObject old) {
         ChromeTabbedActivity tabbed =
                 activity instanceof ChromeTabbedActivity ? (ChromeTabbedActivity) activity : null;
+        int defaultColor = defaultThemeColor(activity);
         if (old.has("toolbar")) {
             // 交还给 ToolbarManager 按站点主题色刷新
-            LemurXChromeHost.resetToolbarColor(
-                    LemurThemeUtils.isDarkMode() ? 0xFF202124 : Color.WHITE);
+            resetToolbarColor(tabbed, defaultColor);
         }
         if (old.has("statusBar")) {
-            LemurXChromeHost.setStatusBarColor(
-                    LemurThemeUtils.isDarkMode() ? 0xFF202124 : Color.WHITE);
+            resetStatusBarColor(tabbed, defaultColor);
         }
         if (old.has("navBar") && activity.getWindow() != null) {
-            activity.getWindow()
-                    .setNavigationBarColor(
-                            LemurThemeUtils.isDarkMode() ? 0xFF202124 : Color.WHITE);
+            activity.getWindow().setNavigationBarColor(defaultColor);
         }
         if (old.has("bottomBar")) {
-            View bottom = findByName(activity, "bottom_toolbar_browsing");
+            View bottom = bottomBarView(activity);
             if (bottom != null && sBottomBarCaptured) {
                 bottom.setBackground(sBottomBarOriginalBg);
             }
@@ -1079,15 +1161,10 @@ public class LemurXSkinHost {
         if (old.has("iconTint")) {
             ColorStateList tint = defaultIconTint(activity);
             if (tint != null) {
-                tintContainer(activity, "toolbar_buttons_left", tint);
-                tintContainer(activity, "toolbar_buttons", tint);
-                tintContainer(activity, "bottom_toolbar_browsing", tint);
+                tintShellIcons(activity, tint);
             }
         }
-        if (old.has("bottomStyle") || old.has("barLayout")) {
-            LemurXChromeHost.setBarLayout("1-2-3-4-5");
-            BottomToolbarStyleManger.onStyleChange(1);
-        }
+        // bottomStyle / barLayout：stock 无可定制底栏，无需还原
         if (tabbed != null) {
             JSONArray hidden = old.optJSONArray("hideButtons");
             if (hidden != null) {
@@ -1117,7 +1194,59 @@ public class LemurXSkinHost {
         }
     }
 
+    /** 有标签组底栏（bottom_controls_wrapper）就用它，否则退化到 bottom_container；都没有返回 null。 */
+    private static View bottomBarView(Activity activity) {
+        View bottom = findByName(activity, "bottom.controls");
+        return bottom != null ? bottom : findByName(activity, "bottom");
+    }
+
+    /** stock 顶栏默认色：跟 ToolbarManager 一样取 colorSurface（夜间模式自动切换）。 */
+    private static int defaultThemeColor(Activity activity) {
+        try {
+            return ChromeColors.getDefaultThemeColor(activity, false);
+        } catch (Exception e) {
+            return isDarkMode() ? 0xFF202124 : Color.WHITE;
+        }
+    }
+
+    /** 把顶栏颜色交还给 ToolbarManager（重新允许按 Tab 主题色更新）。 */
+    private static boolean resetToolbarColor(ChromeTabbedActivity tabbed, int defaultColor) {
+        ToolbarManager toolbar = tabbed == null ? null : tabbed.getToolbarManager();
+        if (toolbar == null) {
+            return false;
+        }
+        try {
+            toolbar.setShouldUpdateToolbarPrimaryColor(true);
+            toolbar.onThemeColorChanged(defaultColor, false);
+            return true;
+        } catch (Exception e) {
+            Log.i(TAG, "reset toolbar color failed: %s", e.getMessage());
+            return false;
+        }
+    }
+
+    /** 让 StatusBarColorController 按当前 Tab / 主题重算状态栏色；拿不到就直接设默认色。 */
+    private static boolean resetStatusBarColor(ChromeTabbedActivity tabbed, int defaultColor) {
+        if (tabbed != null) {
+            try {
+                tabbed.getRootUiCoordinatorForTesting()
+                        .getStatusBarColorController()
+                        .updateStatusBarColor();
+                return true;
+            } catch (Exception e) {
+                Log.i(TAG, "status bar controller unavailable: %s", e.getMessage());
+            }
+        }
+        return LemurXChromeHost.setStatusBarColor(defaultColor);
+    }
+
     private static ColorStateList defaultIconTint(Activity activity) {
+        try {
+            // stock 顶栏图标默认色（default_icon_color_tint_list）
+            return ThemeUtils.getThemedToolbarIconTint(activity, false);
+        } catch (Exception e) {
+            // 资源丢了就按名字再找一次
+        }
         int id =
                 activity.getResources()
                         .getIdentifier(
@@ -1131,6 +1260,40 @@ public class LemurXSkinHost {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * 给外壳按钮上色：顶栏按钮组（手机 toolbar_buttons / 平板整条）+ 左侧的主页 / 后退，
+     * 以及有的话标签组底栏。注意 stock 顶栏在主题色变化时会自己重刷 tint，皮肤重放会再盖回来。
+     */
+    private static boolean tintShellIcons(Activity activity, ColorStateList tint) {
+        boolean any = false;
+        View buttons = findByName(activity, "toolbar_buttons");
+        if (buttons != null) {
+            tintTree(buttons, tint);
+            any = true;
+        }
+        for (String name :
+                new String[] {"home", "back", "forward", "reload", "optional", "tabs", "menu"}) {
+            View view = findByName(activity, name);
+            if (view != null && (buttons == null || !isDescendant(view, buttons))) {
+                tintTree(view, tint);
+                any = true;
+            }
+        }
+        any |= tintContainer(activity, "bottom.controls", tint);
+        return any;
+    }
+
+    private static boolean isDescendant(View view, View ancestor) {
+        android.view.ViewParent parent = view.getParent();
+        while (parent != null) {
+            if (parent == ancestor) {
+                return true;
+            }
+            parent = parent.getParent();
+        }
+        return false;
     }
 
     private static boolean tintContainer(Activity activity, String name, ColorStateList tint) {
@@ -1162,14 +1325,21 @@ public class LemurXSkinHost {
         View view;
         switch (slot) {
             case "toolbar.start":
-                view = findByName(activity, "toolbar_buttons_left");
+                // stock 手机顶栏没有左侧按钮组（ToolbarPhone 自己排版子 View，不能硬塞）；
+                // 平板顶栏是一条 LinearLayout，可以插到最前面
+                view = findByName(activity, "bar.start");
                 break;
             case "toolbar.end":
-                view = findByName(activity, "toolbar_buttons");
+                // 手机：toolbar_buttons（LinearLayout）；平板：整条 toolbar_tablet_layout
+                view = findByName(activity, "buttons");
                 break;
             case "bottom.bar":
             case "bottom.start":
-                view = findByName(activity, "bottom_toolbar_browsing");
+                // stock 没有可定制底栏：有标签组底栏就挂进去，否则挂到 bottom_container（FrameLayout）
+                view = findByName(activity, "bottom.controls");
+                if (view == null) {
+                    view = findByName(activity, "bottom");
+                }
                 break;
             default:
                 if (slot.startsWith("view:")) {
@@ -1227,6 +1397,16 @@ public class LemurXSkinHost {
                 if (!mount.tree.has("height")) {
                     llp.height = ViewGroup.LayoutParams.MATCH_PARENT;
                 }
+            } else if (lp instanceof FrameLayout.LayoutParams
+                    && ("bottom.bar".equals(mount.slot) || "bottom.start".equals(mount.slot))) {
+                // 退化到 bottom_container（FrameLayout）时：默认整宽、贴底，像一条底栏
+                FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) lp;
+                if (!mount.tree.has("width")) {
+                    flp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+                }
+                if (!mount.tree.has("gravity")) {
+                    flp.gravity = Gravity.BOTTOM;
+                }
             }
             int index = mount.tree.optInt("index", -1);
             if ("toolbar.start".equals(mount.slot) || "bottom.start".equals(mount.slot)) {
@@ -1241,7 +1421,7 @@ public class LemurXSkinHost {
             mount.popup = null;
             return true;
         } catch (Exception e) {
-            LemurLogUtils.i(TAG, "mount failed", mount.slot, e.getMessage());
+            Log.i(TAG, "mount failed: %s %s", mount.slot, e.getMessage());
             return false;
         }
     }
@@ -1293,9 +1473,11 @@ public class LemurXSkinHost {
             }
             case "page.bottom": {
                 gravity = Gravity.BOTTOM | Gravity.START;
-                View bottom = findByName(activity, "bottom_toolbar_browsing");
-                if (bottom != null && bottom.getVisibility() == View.VISIBLE) {
-                    y += bottom.getHeight() > 0 ? bottom.getHeight() : dp(activity, 56);
+                // stock 底部控件条（标签组栏）按需 inflate，没有就不用让位
+                View bottom = findByName(activity, "bottom.controls");
+                if (bottom != null && bottom.getVisibility() == View.VISIBLE
+                        && bottom.getHeight() > 0) {
+                    y += bottom.getHeight();
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                         && decor.getRootWindowInsets() != null) {
@@ -1319,7 +1501,7 @@ public class LemurXSkinHost {
         try {
             popup.showAtLocation(decor, gravity, x, y);
         } catch (Exception e) {
-            LemurLogUtils.i(TAG, "popup show failed", mount.slot, e.getMessage());
+            Log.i(TAG, "popup show failed: %s %s", mount.slot, e.getMessage());
             return false;
         }
         mount.view = view;
@@ -1345,7 +1527,7 @@ public class LemurXSkinHost {
                     parent.addView(mount.replaced, clampIndex(parent, index >= 0
                             ? index : mount.replacedIndex), mount.replacedLp);
                 } catch (Exception e) {
-                    LemurLogUtils.i(TAG, "restore replaced failed", e.getMessage());
+                    Log.i(TAG, "restore replaced failed: %s", e.getMessage());
                 }
             }
         }
@@ -1896,7 +2078,7 @@ public class LemurXSkinHost {
                     ((TextView) view).setText(style.optString("text"));
                 }
             } catch (Exception e) {
-                LemurLogUtils.i(TAG, "style failed", e.getMessage());
+                Log.i(TAG, "style failed: %s", e.getMessage());
             }
         }
         return hits.size();
@@ -2018,7 +2200,7 @@ public class LemurXSkinHost {
             }
             return id == 0 ? null : activity.getDrawable(id);
         } catch (Exception e) {
-            LemurLogUtils.i(TAG, "icon failed", icon, e.getMessage());
+            Log.i(TAG, "icon failed: %s %s", icon, e.getMessage());
             return null;
         }
     }
@@ -2123,16 +2305,84 @@ public class LemurXSkinHost {
     }
 
     private static int textColorDefault() {
-        return LemurThemeUtils.isDarkMode() ? 0xFFE8EAED : 0xFF202124;
+        return isDarkMode() ? 0xFFE8EAED : 0xFF202124;
     }
 
+    /** SHELL 表里的候选资源名串（a|b|c）取第一个。 */
+    private static String firstCandidate(String candidates) {
+        if (TextUtils.isEmpty(candidates)) {
+            return "";
+        }
+        int bar = candidates.indexOf('|');
+        return bar < 0 ? candidates : candidates.substring(0, bar);
+    }
+
+    /** 逻辑名 -> SHELL 表候选资源名串；不是逻辑名返回 null。 */
+    private static String shellCandidates(String name) {
+        for (String[] row : SHELL) {
+            if (row[1].equals(name)) {
+                return row[2];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 按名字找 View：先当 SHELL 表的逻辑名（bar / urlbar / home …）解析成 stock 资源名，
+     * 找不到再当原始资源名用。stock 无等价物的逻辑名直接返回 null。
+     */
     private static View findByName(Activity activity, String name) {
         if (activity == null || TextUtils.isEmpty(name)) {
             return null;
         }
+        String candidates = shellCandidates(name);
+        if (candidates != null) {
+            if (TextUtils.isEmpty(candidates)) {
+                return null;
+            }
+            for (String candidate : candidates.split("\\|")) {
+                View hit = findByResourceName(activity, candidate);
+                if (hit != null) {
+                    return hit;
+                }
+            }
+            return null;
+        }
+        return findByResourceName(activity, name);
+    }
+
+    private static View findByResourceName(Activity activity, String name) {
+        if ("android:content".equals(name)) {
+            return activity.findViewById(android.R.id.content);
+        }
         int id = activity.getResources().getIdentifier(name, "id", activity.getPackageName());
         View view = id == 0 ? null : activity.findViewById(id);
-        return view != null ? view : LemurXUiHost.findByIdName(name);
+        if (view == null) {
+            view = LemurXUiHost.findByIdName(name);
+        }
+        if (view == null && "toolbar_progress_bar".equals(name)) {
+            // 进度条由 ToolbarManager 从 ViewStub inflate，有时还没 id 化 —— 按类兜底
+            Window window = activity.getWindow();
+            View decor = window == null ? null : window.getDecorView();
+            view = decor == null ? null : findByClass(decor, ToolbarProgressBar.class);
+        }
+        return view;
+    }
+
+    private static View findByClass(View root, Class<?> cls) {
+        if (cls.isInstance(root)) {
+            return root;
+        }
+        if (root instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) root;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View hit = findByClass(group.getChildAt(i), cls);
+                if (hit != null) {
+                    return hit;
+                }
+            }
+        }
+        return null;
     }
 
     private static int dp(Activity activity, int value) {

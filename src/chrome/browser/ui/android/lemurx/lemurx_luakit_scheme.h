@@ -9,6 +9,7 @@
 #include <string>
 
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/frame_tree_node_id.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 
@@ -39,8 +40,9 @@ bool LemurXLuakitIsSchemeRegistered(const std::string& scheme);
 // ChromeContentBrowserClient::CreateNonNetworkNavigationURLLoaderFactory 调用：
 // scheme 被 Lua 注册过则返回工厂，否则返回空 remote。
 mojo::PendingRemote<network::mojom::URLLoaderFactory>
-LemurXLuakitMaybeCreateNavigationFactory(const std::string& scheme,
-                                        int frame_tree_node_id);
+LemurXLuakitMaybeCreateNavigationFactory(
+    const std::string& scheme,
+    content::FrameTreeNodeId frame_tree_node_id);
 
 // ChromeContentBrowserClient::RegisterNonNetworkSubresourceURLLoaderFactories
 // 调用：给已注册的每个 scheme 各挂一个工厂（页面内 <img src="luakit://…"> 等）。

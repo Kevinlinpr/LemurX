@@ -523,8 +523,10 @@ end
 __lk.on_webview_destroyed = function(view)
     local p = object.priv(view)
     if p.native_id then
-        by_id[p.native_id] = nil
+        -- 先让宿主销毁：宿主随之回投的 page-removed/remove 事件还需要通过 by_id
+        -- 找到这个 webview 对象，否则 notebook 收不到 page-removed（tablist 依赖它）
         pcall(nat, "destroy", p.native_id, {})
+        by_id[p.native_id] = nil
         p.native_id = nil
     end
 end

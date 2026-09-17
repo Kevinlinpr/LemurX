@@ -182,6 +182,10 @@ local function new(arg1, arg2)
                 by_view[view] = tl
                 wire_tab(tl)
                 tlist.box:pack(tl.widget, { expand = false, fill = orientation == "vertical", padding = 0 })
+                -- webview 被 destroy 时宿主未必回投 page-removed：自己盯着 destroy 信号
+                common.on_obj(view, "destroy", function()
+                    if tlist.widget.is_alive then rebuild() end
+                end)
             end
             present[tl] = true
             ordered[#ordered + 1] = tl

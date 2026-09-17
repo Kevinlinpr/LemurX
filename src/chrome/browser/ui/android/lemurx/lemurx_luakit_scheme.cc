@@ -10,7 +10,9 @@
 #include <string>
 #include <utility>
 
+#include "base/byte_size.h"
 #include "base/functional/bind.h"
+#include "base/memory/self_deleting.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
@@ -37,6 +39,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
+#include "services/network/public/cpp/http_request_headers_update_params.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/self_deleting_url_loader_factory.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
@@ -120,7 +123,7 @@ class SchemeLoader : public network::mojom::URLLoader {
                    base::BindOnce(&SchemeLoader::Fail, base::Unretained(this),
                                   net::ERR_TIMED_OUT));
 
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "request");
     d.Set("id", id_);
     d.Set("uri", url_.possibly_invalid_spec());
@@ -167,8 +170,9 @@ class SchemeLoader : public network::mojom::URLLoader {
     }
 
     auto head = network::mojom::URLResponseHead::New();
-    const char* reason = net::TryToGetHttpReasonPhrase(
-        static_cast<net::HttpStatusCode>(status_code));
+    // 154: GetHttpReasonPhrase 返回 string_view，未知状态码回落 "OK"。
+    std::string reason(net::GetHttpReasonPhrase(
+        static_cast<net::HttpStatusCode>(status_code), "OK"));
     std::string raw = base::StringPrintf(
         "HTTP/1.1 %d %s\n"
         "Content-Type: %s\n"
@@ -176,7 +180,7 @@ class SchemeLoader : public network::mojom::URLLoader {
         "Cache-Control: no-store\n"
         "X-Content-Type-Options: nosniff\n"
         "Access-Control-Allow-Origin: *\n",
-        status_code, reason ? reason : "OK", mime.c_str(), data.size());
+        status_code, reason.c_str(), mime.c_str(), data.size());
     head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
         net::HttpUtil::AssembleRawHeaders(raw));
     head->mime_type = mime_only;
@@ -218,14 +222,10 @@ class SchemeLoader : public network::mojom::URLLoader {
 
   // network::mojom::URLLoader:
   void FollowRedirect(
-      const std::vector<std::string>& removed_headers,
-      const net::HttpRequestHeaders& modified_headers,
-      const net::HttpRequestHeaders& modified_cors_exempt_headers,
+      network::HttpRequestHeadersUpdateParams headers_update_params,
       const std::optional<GURL>& new_url) override {}
   void SetPriority(net::RequestPriority priority,
                    int32_t intra_priority_value) override {}
-  void PauseReadingBodyFromNet() override {}
-  void ResumeReadingBodyFromNet() override {}
 
  private:
   ~SchemeLoader() override { Pending().erase(id_); }
@@ -240,9 +240,10 @@ class SchemeLoader : public network::mojom::URLLoader {
     producer_.reset();
     network::URLLoaderCompletionStatus status(
         result == MOJO_RESULT_OK ? net::OK : net::ERR_FAILED);
-    status.encoded_data_length = static_cast<int64_t>(body_size_);
-    status.encoded_body_length = static_cast<int64_t>(body_size_);
-    status.decoded_body_length = static_cast<int64_t>(body_size_);
+    // 154: 长度字段是 base::ByteSize 强类型
+    status.encoded_data_length = base::ByteSize(body_size_);
+    status.encoded_body_length = base::ByteSize(body_size_);
+    status.decoded_body_length = base::ByteSize(body_size_);
     client_->OnComplete(status);
     Destroy();
   }
@@ -265,7 +266,8 @@ class SchemeURLLoaderFactory : public network::SelfDeletingURLLoaderFactory {
   static mojo::PendingRemote<network::mojom::URLLoaderFactory> Create(
       int tab_id) {
     mojo::PendingRemote<network::mojom::URLLoaderFactory> remote;
-    new SchemeURLLoaderFactory(tab_id, remote.InitWithNewPipeAndPassReceiver());
+    base::MakeSelfDeleting<SchemeURLLoaderFactory>(
+        tab_id, remote.InitWithNewPipeAndPassReceiver());
     return remote;
   }
 
@@ -273,10 +275,12 @@ class SchemeURLLoaderFactory : public network::SelfDeletingURLLoaderFactory {
   SchemeURLLoaderFactory& operator=(const SchemeURLLoaderFactory&) = delete;
 
  private:
+  friend class base::internal::MakeSelfDeletingImpl;
   SchemeURLLoaderFactory(
       int tab_id,
-      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver)
-      : network::SelfDeletingURLLoaderFactory(std::move(receiver)),
+      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
+      base::SelfDeletingPassKey key)
+      : network::SelfDeletingURLLoaderFactory(std::move(receiver), key),
         tab_id_(tab_id) {}
   ~SchemeURLLoaderFactory() override = default;
 
@@ -289,7 +293,7 @@ class SchemeURLLoaderFactory : public network::SelfDeletingURLLoaderFactory {
       const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
       override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-    if (!LemurXLuakitIsSchemeRegistered(request.url.scheme())) {
+    if (!LemurXLuakitIsSchemeRegistered(std::string(request.url.scheme()))) {
       mojo::Remote<network::mojom::URLLoaderClient> c(std::move(client));
       c->OnComplete(network::URLLoaderCompletionStatus(net::ERR_UNKNOWN_URL_SCHEME));
       return;
@@ -399,8 +403,9 @@ bool LemurXLuakitIsSchemeRegistered(const std::string& scheme) {
 }
 
 mojo::PendingRemote<network::mojom::URLLoaderFactory>
-LemurXLuakitMaybeCreateNavigationFactory(const std::string& scheme,
-                                        int frame_tree_node_id) {
+LemurXLuakitMaybeCreateNavigationFactory(
+    const std::string& scheme,
+    content::FrameTreeNodeId frame_tree_node_id) {
   if (!LemurXLuakitIsSchemeRegistered(scheme)) {
     return {};
   }

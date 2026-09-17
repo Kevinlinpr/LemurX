@@ -91,6 +91,7 @@ local function expand_cmd_names(trigger)
         if piece ~= "" then
             local base, opt = piece:match("^([^%[]+)%[([^%]]*)%]$")
             if base then
+                -- luakit 语义：":o[pen]" → "open" 与 "o"
                 names[#names + 1] = base .. opt
                 names[#names + 1] = base
             else
@@ -103,8 +104,12 @@ end
 _M.expand_cmd_names = expand_cmd_names
 
 local function is_cmd_trigger(trigger)
-    return type(trigger) == "string" and trigger:match("^%s*:") ~= nil
+    return type(trigger) == "string" and trigger:match("^%s*:%S") ~= nil
 end
+
+-- ":o[pen]" 这类缩写由 lousy.bind.parse_bind（expand_cmd）负责展开；
+-- 这里原样转交 trigger，本模块只保留一份命令名清单供补全使用。
+local function lousy_trigger(trigger) return trigger end
 
 local function refresh_windows()
     for _, w in pairs(window.bywidget) do
@@ -146,8 +151,9 @@ function _M.add_binds(mode, binds, before)
         local m = ensure_mode(name)
         for _, b in ipairs(binds) do
             local trigger, desc, func, opts = normalize_bind(b)
-            lousy.bind.remove_bind(m.binds, trigger)
-            lousy.bind.add_bind(m.binds, trigger, { func = func, desc = desc }, opts)
+            local lt = lousy_trigger(trigger)
+            lousy.bind.remove_bind(m.binds, lt)
+            lousy.bind.add_bind(m.binds, lt, { func = func, desc = desc }, opts)
             if before and #m.binds > 1 then
                 table.insert(m.binds, 1, table.remove(m.binds))
             end
@@ -163,7 +169,7 @@ function _M.remove_binds(mode, names)
         local m = registry[name]
         if m then
             for _, trigger in ipairs(names) do
-                lousy.bind.remove_bind(m.binds, trigger)
+                lousy.bind.remove_bind(m.binds, lousy_trigger(trigger))
                 forget_command(m, trigger)
             end
         end
@@ -177,7 +183,7 @@ function _M.remap_binds(mode, remaps)
         local m = ensure_mode(name)
         for _, r in ipairs(remaps) do
             local new, old, keep = r[1], r[2], r[3]
-            lousy.bind.remap_bind(m.binds, new, old, keep)
+            lousy.bind.remap_bind(m.binds, lousy_trigger(new), lousy_trigger(old), keep)
             for _, c in ipairs(m.commands) do
                 if c.trigger == old then
                     record_command(m, new, c.desc, c.func, c.opts)

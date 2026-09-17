@@ -1,0 +1,41 @@
+diff --git a/chrome/renderer/browser_exposed_renderer_interfaces.cc b/chrome/renderer/browser_exposed_renderer_interfaces.cc
+index c45643ed79..0dee6cb063 100644
+--- a/chrome/renderer/browser_exposed_renderer_interfaces.cc
++++ b/chrome/renderer/browser_exposed_renderer_interfaces.cc
+@@ -29,8 +29,22 @@
+ #include "chrome/renderer/font_prewarmer.h"
+ #endif
+ 
++#if BUILDFLAG(IS_ANDROID)
++#include "chrome/common/lemurx_web.mojom.h"
++#include "chrome/renderer/lemurx/luakit_web_extension.h"
++#endif
++
+ namespace {
+ 
++#if BUILDFLAG(IS_ANDROID)
++void BindLuakitWebExtension(
++    mojo::PendingReceiver<lemurx::mojom::LuakitWebExtension> receiver) {
++  if (auto* ext = lemurx::LuakitWebExtension::Get()) {
++    ext->Bind(std::move(receiver));
++  }
++}
++#endif
++
+ void BindWebRTCLoggingAgent(
+     ChromeContentRendererClient* client,
+     mojo::PendingReceiver<chrome::mojom::WebRtcLoggingAgent> receiver) {
+@@ -70,6 +84,13 @@ void ExposeChromeRendererInterfacesToBrowser(
+       base::SequencedTaskRunner::GetCurrentDefault());
+ #endif
+ 
++#if BUILDFLAG(IS_ANDROID)
++  // LemurX: browser -> renderer-embedded Lua (luakit web extension).
++  binders->Add<lemurx::mojom::LuakitWebExtension>(
++      base::BindRepeating(&BindLuakitWebExtension),
++      base::SequencedTaskRunner::GetCurrentDefault());
++#endif
++
+ #if BUILDFLAG(IS_WIN)
+   binders->Add<chrome::mojom::FontPrewarmer>(
+       base::BindRepeating(&FontPrewarmer::Bind),

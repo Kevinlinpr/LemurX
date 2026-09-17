@@ -117,7 +117,10 @@ end })
 local function theme()
     if lousy.theme and lousy.theme.get then
         local ok, t = pcall(lousy.theme.get)
-        if ok and type(t) == "table" and next(t) ~= nil then return t end
+        -- lousy.theme.get() 可能返回带 __index 的代理表（next() 为空），所以按键探测
+        if ok and type(t) == "table" and (next(t) ~= nil or t.ibar_fg ~= nil or t.notif_fg ~= nil) then
+            return t
+        end
     end
     return fallback_theme
 end
@@ -431,6 +434,26 @@ methods.hit = function(w, mods, key, opts)
 
     local args = join(opts, { enable_buffer = enable_buffer, buffer = count and rest or buffer })
     if count then args.count = tonumber(count) end
+
+    -- 缓冲序列进行中（如已按下 "g"）：后续字符先尝试续接缓冲，
+    -- 这样 "gT" 不会被单键 "T" 抢走；续接失败才回到普通匹配。
+    local shift_only = (#mods == 0) or (#mods == 1 and mods[1] == "Shift")
+    if not count then rest = buffer end
+    if enable_buffer and rest ~= "" and shift_only and utf8.len(key) == 1 then
+        local newbuf = rest .. key
+        local matched, partial = lousy.bind.match_buf(w, w.binds or {}, newbuf, args)
+        if matched then
+            w.buffer = nil
+            w:update_buf()
+            return true
+        elseif partial then
+            w.buffer = (count or "") .. newbuf
+            w:update_buf()
+            return true
+        end
+        args.buffer = ""
+    end
+
     local caught, newbuf = lousy.bind.hit(w, w.binds or {}, mods, key, args)
     newbuf = newbuf or ""
     if not caught then newbuf = "" end

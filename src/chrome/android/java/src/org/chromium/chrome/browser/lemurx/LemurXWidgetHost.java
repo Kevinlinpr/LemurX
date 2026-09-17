@@ -38,9 +38,10 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
-import org.chromium.chrome.lemurx.base.utils.LemurLogUtils;
+import org.chromium.chrome.browser.app.ChromeActivity;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -90,10 +91,15 @@ public class LemurXWidgetHost {
         boolean wantsScroll;
         boolean wantsEnter;
         boolean suppressChanged;   // entry 程序性改文本时不发 changed
-        int lastW = -1, lastH = -1;
-        String bg, fg, font;
-        int minW = -1, minH = -1;
-        int alignH = -1, alignV = -1;
+        int lastW = -1;
+        int lastH = -1;
+        String bg;
+        String fg;
+        String font;
+        int minW = -1;
+        int minH = -1;
+        int alignH = -1;
+        int alignV = -1;
         boolean windowShown;
     }
 
@@ -143,7 +149,14 @@ public class LemurXWidgetHost {
                 return "{\"ok\":false,\"error\":\"" + e + "\"}";
             }
         }
-        String result = ThreadUtils.runOnUiThreadBlockingNoException(task);
+        // Chromium 154 没有 runOnUiThreadBlockingNoException 了；runOnUiThreadBlocking(Callable)
+        // 会把任务里的异常包成 RuntimeException 抛回来（runOp 自己已兜住，这里只防 UI 线程投递失败）
+        String result;
+        try {
+            result = ThreadUtils.runOnUiThreadBlocking(task);
+        } catch (RuntimeException e) {
+            result = null;
+        }
         return result == null ? "{\"ok\":false,\"error\":\"ui thread\"}" : result;
     }
 
@@ -223,7 +236,7 @@ public class LemurXWidgetHost {
                 }
                 return wrap.toString();
             } catch (Throwable e) {
-                LemurLogUtils.i(TAG, "luakit widget op failed", op, String.valueOf(id), e.toString());
+                Log.i(TAG, "luakit widget op failed: %s %s %s", op, String.valueOf(id), e.toString());
                 JSONObject err = new JSONObject();
                 try {
                     err.put("ok", false);
@@ -1563,7 +1576,7 @@ public class LemurXWidgetHost {
                 break;
             }
         }
-        View holder = a.findViewById(a.getResources().getIdentifier("compositor_view_holder", "id", a.getPackageName()));
+        View holder = compositorViewHolder(a);
         if (holder == null) return;
         ViewParent hp = holder.getParent();
         if (!(hp instanceof View)) return;
@@ -1584,10 +1597,27 @@ public class LemurXWidgetHost {
         applyContentInsets(Math.max(0, left), Math.max(0, top), Math.max(0, right), Math.max(0, bottom));
     }
 
+    /**
+     * 原生 Tab 内容所在的 CompositorViewHolder。Chromium 154 的 ChromeActivity 公开的是
+     * getCompositorViewHolderSupplier()（ForTesting 版不用于产品代码）；供应器还没就绪时
+     * 退回按资源名找 R.id.compositor_view_holder（compositor_view_holder.xml 里仍叫这个名字）。
+     */
+    private static View compositorViewHolder(Activity a) {
+        View holder = null;
+        if (a instanceof ChromeActivity) {
+            holder = ((ChromeActivity) a).getCompositorViewHolderSupplier().get();
+        }
+        if (holder == null) {
+            int id = a.getResources().getIdentifier("compositor_view_holder", "id", a.getPackageName());
+            holder = id == 0 ? null : a.findViewById(id);
+        }
+        return holder;
+    }
+
     private static void applyContentInsets(int left, int top, int right, int bottom) {
         Activity a = activity();
         if (a == null) return;
-        View holder = a.findViewById(a.getResources().getIdentifier("compositor_view_holder", "id", a.getPackageName()));
+        View holder = compositorViewHolder(a);
         if (holder == null) return;
         if (sContentInsets[0] == left && sContentInsets[1] == top && sContentInsets[2] == right && sContentInsets[3] == bottom) {
             return;

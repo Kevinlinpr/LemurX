@@ -1,0 +1,28 @@
+# Copyright 2026 The LemurX Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+assert(is_android)
+
+# Renderer-embedded Lua: one lua_State per renderer process exposing the
+# luakit web-extension API (dom_document, page, ipc_channel, ...).
+source_set("lemurx") {
+  sources = [
+    "luakit_web_extension.cc",
+    "luakit_web_extension.h",
+  ]
+
+  deps = [
+    "//base",
+    "//chrome/common:mojo_bindings",
+    "//content/public/renderer",
+    "//mojo/public/cpp/bindings",
+    "//net",
+    "//services/network/public/cpp",
+    "//third_party/blink/public:blink",
+    "//third_party/blink/public/common",
+    "//third_party/lua",
+    "//url",
+    "//v8",
+  ]
+}

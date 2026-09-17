@@ -137,7 +137,7 @@ function M.add(what, opts)
         download = d,
         created = os.time(),
         started_at = luakit.time(),
-        w = opts.window,
+        w = opts.window or opts.w or (opts.view and M.window_of(opts.view)) or nil,
         dir = opts.dir,
         filename = opts.filename,
         opening = false,
@@ -253,6 +253,7 @@ local function window_of(view)
     end
     return nil
 end
+M.window_of = window_of
 
 luakit.add_signal("download-start", function(d, view)
     M.add(d, { window = window_of(view) })
@@ -287,7 +288,7 @@ do
             { "<Control-D>", "Download a URL (opens the :download prompt).", function(w) w:enter_cmd(":download ") end },
         })
         modes.add_cmds({
-            { ":down[load]", "Download the given URL: :download <uri>", function(w, o)
+            { ":download, :down", "Download the given URL: :download <uri>", function(w, o)
                 local uri = ((o and o.arg) or ""):match("^%s*(%S+)")
                 if not uri then w:error("Usage: :download <uri>") return end
                 M.add(uri, { window = w })

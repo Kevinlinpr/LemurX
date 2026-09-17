@@ -1,0 +1,37 @@
+diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
+index 02f4820634..29de4a52a3 100644
+--- a/chrome/renderer/chrome_content_renderer_client.cc
++++ b/chrome/renderer/chrome_content_renderer_client.cc
+@@ -55,6 +55,9 @@
+ #include "chrome/grit/renderer_resources.h"
+ #include "chrome/renderer/benchmarking_bindings.h"
+ #include "chrome/renderer/browser_exposed_renderer_interfaces.h"
++#if BUILDFLAG(IS_ANDROID)
++#include "chrome/renderer/lemurx/luakit_web_extension.h"
++#endif
+ #include "chrome/renderer/chrome_content_settings_agent_delegate.h"
+ #include "chrome/renderer/chrome_render_frame_observer.h"
+ #include "chrome/renderer/chrome_render_thread_observer.h"
+@@ -391,6 +394,11 @@ ChromeContentRendererClient::~ChromeContentRendererClient() = default;
+ void ChromeContentRendererClient::RenderThreadStarted() {
+   RenderThread* thread = RenderThread::Get();
+ 
++#if BUILDFLAG(IS_ANDROID)
++  // LemurX: one Lua state per renderer process (luakit web extension model).
++  lemurx::LuakitWebExtension::Create();
++#endif
++
+   main_thread_profiler_->SetAuxUnwinderFactory(base::BindRepeating(
+       &CreateV8Unwinder, base::Unretained(v8::Isolate::GetCurrent())));
+ 
+@@ -644,6 +652,10 @@ void ChromeContentRendererClient::RenderFrameCreated(
+ 
+   new prerender::NoStatePrefetchRenderFrameObserver(render_frame);
+ 
++#if BUILDFLAG(IS_ANDROID)
++  lemurx::LuakitWebExtension::OnRenderFrameCreated(render_frame);
++#endif
++
+   auto content_settings_delegate =
+       std::make_unique<ChromeContentSettingsAgentDelegate>(render_frame);
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)

@@ -579,13 +579,16 @@ end
 local deprecation_seen = {}
 function M.deprecate(name, replacement, level)
     local info = debug.getinfo((level or 2) + 1, "Sl")
-    local site = info and (tostring(info.short_src) .. ":" .. tostring(info.currentline)) or "?"
-    local key = site .. "|" .. tostring(name)
+    local site = nil
+    if info and info.short_src and info.short_src ~= "[C]" and (info.currentline or 0) > 0 then
+        site = tostring(info.short_src) .. ":" .. tostring(info.currentline)
+    end
+    local key = tostring(site) .. "|" .. tostring(name)
     if deprecation_seen[key] then return end
     deprecation_seen[key] = true
     local text = ("%s is deprecated"):format(tostring(name))
     if replacement then text = text .. ("; use %s instead"):format(tostring(replacement)) end
-    text = text .. " (" .. site .. ")"
+    if site then text = text .. " (" .. site .. ")" end
     local m = rawget(_G, "msg")
     if m and m.warn then m.warn("%s", text) else io.stderr:write(text, "\n") end
 end

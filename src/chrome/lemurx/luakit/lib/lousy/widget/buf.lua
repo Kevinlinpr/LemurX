@@ -42,13 +42,21 @@ function M.update(w)
     paint_w(w)
 end
 
+-- 让 w:update_buf() 一定会刷新本窗口的 buf 标签：
+--   * 窗口已有 update_buf（window.methods 拷贝过来的占位实现）→ 在实例上包一层，先调原来的再刷新
+--   * 没有 → 直接补一个
+-- 每个窗口只包一次（标记在 labels[w].wrapped）
 local function ensure_method(w)
-    if type(w) == "table" and rawget(w, "update_buf") == nil then
-        local ok = pcall(function()
-            if w.update_buf == nil then w.update_buf = paint_w end
-        end)
-        if not ok then rawset(w, "update_buf", paint_w) end
-    end
+    if type(w) ~= "table" then return end
+    local st = labels[w]
+    if st.wrapped then return end
+    st.wrapped = true
+    local ok, prev = pcall(function() return w.update_buf end)
+    if not ok or type(prev) ~= "function" then prev = nil end
+    rawset(w, "update_buf", function(ww, ...)
+        if prev then prev(ww, ...) end
+        paint_w(ww)
+    end)
     local win = package.loaded["window"]
     if type(win) == "table" and type(win.methods) == "table" and win.methods.update_buf == nil then
         win.methods.update_buf = paint_w

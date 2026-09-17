@@ -58,17 +58,24 @@ local function open_db()
     pcall(function() rows = db:exec("SELECT domain, enable_scripts, enable_plugins FROM by_domain") end)
     for _, row in ipairs(type(rows) == "table" and rows or {}) do
         if type(row) == "table" and type(row.domain) == "string" then
+            -- 列值：1 = 开，0 = 关，其它（NULL / -1）= 未设置
+            local function tri(v)
+                local n = tonumber(v)
+                if n == 1 then return true elseif n == 0 then return false end
+                return nil
+            end
             cache[row.domain] = {
-                enable_scripts = row.enable_scripts ~= nil and (tonumber(row.enable_scripts) == 1) or nil,
-                enable_plugins = row.enable_plugins ~= nil and (tonumber(row.enable_plugins) == 1) or nil,
+                enable_scripts = tri(row.enable_scripts),
+                enable_plugins = tri(row.enable_plugins),
             }
         end
     end
     return db
 end
 
+-- 绑定参数里不能有 nil（会截断参数表），未设置用 -1 表示
 local function to_int(v)
-    if v == nil then return nil end
+    if v == nil then return -1 end
     return v and 1 or 0
 end
 

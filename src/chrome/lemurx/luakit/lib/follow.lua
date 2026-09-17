@@ -338,7 +338,8 @@ local function apply_sort_labels()
         select.label_maker = nil
     end
 end
-settings.add_signal("setting-changed", function(_, ev)
+settings.add_signal("setting-changed", function(a, b)
+    local ev = type(a) == "table" and a or b -- C 组 settings 是模块信号：handler(ev)；也兼容 (obj, ev)
     if ev and ev.key == "follow.sort_labels" then apply_sort_labels() end
 end)
 apply_sort_labels()
@@ -364,8 +365,10 @@ modes.add_binds("ex-follow", {
     { "Y", "Yank the chosen element's text/description.", function (w) ex(w, "yank_desc") end },
     { "i", "Open the chosen image in the current tab.", function (w) ex(w, "image") end },
     { "I", "Open the chosen image in a new tab.", function (w) ex(w, "image_tab") end },
-    { "x", "Download the chosen link.", function (w) ex(w, "download") end },
-    { "X", "Download the chosen image.", function (w) ex(w, "download_image") end },
+    { "s", "Download (save) the chosen link.", function (w) ex(w, "download") end },
+    { "S", "Download (save) the chosen image.", function (w) ex(w, "download_image") end },
+    { "x", "Download the chosen link (alias of s).", function (w) ex(w, "download") end },
+    { "X", "Download the chosen image (alias of S).", function (w) ex(w, "download_image") end },
     { "o", "Open the chosen link in the current tab.", function (w) ex(w, "open") end },
     { "t", "Open the chosen link in a new tab.", function (w) ex(w, "tab") end },
     { "b", "Open the chosen link in a background tab.", function (w) ex(w, "bg_tab") end },

@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/synchronization/lock.h"
-#include "extensions/common/url_pattern.h"
+#include "chrome/browser/lemurx/lemurx_url_pattern.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "url/gurl.h"
 
@@ -38,8 +38,7 @@ class LemurXNetRules {
     std::vector<std::pair<std::string, std::string>> replace_body;
     std::string request_body;
     std::vector<std::pair<std::string, std::string>> replace_request_body;
-    URLPattern pattern{URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS |
-                       URLPattern::SCHEME_WS | URLPattern::SCHEME_WSS};
+    lemurx::UrlPattern pattern;
     bool pattern_valid = false;
 
     bool Matches(const GURL& url,

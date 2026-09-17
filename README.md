@@ -25,7 +25,9 @@ The full reference lives in `src/chrome/lemurx/lua/docs/LUA_GUIDE.md`.
   [luakit](https://luakit.github.io/) reimplemented on Chromium: `widget{}` trees
   mapped to Android views, `webview` bound to a Tab, `luakit.register_scheme`,
   `sqlite3`, `regex`, `soup`, `stylesheet`, `timer`, `download`, `ipc_channel`.
-  luakit's own `lib/`, `lousy/` and `rc.lua` run unmodified on a phone.
+  The standard module set (`window`, `webview`, `modes`, `binds`, `lousy.*`,
+  `follow`, `adblock`, `formfiller`, `session`, the `luakit://` chrome pages, …)
+  is re-implemented clean-room, so an `rc.lua` written for luakit runs on a phone.
 * **Lua in the renderer** — one `lua_State` per renderer process with `page`,
   `dom_document`, `dom_element` on real V8 handles, a synchronous `send-request`
   hook on every subresource, `luakit.register_function` to expose Lua to page JS.
@@ -47,7 +49,7 @@ src/               overlay — files that do not exist upstream, mirrored at the
   chrome/common/lemurx_web.mojom       browser <-> renderer Lua IPC
   chrome/android/java/.../lemurx/      Java hosts (shell, UI, widgets, moat)
   chrome/lemurx/lua/                   init.lua, tutorial, examples, docs
-  chrome/lemurx/luakit/                luakit kernel (BSD) + luakit lib/ (GPLv3, verbatim)
+  chrome/lemurx/luakit/                luakit-compatible runtime: kernel/, lib/, lousy/, config/
   third_party/lua/                     Lua 5.4.7
 patches/           unified diffs for the handful of upstream files we hook into
 tools/apply.py     lays src/ + patches/ over chromium/src
@@ -67,6 +69,21 @@ gn gen out/lemurx --args="$(cat ../../tools/args.gn)"
 autoninja -C out/lemurx chrome_public_apk
 ```
 
+### Distributed build (self-hosted REAPI)
+
+`tools/args.gn` enables `use_remoteexec` / `use_siso`; `chromium/.gclient`
+points Siso at the in-house Buildbarn cluster (`reapi_address`,
+`reapi_backend_config_path = tools/rbe/backend.star`). `gclient runhooks`
+(or `configure_siso.py` directly) installs the backend config. The cluster is
+plaintext gRPC and does not implement `google.longrunning.Operations`, so run:
+
+```sh
+export RBE_service_no_security=true
+autoninja -C out/lemurx -reapi_insecure -reapi_keep_exec_stream -remote_jobs 256 chrome_public_apk
+```
+
+Without a reachable cluster, `autoninja --offline` builds locally.
+
 ## Upgrading Chromium
 
 1. Change `CHROMIUM_VERSION` and the `@version` in `chromium/.gclient`.
@@ -75,5 +92,7 @@ autoninja -C out/lemurx chrome_public_apk
 
 ## License
 
-LemurX code is BSD-3-Clause (`LICENSE`). Third-party notices in `NOTICE`; the luakit
-Lua libraries are GPLv3 and shipped as separate source files.
+Everything in this repository is BSD-3-Clause (`LICENSE`), including the
+luakit-compatible Lua runtime, which is an independent re-implementation of
+luakit's public API and contains no luakit code. Third-party notices (Chromium,
+Lua, markdown.lua) are in `NOTICE`.

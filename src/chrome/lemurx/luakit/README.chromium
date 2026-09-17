@@ -1,16 +1,28 @@
-Name: luakit Lua library (lib/, lousy/, config/, resources/)
-URL: https://github.com/luakit/luakit
-Revision: f796017791d53cfafd368b6e893137b0868daa9a
-Date: 2026-05-28 14:22:26 +0200
-License: GPL-3.0
-License File: COPYING.GPLv3
+Name: LemurX luakit-compatible Lua runtime
+URL: (first-party, see //LICENSE)
+Version: 1
+License: BSD-3-Clause
+License File: //LICENSE
 Security Critical: no
 Shipped: yes
 
 Description:
-luakit 浏览器的纯 Lua 层（lib/*.lua、lousy/、默认 config/rc.lua、theme.lua、resources/），
-原样搬入，作为狐猴 luakit 兼容运行时的上层。luakit 的 C 代码一行未拷；
-对外接口由 kernel/ 下自研（BSD）内核在 lemurx.* 与 __luakit 原生原语之上实现。
+A from-scratch, API-compatible re-implementation of the luakit browser's Lua
+surface for Chromium/Android:
 
-Local Modifications:
-见 kernel/ 与 patches/ 记录的少量 Android 适配（若有）。
+  kernel/   the object model (signals, properties), widget tree, webview,
+            timers, ipc_channel, soup, sqlite3, regex, lfs, xdg, msg,
+            stylesheets, downloads, unique-instance, custom schemes, plus the
+            renderer-side (web/) dom_document, page, ipc, luakit modules.
+  lib/      the standard luakit module set (window, webview, modes, binds,
+            lousy.*, chrome pages, adblock, follow, formfiller, session, ...)
+            rewritten clean-room from luakit's public API documentation.
+  config/   default rc.lua / theme.lua.
+
+No luakit source code (C or Lua) is included; the only inheritance is the
+public Lua API (names, signatures, signal names, settings keys) so that
+scripts written against luakit's documentation keep working.
+
+Everything under this directory is BSD-3-Clause, the same as the rest of
+LemurX. Regenerate luakit_assets.gni after adding/removing files:
+  cd chrome/lemurx/luakit && ./gen_assets_gni.sh

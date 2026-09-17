@@ -130,8 +130,8 @@ modes.add_cmds({
 })
 
 modes.add_binds("normal", {
-    { "^gd$", "Open the downloads page in the current tab.", function(w) w:navigate(M.chrome_page) end },
-    { "^gD$", "Open the downloads page in a new tab.", function(w) w:new_tab(M.chrome_page) end },
+    { "gd", "Open the downloads page in the current tab.", function(w) w:navigate(M.chrome_page) end },
+    { "gD", "Open the downloads page in a new tab.", function(w) w:new_tab(M.chrome_page) end },
 })
 
 return M

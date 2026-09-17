@@ -29,6 +29,7 @@
 #include "chrome/browser/ui/android/lemurx/lemurx_luakit_native.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -60,7 +61,7 @@ void EnsureEnv() {
     return;
   }
   sh.env_json = LemurXLuakitEnvJson();
-  std::optional<base::Value> v = base::JSONReader::Read(sh.env_json);
+  std::optional<base::Value> v = base::JSONReader::Read(sh.env_json, base::JSON_PARSE_RFC);
   if (v && v->is_dict()) {
     const std::string* inst = v->GetDict().FindString("install_dir");
     const std::string* conf = v->GetDict().FindString("config_dir");
@@ -95,14 +96,17 @@ std::map<int, std::unique_ptr<WebHost>>& Hosts() {
   return *m;
 }
 
-// 渲染进程 Ready 之前到达的主框架通知：pid → [(routing_id, tab_id)]
-std::map<int, std::vector<std::pair<int, int>>>& PendingNotifies() {
-  static base::NoDestructor<std::map<int, std::vector<std::pair<int, int>>>>
+// 主框架的身份：LocalFrameToken（154 起渲染进程侧没有 routing id 了）
+using FrameRef = blink::LocalFrameToken;
+
+// 渲染进程 Ready 之前到达的主框架通知：pid → [(frame_token, tab_id)]
+std::map<int, std::vector<std::pair<FrameRef, int>>>& PendingNotifies() {
+  static base::NoDestructor<std::map<int, std::vector<std::pair<FrameRef, int>>>>
       m;
   return *m;
 }
 
-std::string ToJson(const base::Value::Dict& d) {
+std::string ToJson(const base::DictValue& d) {
   std::string out;
   base::JSONWriter::Write(d, &out);
   return out;
@@ -124,19 +128,19 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
     return ext_.is_bound() ? ext_.get() : nullptr;
   }
 
-  void NotifyPage(int routing_id, int tab_id) {
+  void NotifyPage(const FrameRef& frame, int tab_id) {
     if (ext()) {
-      ext_->PageCreated(routing_id, tab_id);
+      ext_->PageCreated(frame, tab_id);
       NotifyPageAttached(tab_id);
     } else {
-      pending_pages_.emplace_back(routing_id, tab_id);
+      pending_pages_.emplace_back(frame, tab_id);
     }
   }
 
   // luakit：某个 view 接上了 web extension → luakit "web-extension-created"(view)
   // + view "web-extension-loaded"
   void NotifyPageAttached(int tab_id) {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "page");
     d.Set("pid", process_id_);
     d.Set("tab", tab_id);
@@ -164,9 +168,9 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
     }
     // 渲染进程侧 luakit.web_process_id：与 UI 侧 webview.web_process_id 同一套 id
     {
-      std::optional<base::Value> ev = base::JSONReader::Read(env);
-      base::Value::Dict d = ev && ev->is_dict() ? std::move(ev->GetDict())
-                                                 : base::Value::Dict();
+      std::optional<base::Value> ev = base::JSONReader::Read(env, base::JSON_PARSE_RFC);
+      base::DictValue d = ev && ev->is_dict() ? std::move(ev->GetDict())
+                                                 : base::DictValue();
       d.Set("pid", process_id_);
       env = ToJson(d);
     }
@@ -176,15 +180,15 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
     }
     ready_ = true;
 
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "created");
     d.Set("pid", process_id_);
     LemurXLuakitDispatch("webext", process_id_, ToJson(d), 0);
 
-    std::vector<std::pair<int, int>> pending = std::move(pending_pages_);
+    std::vector<std::pair<FrameRef, int>> pending = std::move(pending_pages_);
     pending_pages_.clear();
-    for (const auto& [rid, tab] : pending) {
-      ext_->PageCreated(rid, tab);
+    for (const auto& [frame, tab] : pending) {
+      ext_->PageCreated(frame, tab);
       NotifyPageAttached(tab);
     }
   }
@@ -192,7 +196,7 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
   void EmitSignal(const std::string& channel,
                   const std::string& signame,
                   const std::string& args_json) override {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("channel", channel);
     d.Set("signame", signame);
     d.Set("args", args_json);
@@ -240,7 +244,7 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
   void Log(int32_t level,
            const std::string& group,
            const std::string& message) override {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("level", level);
     d.Set("group", group);
     d.Set("msg", message);
@@ -251,7 +255,7 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
   void EvalJsResult(int32_t callback_id,
                     const std::string& result_json,
                     const std::optional<std::string>& error) override {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("result", result_json);
     if (error) {
       d.Set("error", *error);
@@ -261,7 +265,7 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
 
  private:
   void OnDisconnect() {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("ev", "destroyed");
     d.Set("pid", process_id_);
     LemurXLuakitDispatch("webext", process_id_, ToJson(d), 0);
@@ -272,13 +276,13 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
   bool ready_ = false;
   mojo::Receiver<lemurx::mojom::LuakitWebHost> receiver_;
   mojo::Remote<lemurx::mojom::LuakitWebExtension> ext_;
-  std::vector<std::pair<int, int>> pending_pages_;
+  std::vector<std::pair<FrameRef, int>> pending_pages_;
 };
 
 // ===== UI 线程操作 =====
 
-// tab → (process id, routing id)；失败返回 false
-bool MainFrameOf(int tab_id, int* pid, int* rid) {
+// tab → (process id, main-frame token)；失败返回 false
+bool MainFrameOf(int tab_id, int* pid, FrameRef* rid) {
   content::WebContents* wc = LemurXWebContentsForTab(tab_id);
   if (!wc) {
     return false;
@@ -287,8 +291,8 @@ bool MainFrameOf(int tab_id, int* pid, int* rid) {
   if (!rfh) {
     return false;
   }
-  *pid = rfh->GetProcess()->GetID();
-  *rid = rfh->GetRoutingID();
+  *pid = rfh->GetProcess()->GetDeprecatedID();
+  *rid = rfh->GetFrameToken();
   return true;
 }
 
@@ -312,7 +316,8 @@ void EmitOnUi(std::string channel,
     }
     return;
   }
-  int pid = 0, rid = 0;
+  int pid = 0;
+  FrameRef rid;
   if (!MainFrameOf(tab_id, &pid, &rid)) {
     return;
   }
@@ -326,9 +331,10 @@ void EmitOnUi(std::string channel,
 }
 
 void EvalOnUi(int tab_id, std::string script, std::string source, int cb_id) {
-  int pid = 0, rid = 0;
+  int pid = 0;
+  FrameRef rid;
   if (!MainFrameOf(tab_id, &pid, &rid)) {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("result", "null");
     d.Set("error", "no such tab");
     LemurXLuakitDispatch("webeval", cb_id, ToJson(d), 0);
@@ -336,7 +342,7 @@ void EvalOnUi(int tab_id, std::string script, std::string source, int cb_id) {
   }
   auto it = Hosts().find(pid);
   if (it == Hosts().end() || !it->second->ext()) {
-    base::Value::Dict d;
+    base::DictValue d;
     d.Set("result", "null");
     d.Set("error", "web extension not attached to this process");
     LemurXLuakitDispatch("webeval", cb_id, ToJson(d), 0);
@@ -347,7 +353,8 @@ void EvalOnUi(int tab_id, std::string script, std::string source, int cb_id) {
 }
 
 void ScrollOnUi(int tab_id, int x, int y) {
-  int pid = 0, rid = 0;
+  int pid = 0;
+  FrameRef rid;
   if (!MainFrameOf(tab_id, &pid, &rid)) {
     return;
   }
@@ -473,8 +480,8 @@ void LemurXLuakitWebNotifyPage(content::RenderFrameHost* main_frame,
   if (!main_frame) {
     return;
   }
-  int pid = main_frame->GetProcess()->GetID();
-  int rid = main_frame->GetRoutingID();
+  int pid = main_frame->GetProcess()->GetDeprecatedID();
+  FrameRef rid = main_frame->GetFrameToken();
   auto it = Hosts().find(pid);
   if (it == Hosts().end()) {
     PendingNotifies()[pid].emplace_back(rid, tab_id);

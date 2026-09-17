@@ -1,0 +1,21 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedAppMenuPropertiesDelegate.java b/chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedAppMenuPropertiesDelegate.java
+index 6a9467d96a..81743645a1 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedAppMenuPropertiesDelegate.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedAppMenuPropertiesDelegate.java
+@@ -50,6 +50,7 @@ import org.chromium.chrome.browser.image_descriptions.ImageDescriptionsControlle
+ import org.chromium.chrome.browser.incognito.IncognitoUtils;
+ import org.chromium.chrome.browser.incognito.reauth.IncognitoReauthController;
+ import org.chromium.chrome.browser.layouts.LayoutStateProvider;
++import org.chromium.chrome.browser.lemurx.LemurXChromeHost;
+ import org.chromium.chrome.browser.multiwindow.MultiInstanceManager.PersistedInstanceType;
+ import org.chromium.chrome.browser.multiwindow.MultiWindowModeStateDispatcher;
+ import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
+@@ -299,6 +300,8 @@ public class TabbedAppMenuPropertiesDelegate extends AppMenuPropertiesDelegateIm
+         } else if (menuGroup == MenuGroup.TABLET_EMPTY_MODE_MENU) {
+             populateTabletEmptyModeMenu(modelList);
+         }
++        // LemurX: let Lua hide stock items / append its own items (lemurx.menu.*).
++        LemurXChromeHost.decorateAppMenu(modelList, menuGroup);
+         return modelList;
+     }
+ 

@@ -1,0 +1,20 @@
+diff --git a/chrome/android/BUILD.gn b/chrome/android/BUILD.gn
+index 2133a964d0..8b5881c963 100644
+--- a/chrome/android/BUILD.gn
++++ b/chrome/android/BUILD.gn
+@@ -1840,6 +1840,7 @@ if (_is_default_toolchain) {
+   java_group("chrome_public_non_pak_assets") {
+     deps = [
+       "//chrome/android/webapk/libs/runtime_library:runtime_library_assets",
++      "//chrome/lemurx:lemurx_assets",
+       "//components/privacy_sandbox/privacy_sandbox_attestations/preload:privacy_sandbox_attestations_assets",
+     ]
+   }
+@@ -2990,6 +2991,7 @@ if (_is_default_toolchain) {
+ 
+   generate_jni("chrome_jni_headers") {
+     sources = [
++      "java/src/org/chromium/chrome/browser/lemurx/LemurXBridge.java",
+       "../browser/share/android/java/src/org/chromium/chrome/browser/share/BitmapDownloadRequest.java",
+       "../browser/share/android/java/src/org/chromium/chrome/browser/share/link_to_text/LinkToTextBridge.java",
+       "../browser/share/android/java/src/org/chromium/chrome/browser/share/long_screenshots/bitmap_generation/LongScreenshotsTabService.java",

@@ -414,7 +414,7 @@ bool HasScheme(const std::string& s) {
   return false;
 }
 
-void SetIfNonEmpty(lua_State* L, const char* key, const std::string& v) {
+void SetIfNonEmpty(lua_State* L, const char* key, std::string_view v) {
   if (!v.empty()) {
     lua_pushlstring(L, v.data(), v.size());
     lua_setfield(L, -2, key);
@@ -838,7 +838,7 @@ int Env(lua_State* L) {
     lua_newtable(L);
     return 1;
   }
-  std::optional<base::Value> value = base::JSONReader::Read(s);
+  std::optional<base::Value> value = base::JSONReader::Read(s, base::JSON_PARSE_RFC);
   if (!value || !value->is_dict()) {
     lua_newtable(L);
     return 1;
@@ -869,7 +869,7 @@ base::Value LuaToValue(lua_State* L, int index) {
       lua_Integer n = luaL_len(L, index);
       bool is_array = n > 0;
       if (is_array) {
-        base::Value::List list;
+        base::ListValue list;
         for (lua_Integer i = 1; i <= n; ++i) {
           lua_rawgeti(L, index, i);
           list.Append(LuaToValue(L, -1));
@@ -877,7 +877,7 @@ base::Value LuaToValue(lua_State* L, int index) {
         }
         return base::Value(std::move(list));
       }
-      base::Value::Dict dict;
+      base::DictValue dict;
       lua_pushnil(L);
       while (lua_next(L, index) != 0) {
         if (lua_type(L, -2) == LUA_TSTRING) {
@@ -895,7 +895,7 @@ base::Value LuaToValue(lua_State* L, int index) {
 int JsonDecode(lua_State* L) {
   size_t len = 0;
   const char* s = luaL_checklstring(L, 1, &len);
-  std::optional<base::Value> value = base::JSONReader::Read(std::string(s, len));
+  std::optional<base::Value> value = base::JSONReader::Read(std::string(s, len), base::JSON_PARSE_RFC);
   if (!value) {
     return PushNilErr(L, "invalid json");
   }
@@ -925,11 +925,11 @@ int WidgetOp(lua_State* L) {
     base::JSONWriter::Write(LuaToValue(L, 3), &json);
   }
   std::string out = LemurXLuakitWidgetOp(op, id, json);
-  std::optional<base::Value> value = base::JSONReader::Read(out);
+  std::optional<base::Value> value = base::JSONReader::Read(out, base::JSON_PARSE_RFC);
   if (!value || !value->is_dict()) {
     return PushNilErr(L, "widget host unavailable");
   }
-  const base::Value::Dict& dict = value->GetDict();
+  const base::DictValue& dict = value->GetDict();
   if (!dict.FindBool("ok").value_or(false)) {
     const std::string* err = dict.FindString("error");
     return PushNilErr(L, err ? err->c_str() : "widget op failed");
