@@ -2245,6 +2245,27 @@ void SetCFunction(lua_State* L, const char* name, lua_CFunction fn) {
 
 }  // namespace
 
+void LemurXResetLuaGlobals() {
+  // Lua 线程，LemurXEngine::StopOnLuaThread 调用。各表里的 ref 属于马上要
+  // lua_close 的状态，直接 clear 即可；已排队的派发任务随后查表落空、早退。
+  g_ui_click_refs.clear();
+  g_tab_events.clear();
+  g_cdp_events.clear();
+  g_timers.clear();
+  g_exposed.clear();
+  g_http_callbacks.clear();
+}
+
+void LemurXResetBrowserState() {
+  // UI 线程。顺序无所谓，每一项都独立地把对应的 ContentBrowserClient 钩子
+  // 退回「无规则」分支。
+  LemurXNetRules::Get()->Clear();
+  LemurXLuakitWebviewResetAll();
+  LemurXCdpDetachAll();
+  LemurXLuakitSchemeResetAll();
+  LemurXLuakitWebHostResetAll();
+}
+
 void RegisterLemurXApi(lua_State* L) {
   lua_pushcfunction(L, LuaLog);
   lua_setglobal(L, "print");
@@ -2540,6 +2561,27 @@ content::WebContents* LemurXWebContentsForTab(int tab_id) {
 
 static void JNI_LemurXBridge_Start(JNIEnv* env) {
   LemurXEngine::Get()->Start();
+}
+
+namespace {
+
+void NotifyRuntimeStopped() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_LemurXBridge_onRuntimeStopped(env);
+}
+
+}  // namespace
+
+// 用户在「Lua 脚本」里关掉开关 / 重载脚本（UI 线程）：先把浏览器进程里所有
+// 脚本写入的原生状态清回空，再停引擎；Lua 线程清理完成后回 Java
+// onRuntimeStopped，Java 那边据此决定是否重新 start()。
+static void JNI_LemurXBridge_Shutdown(JNIEnv* env) {
+  LemurXResetBrowserState();
+  LemurXEngine::Get()->Stop(base::BindOnce(&NotifyRuntimeStopped));
+}
+
+static jboolean JNI_LemurXBridge_IsRuntimeEnabled(JNIEnv* env) {
+  return LemurXEngine::Get()->enabled();
 }
 
 static void JNI_LemurXBridge_Eval(

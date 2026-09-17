@@ -440,6 +440,16 @@ class LemurXMoatHost {
         return params;
     }
 
+    /**
+     * 用户关掉 Lua / 重载脚本时：清掉按 tab 记的 UA 覆盖与额外请求头。
+     * 之后 tabs.navigate 不再带头，页面事件也不再重注 navigator.userAgent；
+     * 已注入到当前文档里的 UA 随下一次导航消失。
+     */
+    static void resetAll() {
+        sTabHeaders.clear();
+        sTabUserAgents.clear();
+    }
+
     static void onTabEvent(String name, Tab tab) {
         if (tab == null || TextUtils.isEmpty(name)) {
             return;

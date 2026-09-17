@@ -31,4 +31,7 @@ void LemurXLuakitBindWebHost(
 // 渲染进程据此建 page 对象并发 page-created。
 void LemurXLuakitWebNotifyPage(content::RenderFrameHost* main_frame, int tab_id);
 
+// UI 线程。用户关掉 Lua 时调用：清空 web 模块清单与待送达的主框架通知。
+void LemurXLuakitWebHostResetAll();
+
 #endif  // CHROME_BROWSER_UI_ANDROID_LEMURX_LEMURX_LUAKIT_WEB_HOST_H_

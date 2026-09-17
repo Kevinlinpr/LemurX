@@ -799,6 +799,25 @@ int LemurXLuakitTabIdForWebContents(content::WebContents* web_contents) {
   return it == TabIds().end() ? -1 : it->second;
 }
 
+void LemurXLuakitWebviewResetAll() {
+  // 正在 DEFER 等 Lua 回话的导航：Lua 已经没了，全部放行，别让页面卡到 4 秒超时
+  std::vector<base::WeakPtr<Throttle>> pending;
+  for (auto& item : PendingThrottles()) {
+    pending.push_back(item.second);
+  }
+  PendingThrottles().clear();
+  for (auto& t : pending) {
+    if (t) {
+      t->Reply(true);
+    }
+  }
+  // 摘掉全部附着：TabObserver 析构会把自己从 TabIds() 里移除；
+  // 之后 MaybeAddNavigationThrottle 对任何 Tab 都不再挂节流器
+  Observers().clear();
+  TabIds().clear();
+  AllowedCerts().clear();
+}
+
 void RegisterLemurXLuakitWebview(lua_State* L) {
   lua_getglobal(L, "__luakit");
   if (!lua_istable(L, -1)) {

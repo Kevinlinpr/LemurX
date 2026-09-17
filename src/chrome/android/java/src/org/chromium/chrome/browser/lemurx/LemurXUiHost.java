@@ -108,6 +108,13 @@ class LemurXUiHost {
                 });
     }
 
+    /** 用户关掉 Lua / 重载脚本时（UI 线程）：所有覆盖层立刻拆掉，且 reattach() 无物可重放。 */
+    static void resetAll() {
+        ThreadUtils.assertOnUiThread();
+        sOverlayJson.clear();
+        dismissAllPopups();
+    }
+
     static String op(String action, String json) {
         String act = action == null ? "" : action.toLowerCase(Locale.US);
         if ("dump".equals(act)) {

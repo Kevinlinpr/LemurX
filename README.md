@@ -37,6 +37,32 @@ scripts you install from others (`files/lua/ugc/`) run in their own `lua_State`
 with a reduced standard library and no privileged APIs. The boundary is enforced
 at runtime, per state, not by source inspection.
 
+## The user always wins
+
+Depth of customisation is only worth anything if it never costs the user
+control of the browser. Three guarantees back that:
+
+* **Stock when idle.** Every hook LemurX adds to Chromium (URL-loader
+  throttles, navigation throttles, certificate override, custom schemes, back
+  press, app menu, tab observers, renderer Lua) is gated on state that only a
+  script can create. With no script running, each hook is an early `return`
+  and the browser behaves like the official build it was compiled from.
+* **A native master switch.** The three-dot menu always ends with **Lua
+  scripts**: a plain Android dialog (no Lua involved, scripts cannot hide or
+  intercept it) with an on/off switch for the runtime and a checkbox per
+  script — the bundled tutorial, your local scripts, and `ugc/` scripts alike.
+  Applying a change tears down everything scripts did — net rules, attached
+  webviews, certificate whitelist, CDP sessions, schemes, timers, overlays,
+  widgets, skin, per-tab UA/headers — stops the Lua engine
+  (`LemurXEngine::Stop`), and recreates the activity so the shell is inflated
+  from stock resources. Turning it back on starts a fresh `lua_State` and
+  re-runs the scripts. The switch lives in its own preference file that no
+  Lua API can reach.
+* **Boot-loop protection.** If the process dies twice in a row within 20 s of
+  starting scripts, the runtime is disabled automatically and the browser
+  comes up stock with a notice; a script can never lock you out of the
+  browser you need to fix it.
+
 ## Layout
 
 ```

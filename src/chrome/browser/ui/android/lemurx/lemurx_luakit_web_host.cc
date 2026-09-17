@@ -506,6 +506,19 @@ void LemurXLuakitWebNotifyPage(content::RenderFrameHost* main_frame,
   it->second->NotifyPage(rid, tab_id);
 }
 
+void LemurXLuakitWebHostResetAll() {
+  // 新起的渲染进程不再自动 require 任何 web 模块；尚未送达的主框架通知作废。
+  // 已经在某个渲染进程里跑起来的模块随该进程（页面导航/关闭）自然消亡——
+  // 渲染进程侧没有「卸载」原语，而它们只对 TabObserver 报过 PageCreated 的页
+  // 面生效，这里 TabObserver 已被 LemurXLuakitWebviewResetAll 清光。
+  {
+    Shared& sh = GetShared();
+    base::AutoLock lock(sh.lock);
+    sh.modules.clear();
+  }
+  PendingNotifies().clear();
+}
+
 void RegisterLemurXLuakitWebHost(lua_State* L) {
   lua_getglobal(L, "__luakit");
   if (!lua_istable(L, -1)) {

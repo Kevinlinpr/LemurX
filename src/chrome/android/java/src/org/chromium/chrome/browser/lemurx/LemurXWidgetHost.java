@@ -1368,23 +1368,29 @@ public class LemurXWidgetHost {
     /** 原生侧切了 Tab（用户手势/其它入口）：同步所有包含该 tab 的 notebook。 */
     static void onNativeTabSelected(int tabId) {
         ThreadUtils.runOnUiThread(() -> {
-            for (W nb : new ArrayList<>(sWidgets.values())) {
-                if (!"notebook".equals(nb.type) || nb.pages == null) continue;
-                for (int i = 0; i < nb.pages.size(); i++) {
-                    W page = sWidgets.get(nb.pages.get(i));
-                    if (page != null && page.tabId == tabId && nb.current != i) {
-                        nb.current = i;
-                        showNotebookPage(nb, i);
-                        JSONObject ev = new JSONObject();
-                        try {
-                            ev.put("child", page.id);
-                            ev.put("index", i + 1);
-                        } catch (Exception ignored) {
+            // 这段跑在 Chromium 的 TabModel 观察者回调栈上（didSelectTab），
+            // 任何异常都会把 ChromeTabbedActivity 一起带崩，必须全部兜住。
+            try {
+                for (W nb : new ArrayList<>(sWidgets.values())) {
+                    if (!"notebook".equals(nb.type) || nb.pages == null) continue;
+                    for (int i = 0; i < nb.pages.size(); i++) {
+                        W page = sWidgets.get(nb.pages.get(i));
+                        if (page != null && page.tabId == tabId && nb.current != i) {
+                            nb.current = i;
+                            showNotebookPage(nb, i);
+                            JSONObject ev = new JSONObject();
+                            try {
+                                ev.put("child", page.id);
+                                ev.put("index", i + 1);
+                            } catch (Exception ignored) {
+                            }
+                            emit(nb, "switch-page", ev);
+                            syncContentRect();
                         }
-                        emit(nb, "switch-page", ev);
-                        syncContentRect();
                     }
                 }
+            } catch (Throwable e) {
+                Log.i(TAG, "onNativeTabSelected failed: %s", e.toString());
             }
         });
     }
@@ -1548,6 +1554,42 @@ public class LemurXWidgetHost {
             applyContentInsets(0, 0, 0, 0);
         }
         emitProp(w, "visible");
+    }
+
+    /**
+     * 用户关掉 Lua / 重载脚本时（UI 线程）：销毁全部 luakit 控件。window 先 hide 以便
+     * 把 Chrome 外壳（controls / 底栏 / 内容区外边距）交还回去。
+     */
+    static void resetAll() {
+        ThreadUtils.assertOnUiThread();
+        for (W w : new ArrayList<>(sWidgets.values())) {
+            if ("window".equals(w.type)) {
+                try {
+                    hideWindow(w);
+                } catch (Exception e) {
+                    Log.i(TAG, "resetAll hideWindow: %s", e.getMessage());
+                }
+            }
+        }
+        for (Integer id : new ArrayList<>(sWidgets.keySet())) {
+            try {
+                destroy(id);
+            } catch (Exception e) {
+                Log.i(TAG, "resetAll destroy %d: %s", id, e.getMessage());
+            }
+        }
+        sWidgets.clear();
+        sByView.clear();
+        if (sShellHidden) {
+            sShellHidden = false;
+            try {
+                LemurXChromeHost.setControls("both");
+                LemurXChromeHost.hideBottomToolbar(false);
+                applyContentInsets(0, 0, 0, 0);
+            } catch (Exception e) {
+                Log.i(TAG, "resetAll shell: %s", e.getMessage());
+            }
+        }
     }
 
     /** Activity 重建后把显示中的 window 重新挂上。 */

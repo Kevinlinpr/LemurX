@@ -495,22 +495,32 @@ bool LemurXCdpAttach(int tab_id) {
   return json.find("\"ok\":true") != std::string::npos;
 }
 
+void LemurXCdpDetachAll() {
+  // UI 线程直接调（LemurXResetBrowserState）。Detach 会把已开的域
+  // （Emulation / Network 覆盖……）随 DevTools 会话一起撤掉。
+  for (auto& item : Clients()) {
+    item.second->Detach();
+  }
+  Clients().clear();
+  for (auto& item : HostClients()) {
+    item.second->Detach();
+  }
+  HostClients().clear();
+}
+
 void LemurXCdpDetach(int tab_id) {
-  base::WaitableEvent event(base::WaitableEvent::ResetPolicy::MANUAL,
-                            base::WaitableEvent::InitialState::NOT_SIGNALED);
-  content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(
-                     [](int tab_id, base::WaitableEvent* event) {
-                       auto& clients = Clients();
-                       auto it = clients.find(tab_id);
-                       if (it != clients.end()) {
-                         it->second->Detach();
-                         clients.erase(it);
-                       }
-                       event->Signal();
-                     },
-                     tab_id, &event));
-  event.TimedWait(base::Seconds(2));
+  // 超时后闭包不会再跑（以前绑的是栈上 WaitableEvent 的地址，超时即 UAF）
+  LemurXRunOnUiSync(base::BindOnce(
+                        [](int tab_id) {
+                          auto& clients = Clients();
+                          auto it = clients.find(tab_id);
+                          if (it != clients.end()) {
+                            it->second->Detach();
+                            clients.erase(it);
+                          }
+                        },
+                        tab_id),
+                    base::Seconds(2), "cdp detach");
 }
 
 std::string LemurXCdpVersion() {

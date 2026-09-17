@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_ANDROID_LEMURX_LEMURX_ENGINE_H_
 #define CHROME_BROWSER_UI_ANDROID_LEMURX_LEMURX_ENGINE_H_
 
+#include <atomic>
 #include <map>
 #include <string>
 
@@ -59,6 +60,15 @@ class LemurXEngine {
   LemurXEngine& operator=(const LemurXEngine&) = delete;
 
   void Start();
+  // 用户在「Lua 脚本」里关掉开关时调用（任意线程）：之后 Eval / RunOnLuaThread /
+  // PostDelayedOnLuaThread 全部静默丢弃，Lua 线程上先清掉 lemurx_api 的全局回调表
+  // （事件、定时器、UI 点击、http 回包……），再 lua_close 主状态和全部 UGC 状态。
+  // 已经排队的任务照常跑到，但它们拿到的 state() 是 nullptr / 回调表为空，各自
+  // 早退。on_stopped 在 Lua 线程清理完成后回到调用方线程。再调 Start() 会重新
+  // 建一个干净的状态——这就是「重载脚本」。
+  void Stop(base::OnceClosure on_stopped);
+  // Start() 后为 true，Stop() 后为 false；Java 侧不再 eval，原生侧不再派发。
+  bool enabled() const { return enabled_.load(std::memory_order_acquire); }
   void Eval(const std::string& chunk,
             const std::string& name,
             bool privileged = true);
@@ -77,6 +87,8 @@ class LemurXEngine {
 
  private:
   void StartOnLuaThread();
+  void StopOnLuaThread(scoped_refptr<base::SequencedTaskRunner> reply_runner,
+                       base::OnceClosure on_stopped);
   void EvalOnLuaThread(const std::string& chunk,
                        const std::string& name,
                        bool privileged);
@@ -96,6 +108,8 @@ class LemurXEngine {
   std::string init_chunk_;
   scoped_refptr<base::SequencedTaskRunner> lua_task_runner_;
   bool privileged_ = true;
+  // Start() 置 true，Stop() 置 false。UI 线程写、Lua 线程和 UI 线程读。
+  std::atomic<bool> enabled_{false};
 };
 
 #endif  // CHROME_BROWSER_UI_ANDROID_LEMURX_LEMURX_ENGINE_H_

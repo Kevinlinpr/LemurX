@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/byte_size.h"
 #include "base/functional/bind.h"
@@ -430,6 +431,23 @@ void SetFn(lua_State* L, const char* name, lua_CFunction fn) {
 bool LemurXLuakitIsSchemeRegistered(std::string_view scheme) {
   base::AutoLock lock(GetRegistry().lock);
   return GetRegistry().schemes.count(std::string(scheme)) > 0;
+}
+
+void LemurXLuakitSchemeResetAll() {
+  // 等 Lua 供内容的请求：Lua 已停，直接失败（Fail 内部自毁并从 Pending 摘除，
+  // 所以先拷一份 id 再逐个处理）。
+  std::vector<int> ids;
+  for (const auto& item : Pending()) {
+    ids.push_back(item.first);
+  }
+  for (int id : ids) {
+    FailOnUi(id, net::ERR_ABORTED);
+  }
+  // 清掉注册表：IsHandledURL / 两个工厂入口全部回到「未注册」分支。
+  // ChildProcessSecurityPolicy 里的 web-safe 登记是进程级、不可撤销的，
+  // 留着无害——没有工厂接管时这些 scheme 只会得到普通的错误页。
+  base::AutoLock lock(GetRegistry().lock);
+  GetRegistry().schemes.clear();
 }
 
 mojo::PendingRemote<network::mojom::URLLoaderFactory>

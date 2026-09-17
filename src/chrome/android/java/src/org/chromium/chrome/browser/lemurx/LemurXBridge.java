@@ -16,6 +16,7 @@ import android.database.sqlite.SQLiteDatabase;
 import android.net.Uri;
 import android.text.TextUtils;
 
+import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
@@ -107,23 +108,147 @@ public class LemurXBridge {
         if (sStarted) {
             return;
         }
+        // 用户的裁决优先于一切：总开关关着就什么都不做，连引擎都不起。
+        // 这时浏览器里唯一的 LemurX 痕迹是三点菜单里的「Lua 脚本」入口。
+        if (!LemurXScripts.isEnabled()) {
+            logi("start", "scripts disabled by user; runtime not started");
+            return;
+        }
+        // 启动保护：上两次都没活过宽限期 → 本次自动关掉并提示
+        if (!LemurXScripts.beginBoot()) {
+            ThreadUtils.postOnUiThreadDelayed(
+                    () -> showToast("Lua 脚本连续导致启动崩溃，已自动停用（菜单「Lua 脚本」可重新开启）"),
+                    1500);
+            return;
+        }
         sStarted = true;
-        LemurXBridgeJni.get().start();
-        evalAsset(INIT_ASSET);
-        // luakit 兼容内核紧跟 init.lua：先把 lib/ 解包到 install_dir，再跑内核，
-        // 内核负责注入 luakit/widget/soup/... 全局并（按开关）执行 config/rc.lua。
-        seedLuakit();
-        evalAsset(LUAKIT_KERNEL_ASSET);
-        evalUserScripts();
-        ThreadUtils.postOnUiThread(() -> LemurXChromeHost.attach(getActivity()));
+        // 从 ChromeTabbedActivity.finishNativeInitialization() 直接调进来：
+        // Lua 运行时起不来只能是 LemurX 自己的功能缺失，绝不能把浏览器启动带崩。
+        try {
+            LemurXBridgeJni.get().start();
+            evalAsset(INIT_ASSET);
+            // luakit 兼容内核紧跟 init.lua：先把 lib/ 解包到 install_dir，再跑内核，
+            // 内核负责注入 luakit/widget/soup/... 全局并（按开关）执行 config/rc.lua。
+            seedLuakit();
+            evalAsset(LUAKIT_KERNEL_ASSET);
+            evalUserScripts();
+        } catch (Throwable e) {
+            logi("start", e.toString());
+        }
+        ThreadUtils.postOnUiThread(
+                () -> {
+                    try {
+                        LemurXChromeHost.attach(getActivity());
+                    } catch (Throwable e) {
+                        logi("attach", e.toString());
+                    }
+                });
+        // 活过宽限期才算这次启动成功。用户正常离开（onStop / onDestroy 跑到了）也算：
+        // 崩溃的进程永远走不到这两个回调，20 秒内正常开了又关不能被当成崩溃。
         ThreadUtils.postOnUiThreadDelayed(
                 () -> {
-                    if ("0".equals(prefs().getString("lua_tutorial_hint", "1"))) {
+                    if (sStarted) {
+                        LemurXScripts.markBootHealthy();
+                    }
+                },
+                LemurXScripts.BOOT_GRACE_MS);
+        if (sBootStateListener == null) {
+            sBootStateListener =
+                    (activity, newState) -> {
+                        if (newState == ActivityState.STOPPED
+                                || newState == ActivityState.DESTROYED) {
+                            LemurXScripts.markBootHealthy();
+                        }
+                    };
+            try {
+                ApplicationStatus.registerStateListenerForAllActivities(sBootStateListener);
+            } catch (Throwable e) {
+                logi("boot listener", e.toString());
+            }
+        }
+        ThreadUtils.postOnUiThreadDelayed(
+                () -> {
+                    if (!sStarted || "0".equals(prefs().getString("lua_tutorial_hint", "1"))) {
                         return;
                     }
                     showToast("Lua教程入口：打开右上角三点菜单，底部有「Lua 教程」");
                 },
                 1800);
+    }
+
+    /** 引擎当前是否在跑（Java 侧视角：start() 成功且尚未 shutdown()）。 */
+    static boolean isStarted() {
+        return sStarted;
+    }
+
+    private static boolean sPendingRecreate;
+    private static @Nullable Activity sPendingRecreateActivity;
+    private static ApplicationStatus.@Nullable ActivityStateListener sBootStateListener;
+
+    /**
+     * 用户关掉 Lua / 重载脚本（UI 线程）。顺序：
+     * 1) Java 侧先摘钩：返回键拦截器、页面观察者、各宿主的静态状态全部清空；
+     * 2) 原生侧 LemurXResetBrowserState()（net 规则 / 导航否决 / 证书放行 / CDP / scheme）
+     *    + 引擎 Stop()；
+     * 3) Lua 线程清理完毕回 onRuntimeStopped → 重建 Activity。官方外壳从零 inflate，
+     *    总开关开着的话新 Activity 的 finishNativeInitialization 会再走一遍 start()。
+     *
+     * @param restart 仅用于日志/提示；是否重新 start 由新 Activity 按 LemurXScripts.isEnabled 决定
+     */
+    static void shutdown(@Nullable Activity activity, boolean restart) {
+        ThreadUtils.assertOnUiThread();
+        logi("shutdown", restart ? "reload" : "disable");
+        sStarted = false;
+        sPendingRecreate = true;
+        sPendingRecreateActivity = activity != null ? activity : getActivity();
+        runGuarded("back interceptor off", () -> BackPressManager.setLemurXInterceptor(null, null));
+        runGuarded(
+                "page observer off",
+                () -> {
+                    if (sPageObserver != null) {
+                        sPageObserver.destroy();
+                        sPageObserver = null;
+                        sPageObserverActivity = null;
+                    }
+                });
+        runGuarded("chrome host reset", LemurXChromeHost::resetAll);
+        runGuarded("skin host reset", LemurXSkinHost::resetAll);
+        runGuarded("ui host reset", LemurXUiHost::resetAll);
+        runGuarded("widget host reset", LemurXWidgetHost::resetAll);
+        runGuarded("moat host reset", LemurXMoatHost::resetAll);
+        try {
+            LemurXBridgeJni.get().shutdown();
+        } catch (Throwable e) {
+            logi("shutdown native", e.toString());
+            onRuntimeStopped();
+        }
+    }
+
+    /** 原生 LemurXEngine::Stop 完成后回来（UI 线程）。 */
+    @CalledByNative
+    static void onRuntimeStopped() {
+        if (!sPendingRecreate) {
+            return;
+        }
+        sPendingRecreate = false;
+        Activity activity = sPendingRecreateActivity;
+        sPendingRecreateActivity = null;
+        if (activity == null) {
+            activity = getActivity();
+        }
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+            return;
+        }
+        // 重建：外壳回到官方 Chromium；开着总开关的话新 Activity 会重新 start()
+        final Activity target = activity;
+        ThreadUtils.postOnUiThread(
+                () -> {
+                    try {
+                        target.recreate();
+                    } catch (Exception e) {
+                        logi("recreate", e.getMessage());
+                    }
+                });
     }
 
     /**
@@ -133,19 +258,45 @@ public class LemurXBridge {
     public static void attachChrome(ChromeTabbedActivity activity) {
         ThreadUtils.postOnUiThread(
                 () -> {
-                    LemurXChromeHost.attach(activity);
-                    LemurXUiHost.reattach(activity);
-                    LemurXSkinHost.reattach(activity);
-                    LemurXWidgetHost.reattach(activity);
-                    ensurePageObserver(activity);
-                    // 返回键：BackPressManager 每次先问 Lua（未开启拦截时 consumeChromeBack 立即返回 false）
-                    BackPressManager.setLemurXInterceptor(LemurXBridge::consumeChromeBack);
+                    if (activity == null || activity.isDestroyed() || activity.isFinishing()) {
+                        return;
+                    }
+                    // 总开关关着：一个宿主都不挂、一个观察者都不装、返回键拦截器保持为空。
+                    // 菜单里的「Lua 脚本」入口不在这里——decorateAppMenu 自己加。
+                    if (!LemurXScripts.isEnabled()) {
+                        runGuarded(
+                                "back interceptor off",
+                                () -> BackPressManager.setLemurXInterceptor(null, null));
+                        return;
+                    }
+                    // 各宿主互相独立：一个挂接失败不影响其余，也不能抛回 UI 消息循环
+                    runGuarded("chrome host", () -> LemurXChromeHost.attach(activity));
+                    runGuarded("ui host", () -> LemurXUiHost.reattach(activity));
+                    runGuarded("skin host", () -> LemurXSkinHost.reattach(activity));
+                    runGuarded("widget host", () -> LemurXWidgetHost.reattach(activity));
+                    runGuarded("page observer", () -> ensurePageObserver(activity));
+                    // 返回键：BackPressManager 每次先问 Lua（未开启拦截时 consumeChromeBack 立即返回 false）。
+                    // 第二个参数是无副作用的"现在会拦吗"，手势开始时用它决定要不要让 Chrome 起过渡动画。
+                    runGuarded(
+                            "back interceptor",
+                            () -> BackPressManager.setLemurXInterceptor(
+                                    LemurXBridge::consumeChromeBack,
+                                    LemurXChromeHost::isBackInterceptActive));
                     if (sStarted) {
                         eval(
                                 "if lemurx and lemurx.tutorial and lemurx.tutorial.redraw then lemurx.tutorial.redraw() end",
                                 "chrome_ready");
                     }
                 });
+    }
+
+    /** 跑一段挂接代码并吞掉一切异常（只记日志）。 */
+    private static void runGuarded(String what, Runnable r) {
+        try {
+            r.run();
+        } catch (Throwable e) {
+            logi(what, e.toString());
+        }
     }
 
     /** 用 TabModelSelectorTabObserver 覆盖窗口里所有 Tab，发 started / loaded / document 三个事件。 */
@@ -197,6 +348,10 @@ public class LemurXBridge {
     }
 
     public static void openTutorial() {
+        if (!LemurXScripts.isEnabled()) {
+            showToast("Lua 已停用，请先在菜单「Lua 脚本」里开启");
+            return;
+        }
         if (!sStarted) {
             start();
         }
@@ -213,6 +368,9 @@ public class LemurXBridge {
 
     /** BackPressManager 的 LemurX 拦截器；Lua 未开启返回拦截时无副作用、立即返回 false。 */
     public static boolean consumeChromeBack() {
+        if (!sStarted) {
+            return false;
+        }
         return LemurXChromeHost.consumeBack();
     }
 
@@ -290,21 +448,22 @@ public class LemurXBridge {
     }
 
     public static void eval(String chunk, String name) {
-        if (TextUtils.isEmpty(chunk)) {
-            return;
-        }
-        if (!sStarted) {
-            start();
-        }
-        LemurXBridgeJni.get().eval(chunk, name == null ? "" : name, true);
+        eval(chunk, name, true);
     }
 
     public static void eval(String chunk, String name, boolean privileged) {
         if (TextUtils.isEmpty(chunk)) {
             return;
         }
+        // 用户关掉了 Lua：任何 eval 都不能把引擎偷偷拉起来（原生侧 Eval 也会丢弃）
+        if (!LemurXScripts.isEnabled()) {
+            return;
+        }
         if (!sStarted) {
             start();
+            if (!sStarted) {
+                return;
+            }
         }
         LemurXBridgeJni.get().eval(chunk, name == null ? "" : name, privileged);
     }
@@ -329,6 +488,11 @@ public class LemurXBridge {
         if (files != null) {
             Arrays.sort(files);
             for (File file : files) {
+                // 用户在「Lua 脚本」里勾掉的不加载（含内置教程）
+                if (!LemurXScripts.isScriptEnabled(file.getName())) {
+                    logi("skip disabled", file.getName());
+                    continue;
+                }
                 try (FileInputStream in = new FileInputStream(file)) {
                     eval(readStream(in), file.getName(), true);
                 } catch (Exception e) {
@@ -347,6 +511,10 @@ public class LemurXBridge {
         }
         Arrays.sort(ugcFiles);
         for (File file : ugcFiles) {
+            if (!LemurXScripts.isScriptEnabled("ugc/" + file.getName())) {
+                logi("skip disabled", "ugc/" + file.getName());
+                continue;
+            }
             try (FileInputStream in = new FileInputStream(file)) {
                 eval(readStream(in), "ugc/" + file.getName(), false);
             } catch (Exception e) {
@@ -1950,6 +2118,11 @@ public class LemurXBridge {
     @NativeMethods
     interface Natives {
         void start();
+
+        /** 清空脚本写入原生层的全部状态并停引擎；完成后回 onRuntimeStopped()。 */
+        void shutdown();
+
+        boolean isRuntimeEnabled();
 
         void eval(String chunk, String name, boolean privileged);
 

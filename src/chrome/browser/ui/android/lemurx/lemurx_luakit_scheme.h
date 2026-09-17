@@ -39,6 +39,10 @@ void RegisterLemurXLuakitScheme(lua_State* L);
 // 接 string_view：GURL::scheme() 在 154 返回 string_view。
 bool LemurXLuakitIsSchemeRegistered(std::string_view scheme);
 
+// UI 线程。用户关掉 Lua 时调用：让所有等 Lua 回内容的请求失败，并清空注册表，
+// 之后 IsHandledURL / 工厂入口全部走「未注册」分支。
+void LemurXLuakitSchemeResetAll();
+
 // ChromeContentBrowserClient::CreateNonNetworkNavigationURLLoaderFactory 调用：
 // scheme 被 Lua 注册过则返回工厂，否则返回空 remote。
 mojo::PendingRemote<network::mojom::URLLoaderFactory>

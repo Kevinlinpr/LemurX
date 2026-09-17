@@ -93,6 +93,8 @@ public class LemurXChromeHost {
     private static boolean sSkipMenuIntercept;
     private static int sControlsState = BrowserControlsState.BOTH;
     private static int sLuaTutorialViewId;
+    /** 「Lua 脚本」管理入口的菜单 id；不受 Lua 的 menu.hide / menu.on 影响。 */
+    private static int sScriptsViewId;
     private static boolean sBottomToolbarHidden;
 
     private static final List<LuaMenuItem> sLuaMenus = new ArrayList<>();
@@ -196,6 +198,93 @@ public class LemurXChromeHost {
         applyBottomToolbarVis(activity);
     }
 
+    /**
+     * 用户关掉 Lua / 重载脚本时（UI 线程）：清空本类全部由脚本写入、且会在 attach()
+     * 时重放的静态状态，并把当前窗口里能就地还原的项还原。窗口随后会被重建，所以
+     * 这里的重点是"状态归零"——重建出来的官方外壳不能再被旧状态重放一遍。
+     */
+    static void resetAll() {
+        ThreadUtils.assertOnUiThread();
+        ChromeTabbedActivity activity = sActivity;
+        // 返回键
+        sBackIntercept = false;
+        sSkipBackIntercept = false;
+        sSkipMenuIntercept = false;
+        // 三点菜单：Lua 自己的项、隐藏的原生项、拦截的原生项
+        sLuaMenus.clear();
+        sHiddenMenuActions.clear();
+        sInterceptMenuActions.clear();
+        sInterceptRawNames.clear();
+        // 按钮显隐 / 底栏 / 浏览器控件约束
+        for (String name : new ArrayList<>(sButtonVis.keySet())) {
+            sButtonVis.put(name, View.VISIBLE);
+        }
+        if (activity != null && !activity.isDestroyed()) {
+            try {
+                applyButtonVis(activity);
+            } catch (Exception e) {
+                logi("resetAll buttons", e.getMessage());
+            }
+        }
+        sButtonVis.clear();
+        sBottomToolbarHidden = false;
+        if (activity != null && !activity.isDestroyed()) {
+            try {
+                applyBottomToolbarVis(activity);
+            } catch (Exception e) {
+                logi("resetAll bottom", e.getMessage());
+            }
+        }
+        sControlsState = BrowserControlsState.BOTH;
+        if (sControlsDelegate != null) {
+            try {
+                sControlsDelegate.set(BrowserControlsState.BOTH);
+            } catch (Exception e) {
+                logi("resetAll controls", e.getMessage());
+            }
+        }
+        if (activity != null && !activity.isDestroyed()) {
+            try {
+                Tab tab = activity.getActivityTab();
+                if (tab != null) {
+                    TabBrowserControlsConstraintsHelper.update(
+                            tab, BrowserControlsState.BOTH, false);
+                    SwipeRefreshHandler.from(tab).setEnabled(true);
+                }
+                ToolbarManager toolbar = toolbar();
+                if (toolbar != null) {
+                    toolbar.setUrlBarHidden(false);
+                }
+                Window window = activity.getWindow();
+                window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            } catch (Exception e) {
+                logi("resetAll shell", e.getMessage());
+            }
+        }
+        // 观察者：只转发给 Lua，Lua 没了就不留
+        if (sTabObserver != null) {
+            try {
+                sTabObserver.destroy();
+            } catch (Exception e) {
+                // 旧窗口可能已销毁
+            }
+            sTabObserver = null;
+        }
+        if (sOmniboxListenerStub != null && sOmniboxListener != null) {
+            try {
+                sOmniboxListenerStub.removeUrlFocusChangeListener(sOmniboxListener);
+            } catch (Exception e) {
+                // 同上
+            }
+        }
+        sOmniboxListener = null;
+        sOmniboxListenerStub = null;
+        // controls delegate 随 Activity 走；置空让重建后的 attach 重新加
+        sControlsDelegate = null;
+        sControlsAdded = false;
+        sActivity = null;
+    }
+
     // ---------------------------------------------------------------- 三点菜单（app menu）
 
     /**
@@ -211,7 +300,8 @@ public class LemurXChromeHost {
             return;
         }
         try {
-            if (!sHiddenMenuActions.isEmpty()) {
+            // Lua 隐藏原生菜单项：只在引擎跑着时生效
+            if (!sHiddenMenuActions.isEmpty() && LemurXBridge.isStarted()) {
                 removeHiddenMenuItems(modelList);
             }
             boolean pageMenu = menuGroup == AppMenuPropertiesDelegateImpl.MenuGroup.PAGE_MENU;
@@ -228,13 +318,41 @@ public class LemurXChromeHost {
                 theme = new AppMenuItemTheme(context, selector);
             }
             List<ListItem> extra = new ArrayList<>();
-            if (pageMenu && !sHiddenMenuActions.contains(LUA_TUTORIAL_ACTION)) {
+            boolean luaOn = LemurXScripts.isEnabled() && LemurXBridge.isStarted();
+            if (pageMenu
+                    && luaOn
+                    && LemurXScripts.isScriptEnabled(LemurXScripts.TUTORIAL_FILE)
+                    && !sHiddenMenuActions.contains(LUA_TUTORIAL_ACTION)) {
                 if (sLuaTutorialViewId == 0) {
                     sLuaTutorialViewId = View.generateViewId();
                 }
                 extra.add(
                         buildLuaListItem(
                                 context, theme, sLuaTutorialViewId, "Lua 教程", null));
+            }
+            // 「Lua 脚本」管理入口：总开关关着也在，Lua 隐藏不了（不看 sHiddenMenuActions）。
+            // 这是用户对脚本的最终裁决权所在，必须永远够得着。
+            if (pageMenu) {
+                if (sScriptsViewId == 0) {
+                    sScriptsViewId = View.generateViewId();
+                }
+                extra.add(
+                        buildLuaListItem(
+                                context,
+                                theme,
+                                sScriptsViewId,
+                                luaOn ? "Lua 脚本" : "Lua 脚本（已停用）",
+                                null));
+            }
+            if (!luaOn) {
+                // 停用状态下不加 Lua 注册的菜单项（本来也应该已被 resetAll 清空）
+                if (!extra.isEmpty()) {
+                    AppMenuItemUtils.maybeAddDividerLine(modelList, R.id.divider_line_id);
+                    for (ListItem item : extra) {
+                        modelList.add(item);
+                    }
+                }
+                return;
             }
             for (LuaMenuItem lua : sLuaMenus) {
                 boolean wantOverview = "overview".equals(lua.page);
@@ -373,6 +491,15 @@ public class LemurXChromeHost {
             return false;
         }
         try {
+            // 管理入口最先判，且不经过任何 Lua 拦截逻辑
+            if (sScriptsViewId != 0 && id == sScriptsViewId) {
+                LemurXScripts.showManager(activity());
+                return true;
+            }
+            if (!LemurXBridge.isStarted()) {
+                // 停用状态：其余一切交回 Chrome
+                return false;
+            }
             if (sLuaTutorialViewId != 0 && id == sLuaTutorialViewId) {
                 LemurXBridge.openTutorial();
                 return true;

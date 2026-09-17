@@ -1018,6 +1018,12 @@ void LemurXLuakitDispatchWithReply(
     int id,
     const std::string& a,
     base::OnceCallback<void(const std::string&)> reply) {
+  // 引擎已被用户关掉：RunOnLuaThread 会静默丢任务，等回话的一方（Java 侧的
+  // 同步按键 / 控件裁决）必须立刻拿到「空裁决」而不是等到超时。
+  if (!LemurXEngine::Get()->enabled()) {
+    std::move(reply).Run(std::string());
+    return;
+  }
   LemurXEngine::Get()->RunOnLuaThread(base::BindOnce(
       &DispatchWithReplyOnLuaThread, kind, id, a, std::move(reply)));
 }

@@ -34,6 +34,8 @@ std::string LemurXCdpSendHost(const std::string& host_id,
 std::string LemurXCdpTargets();
 bool LemurXCdpAttach(int tab_id);
 void LemurXCdpDetach(int tab_id);
+// UI 线程。断开全部 DevTools 会话（按 tab 和按 host id 附着的都算）。
+void LemurXCdpDetachAll();
 std::string LemurXCdpVersion();
 bool LemurXCdpInspect(int tab_id, int x, int y);
 

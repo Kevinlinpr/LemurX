@@ -111,16 +111,37 @@ void LemurXEngine::Start() {
         {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
          base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   }
+  enabled_.store(true, std::memory_order_release);
   lua_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&LemurXEngine::StartOnLuaThread,
                                 base::Unretained(this)));
 }
 
+void LemurXEngine::Stop(base::OnceClosure on_stopped) {
+  // 先关闸再清理：闸一关，后续 Eval/RunOnLuaThread 全部丢弃，
+  // 已排队的任务在 Lua 线程上顺序跑完后才会执行 StopOnLuaThread。
+  enabled_.store(false, std::memory_order_release);
+  if (!lua_task_runner_) {
+    if (on_stopped) {
+      std::move(on_stopped).Run();
+    }
+    return;
+  }
+  lua_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&LemurXEngine::StopOnLuaThread, base::Unretained(this),
+                     base::SequencedTaskRunner::HasCurrentDefault()
+                         ? base::SequencedTaskRunner::GetCurrentDefault()
+                         : nullptr,
+                     std::move(on_stopped)));
+}
+
 void LemurXEngine::Eval(const std::string& chunk,
                           const std::string& name,
                           bool privileged) {
-  if (!lua_task_runner_) {
-    Start();
+  // 未 Start()（用户关掉了 Lua）就丢弃：绝不能因为一次 eval 把引擎偷偷拉起来。
+  if (!enabled() || !lua_task_runner_) {
+    return;
   }
   lua_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&LemurXEngine::EvalOnLuaThread,
@@ -129,16 +150,16 @@ void LemurXEngine::Eval(const std::string& chunk,
 }
 
 void LemurXEngine::RunOnLuaThread(base::OnceClosure task) {
-  if (!lua_task_runner_) {
-    Start();
+  if (!enabled() || !lua_task_runner_) {
+    return;
   }
   lua_task_runner_->PostTask(FROM_HERE, std::move(task));
 }
 
 void LemurXEngine::PostDelayedOnLuaThread(base::OnceClosure task,
                                             base::TimeDelta delay) {
-  if (!lua_task_runner_) {
-    Start();
+  if (!enabled() || !lua_task_runner_) {
+    return;
   }
   lua_task_runner_->PostDelayedTask(FROM_HERE, std::move(task), delay);
 }
@@ -239,9 +260,34 @@ void LemurXEngine::RunChunk(lua_State* L,
   }
 }
 
+void LemurXEngine::StopOnLuaThread(
+    scoped_refptr<base::SequencedTaskRunner> reply_runner,
+    base::OnceClosure on_stopped) {
+  // 回调表里存着各状态的 registry ref，必须先于 lua_close 清掉
+  // （清表不 unref：状态马上整个关掉）。
+  LemurXResetLuaGlobals();
+  CloseAllStates();
+  current_ = nullptr;
+  privileged_ = true;
+  init_chunk_.clear();
+  LOG(INFO) << "LemurX: runtime stopped";
+  if (!on_stopped) {
+    return;
+  }
+  if (reply_runner) {
+    reply_runner->PostTask(FROM_HERE, std::move(on_stopped));
+  } else {
+    std::move(on_stopped).Run();
+  }
+}
+
 void LemurXEngine::EvalOnLuaThread(const std::string& chunk,
                                      const std::string& name,
                                      bool privileged) {
+  // Stop() 之后残留在队列里的 eval：不能借机把状态重新建起来
+  if (!enabled()) {
+    return;
+  }
   StartOnLuaThread();
   if (!L_) {
     LOG(ERROR) << "LemurX: lua state is null";

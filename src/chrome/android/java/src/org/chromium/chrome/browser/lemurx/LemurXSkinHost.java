@@ -864,6 +864,68 @@ public class LemurXSkinHost {
         }
     }
 
+    /**
+     * 用户关掉 Lua / 重载脚本时（UI 线程）：主题（含持久化的那份）、挂载树、样式、
+     * 摘下的 View、移动记录、原生 View 监听全部清零并就地还原能还原的部分。
+     * 窗口随后会重建，所以关键是 reattach() 再也没有东西可重放。
+     */
+    static void resetAll() {
+        ThreadUtils.assertOnUiThread();
+        loadTheme();
+        Activity activity = sActivity.get();
+        boolean alive = activity != null && !activity.isDestroyed();
+        // 1) 主题：清持久化，并把颜色/按钮/地址栏/底栏还原
+        JSONObject old = sTheme;
+        sTheme = new JSONObject();
+        sThemeLoaded = true;
+        try {
+            prefs().edit().remove(KEY_THEME).apply();
+        } catch (Exception e) {
+            Log.i(TAG, "resetAll theme pref: %s", e.getMessage());
+        }
+        if (alive && old.length() > 0) {
+            try {
+                restoreTheme(activity, old);
+            } catch (Exception e) {
+                Log.i(TAG, "resetAll restoreTheme: %s", e.getMessage());
+            }
+        }
+        // 2) 原生 View 上装的监听
+        for (String key : new ArrayList<>(sListeners.keySet())) {
+            try {
+                uninstallListeners(key);
+            } catch (Exception e) {
+                Log.i(TAG, "resetAll listener %s: %s", key, e.getMessage());
+            }
+        }
+        sListeners.clear();
+        sListenerViews.clear();
+        // 3) 挂载树 / replace / insert：卸掉并把被换下的原生 View 放回
+        for (Mount m : new ArrayList<>(sMounts.values())) {
+            try {
+                unmountView(m);
+            } catch (Exception e) {
+                Log.i(TAG, "resetAll unmount %s: %s", m.slot, e.getMessage());
+            }
+        }
+        sMounts.clear();
+        // 4) 摘下的原生 View 放回
+        if (alive) {
+            try {
+                restoreDetached(activity, null);
+            } catch (Exception e) {
+                Log.i(TAG, "resetAll restore: %s", e.getMessage());
+            }
+        }
+        sDetached.clear();
+        // 5) style / move 没记录原值，就地无法精确还原；清掉记录，靠窗口重建回到官方外壳
+        sStyles.clear();
+        sMoves.clear();
+        sBottomBarCaptured = false;
+        sBottomBarOriginalBg = null;
+        sActivity = new WeakReference<>(null);
+    }
+
     /** Activity attach（含重建）时把皮肤、挂载树、样式手术全部重放。 */
     static void reattach(Activity activity) {
         if (activity == null || activity.isDestroyed()) {

@@ -44,4 +44,8 @@ bool LemurXLuakitIsCertificateAllowed(std::string_view host);
 // 该 WebContents 被 Lua 包成 webview 时返回 tab id，否则 -1。UI 线程。
 int LemurXLuakitTabIdForWebContents(content::WebContents* web_contents);
 
+// UI 线程。用户关掉 Lua 时调用：放行所有等 Lua 回话的导航、摘掉全部 webview
+// 附着（不再挂导航节流器）、清空证书放行表。之后本文件对 Chromium 零干预。
+void LemurXLuakitWebviewResetAll();
+
 #endif  // CHROME_BROWSER_UI_ANDROID_LEMURX_LEMURX_LUAKIT_WEBVIEW_H_
