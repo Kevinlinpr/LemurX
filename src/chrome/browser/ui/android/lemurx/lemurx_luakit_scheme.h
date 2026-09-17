@@ -7,6 +7,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/frame_tree_node_id.h"
@@ -35,7 +36,8 @@ class Origin;
 void RegisterLemurXLuakitScheme(lua_State* L);
 
 // ChromeContentBrowserClient::IsHandledURL 调用。
-bool LemurXLuakitIsSchemeRegistered(const std::string& scheme);
+// 接 string_view：GURL::scheme() 在 154 返回 string_view。
+bool LemurXLuakitIsSchemeRegistered(std::string_view scheme);
 
 // ChromeContentBrowserClient::CreateNonNetworkNavigationURLLoaderFactory 调用：
 // scheme 被 Lua 注册过则返回工厂，否则返回空 remote。

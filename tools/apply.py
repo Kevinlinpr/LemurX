@@ -35,6 +35,14 @@ def overlay_files():
             yield full, os.path.relpath(full, OVERLAY)
 
 
+def overlay_dirs():
+    """All directories under src/, shallowest first."""
+    for base, dirs, _files in os.walk(OVERLAY):
+        for d in dirs:
+            full = os.path.join(base, d)
+            yield full, os.path.relpath(full, OVERLAY)
+
+
 def patch_files():
     return sorted(
         os.path.join(PATCHES, p) for p in os.listdir(PATCHES)
@@ -42,29 +50,80 @@ def patch_files():
     )
 
 
+def _link_one(src, dst, copy):
+    if copy:
+        if os.path.isdir(src):
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
+    else:
+        os.symlink(src, dst)
+
+
 def link(copy: bool):
-    n = 0
-    for src, rel in overlay_files():
+    """Link the overlay into the checkout.
+
+    Directories that do not exist upstream (chrome/lemurx/, chrome/browser/lemurx/,
+    third_party/lua/, ...) are linked as a whole. Files that land inside an
+    existing upstream directory (chrome/common/lemurx_web.mojom, ...) are linked
+    one by one. Whole-directory links matter for android_assets: Chromium's zip
+    helper preserves symlinks *as symlinks*, so a per-file link would end up in
+    the APK as 70 bytes of link text instead of the Lua source.
+    """
+    unlink(quiet=True)  # drop stale links from an earlier layout
+    n_dirs = n_files = 0
+
+    def visit(rel):
+        nonlocal n_dirs, n_files
+        src = os.path.join(OVERLAY, rel)
         dst = os.path.join(CHROMIUM, rel)
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.isdir(src):
+            if not os.path.lexists(dst):
+                _link_one(src, dst, copy)
+                n_dirs += 1
+                return
+            if os.path.islink(dst):
+                sys.exit(f"unexpected link left behind: {rel}")
+            if not os.path.isdir(dst):
+                sys.exit(f"refusing to overwrite upstream file with a directory: {rel}")
+            for child in sorted(os.listdir(src)):
+                visit(os.path.join(rel, child))
+            return
         if os.path.lexists(dst):
             if os.path.islink(dst) or copy:
                 os.remove(dst)
             else:
                 sys.exit(f"refusing to overwrite upstream file: {rel} (should be a patch, not an overlay file)")
-        if copy:
-            shutil.copy2(src, dst)
-        else:
-            os.symlink(src, dst)
-        n += 1
-    print(f"overlay: {n} files {'copied' if copy else 'linked'}")
+        _link_one(src, dst, copy)
+        n_files += 1
+
+    for child in sorted(os.listdir(OVERLAY)):
+        visit(child)
+    verb = "copied" if copy else "linked"
+    print(f"overlay: {n_dirs} directories + {n_files} files {verb}")
 
 
-def unlink():
+def unlink(quiet: bool = False):
     n = 0
-    for _src, rel in overlay_files():
+    # whole-directory links first (shallowest first, so children are not visited)
+    skipped = []
+    for _src, rel in overlay_dirs():
+        if any(rel.startswith(s + os.sep) for s in skipped):
+            continue
         dst = os.path.join(CHROMIUM, rel)
-        if os.path.lexists(dst):
+        if os.path.islink(dst):
+            os.remove(dst)
+            skipped.append(rel)
+            n += 1
+    for _src, rel in overlay_files():
+        if any(rel.startswith(s + os.sep) for s in skipped):
+            continue
+        dst = os.path.join(CHROMIUM, rel)
+        if os.path.islink(dst):
+            os.remove(dst)
+            n += 1
+        elif os.path.isfile(dst) and not quiet:
+            # --copy layout: only remove if identical to the overlay copy
             os.remove(dst)
             n += 1
     # prune empty dirs we created
@@ -76,7 +135,8 @@ def unlink():
             except OSError:
                 break
             d = os.path.dirname(d)
-    print(f"overlay: {n} files removed")
+    if not quiet:
+        print(f"overlay: {n} entries removed")
 
 
 def git_apply(args):

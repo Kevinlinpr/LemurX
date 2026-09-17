@@ -293,7 +293,7 @@ class SchemeURLLoaderFactory : public network::SelfDeletingURLLoaderFactory {
       const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
       override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-    if (!LemurXLuakitIsSchemeRegistered(std::string(request.url.scheme()))) {
+    if (!LemurXLuakitIsSchemeRegistered(request.url.scheme())) {
       mojo::Remote<network::mojom::URLLoaderClient> c(std::move(client));
       c->OnComplete(network::URLLoaderCompletionStatus(net::ERR_UNKNOWN_URL_SCHEME));
       return;
@@ -397,9 +397,9 @@ void SetFn(lua_State* L, const char* name, lua_CFunction fn) {
 
 }  // namespace
 
-bool LemurXLuakitIsSchemeRegistered(const std::string& scheme) {
+bool LemurXLuakitIsSchemeRegistered(std::string_view scheme) {
   base::AutoLock lock(GetRegistry().lock);
-  return GetRegistry().schemes.count(scheme) > 0;
+  return GetRegistry().schemes.count(std::string(scheme)) > 0;
 }
 
 mojo::PendingRemote<network::mojom::URLLoaderFactory>

@@ -792,8 +792,8 @@ void LemurXLuakitMaybeAddNavigationThrottle(
   registry.AddThrottle(std::make_unique<Throttle>(registry, it->second));
 }
 
-bool LemurXLuakitIsCertificateAllowed(const std::string& host) {
-  return AllowedCerts().count(host) > 0;
+bool LemurXLuakitIsCertificateAllowed(std::string_view host) {
+  return AllowedCerts().count(std::string(host)) > 0;
 }
 
 int LemurXLuakitTabIdForWebContents(content::WebContents* web_contents) {

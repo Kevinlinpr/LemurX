@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 struct lua_State;
 
@@ -37,7 +38,8 @@ void LemurXLuakitMaybeAddNavigationThrottle(
 
 // ChromeContentBrowserClient::AllowCertificateError 调用：
 // luakit.allow_certificate(host, cert) 放行过的主机返回 true。
-bool LemurXLuakitIsCertificateAllowed(const std::string& host);
+// 接 string_view：GURL::host() 在 154 返回 string_view。
+bool LemurXLuakitIsCertificateAllowed(std::string_view host);
 
 // 该 WebContents 被 Lua 包成 webview 时返回 tab id，否则 -1。UI 线程。
 int LemurXLuakitTabIdForWebContents(content::WebContents* web_contents);
