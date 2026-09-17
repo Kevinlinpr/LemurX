@@ -1,31 +1,74 @@
 diff --git a/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java b/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java
-index 79cabb0027..dfc0ccc680 100644
+index 79cabb0027..1d94d8dcfa 100644
 --- a/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java
 +++ b/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java
-@@ -91,6 +91,14 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
+@@ -91,6 +91,34 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
          sMetricsMap = map;
      }
  
 +    // LemurX: consulted first on every back press; returns true when consumed.
 +    private static java.util.function.@Nullable BooleanSupplier sLemurXInterceptor;
 +
++    // LemurX: side-effect free "would the interceptor consume right now?". Checked when a
++    // predictive back gesture *starts* so that no built-in handler gets to begin its
++    // transition (TabOnBackGestureHandler slides the page) for a gesture Lua is going to
++    // swallow at commit time; otherwise the page is left shifted with no cancel/commit and
++    // the next gesture fails to navigate.
++    private static java.util.function.@Nullable BooleanSupplier sLemurXInterceptActive;
++
 +    public static void setLemurXInterceptor(
 +            java.util.function.@Nullable BooleanSupplier interceptor) {
++        setLemurXInterceptor(interceptor, null);
++    }
++
++    public static void setLemurXInterceptor(
++            java.util.function.@Nullable BooleanSupplier interceptor,
++            java.util.function.@Nullable BooleanSupplier isActive) {
 +        sLemurXInterceptor = interceptor;
++        sLemurXInterceptActive = isActive;
++    }
++
++    private static boolean isLemurXInterceptActive() {
++        return sLemurXInterceptor != null
++                && sLemurXInterceptActive != null
++                && sLemurXInterceptActive.getAsBoolean();
 +    }
 +
      public @Nullable Boolean processEscapeKeyEvent() {
          boolean failed = false;
          for (BackPressHandler handler : mHandlers) {
-@@ -138,6 +146,11 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
+@@ -138,6 +166,19 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
          @Override
          public void handleOnBackPressed() {
              mLastCalledHandlerType = -1;
 +            // LemurX: Lua may claim the back press before any built-in handler
 +            // (luakit "back" binds, custom overlays, ...).
 +            if (sLemurXInterceptor != null && sLemurXInterceptor.getAsBoolean()) {
++                // A handler may already have started a predictive-back transition for
++                // this gesture (interception toggled on mid-gesture, or pre-API 34 paths).
++                // It must be told the gesture ended, or the page stays half swiped.
++                if (mActiveHandler != null) {
++                    mActiveHandler.handleOnBackCancelled();
++                }
++                mActiveHandler = null;
++                mLastBackEvent = null;
 +                return;
 +            }
              if (mActiveHandler != null) {
                  Boolean enabled = mActiveHandler.getHandleBackPressChangedSupplier().get();
                  if (enabled != null && enabled) {
+@@ -187,6 +228,14 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
+         // Following methods are only triggered on API 34+.
+         @Override
+         public void handleOnBackStarted(BackEventCompat backEvent) {
++            // LemurX: Lua will swallow this back; don't let any built-in handler start a
++            // transition it would never get to commit or cancel. Progress/cancel are no-ops
++            // with mActiveHandler == null, and the press goes to the interceptor.
++            if (isLemurXInterceptActive()) {
++                mActiveHandler = null;
++                mLastBackEvent = backEvent;
++                return;
++            }
+             mActiveHandler = getEnabledBackPressHandler();
+             assert mActiveHandler != null;
+             mActiveHandler.handleOnBackStarted(backEvent);

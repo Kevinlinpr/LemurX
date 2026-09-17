@@ -833,6 +833,8 @@ lemurx.chrome.on("omnibox", function(ev)
     log("omnibox", ev and ev.focus, ev and ev.text)
 end)
 
+-- 只登记回调：脚本加载时不接管返回键，Chrome 的预测返回手势照旧。
+-- 只有场景 5 显式 interceptBack(true) 之后这里才会被调到；两次返回后交还。
 lemurx.input.onBack(function(ev)
     if not state.back_armed then
         lemurx.chrome.back()

@@ -162,10 +162,13 @@ lemurx.chrome.on("omnibox", function(ev) end)  -- {focus=true|false, text}
 lemurx.chrome.on("back", function(ev) end)     -- {id, url, title}
 lemurx.chrome.on("menu", function(ev) end)     -- {id, title, lua}
 
--- 返回键接管
+-- 返回键接管：onBack 只登记回调，不改浏览器行为；
+-- 只有显式 interceptBack(true) 之后返回键才归 Lua（想放行就 lemurx.chrome.back()）。
+-- 不拦截时 Chrome 的预测返回手势、动画一切照旧。
 lemurx.input.onBack(function(ev)
-    -- 注册后返回键归 Lua，想放行就 lemurx.chrome.back()
+    lemurx.chrome.back()
 end)
+lemurx.input.interceptBack(true)   -- 开始接管
 lemurx.input.interceptBack(false)  -- 交还系统
 
 -- 定时器（毫秒，最小 10）
@@ -608,6 +611,10 @@ lemurx.input.onBack(function()
     armed = true
     lemurx.toast("再按一次返回")
     lemurx.timer.after(2000, function() armed = false end)
+end)
+-- 只在需要保护的页面上开（比如表单页 loaded 时），别在脚本加载时就全局开
+lemurx.tabs.on("loaded", function(ev)
+    if ev.url:find("/checkout") then lemurx.input.interceptBack(true) end
 end)
 ```
 

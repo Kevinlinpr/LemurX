@@ -1169,11 +1169,21 @@ public class LemurXChromeHost {
     }
 
     /**
+     * 无副作用地回答"此刻 Lua 会不会吞掉返回"。BackPressManager 在预测返回手势 *开始* 时
+     * 就问这个：Lua 要拦的话，Chrome 自带的 handler（TabOnBackGestureHandler 会把页面
+     * 跟手滑出去）根本不启动，否则提交时被 Lua 吞掉，那个过渡动画既没提交也没取消，
+     * 页面就卡在左边漏一条的位置，下一次手势也回不去。
+     */
+    static boolean isBackInterceptActive() {
+        return sBackIntercept && !sSkipBackIntercept;
+    }
+
+    /**
      * BackPressManager 每次返回键先问这里（UI 线程）。
      * Lua 没开启拦截时必须极快、无副作用。
      */
     static boolean consumeBack() {
-        if (sSkipBackIntercept || !sBackIntercept) {
+        if (!isBackInterceptActive()) {
             return false;
         }
         JSONObject ev = new JSONObject();

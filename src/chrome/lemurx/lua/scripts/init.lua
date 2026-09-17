@@ -89,8 +89,8 @@
 -- lemurx.menu.hide("history"[, true])   -- 隐藏内置底栏项
 -- lemurx.menu.on("history", function(ev) end)  -- 截获内置项，不再走默认逻辑
 -- lemurx.menu.invoke("history")          -- 强制执行内置逻辑
--- lemurx.input.onBack(function(ev) end)  -- 注册后返回键归 Lua，自行 chrome.back() 放行
--- lemurx.input.interceptBack(true|false)
+-- lemurx.input.onBack(function(ev) end)  -- 只登记回调，不改行为
+-- lemurx.input.interceptBack(true|false) -- 显式开启后返回键才归 Lua，自行 chrome.back() 放行
 -- lemurx.net.addRule({
 --   match = "*://*.doubleclick.net/*",  -- 或 host 片段 / <all_urls>
 --   action = "block"|"redirect"|"modify",
@@ -772,7 +772,7 @@ lemurx.catalog = {
         apis = {
             "tap(x,y[,tabId[,unit]]) swipe(x1,y1,x2,y2[,ms[,tabId]])",
             "type(text[,tabId]) key('enter'|'back'|'tab'|'space'|'esc'|'delete'[,tabId])",
-            "onBack(fn) interceptBack(true)",
+            "onBack(fn) 只登记；interceptBack(true|false) 才开/关接管",
         },
     },
     {

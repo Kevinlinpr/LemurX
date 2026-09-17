@@ -1542,10 +1542,7 @@ int LuaChromeOn(lua_State* L) {
   luaL_checktype(L, 2, LUA_TFUNCTION);
   LuaCb cb = MakeCb(L, luaL_ref(L, LUA_REGISTRYINDEX));
   g_tab_events[name].push_back(cb);
-  if (strcmp(name, "back") == 0) {
-    JNIEnv* env = base::android::AttachCurrentThread();
-    Java_LemurXBridge_chromeSetBackIntercept(env, true);
-  }
+  // chrome.on("back") 同 input.onBack：只登记，不开拦截（见 LuaInputOnBack 注释）。
   return 0;
 }
 
@@ -1634,12 +1631,14 @@ int LuaMenuList(lua_State* L) {
   return PushJson(L, JavaString(env, Java_LemurXBridge_chromeMenuList(env)));
 }
 
+// 只登记回调，不改浏览器行为。以前这里顺手 chromeSetBackIntercept(true)，结果教程
+// 脚本一加载（它在文件末尾 onBack 登记了防手滑逻辑）返回键就归了 Lua：Chrome 的
+// 预测返回动画被压掉、每次返回都要绕一圈 chrome.back()——用户两次反馈的"左缘手势
+// 回不去 / 漏一条"根源就在这。拦截必须是脚本显式 interceptBack(true) 的决定。
 int LuaInputOnBack(lua_State* L) {
   luaL_checktype(L, 1, LUA_TFUNCTION);
   LuaCb cb = MakeCb(L, luaL_ref(L, LUA_REGISTRYINDEX));
   g_tab_events["back"].push_back(cb);
-  JNIEnv* env = base::android::AttachCurrentThread();
-  Java_LemurXBridge_chromeSetBackIntercept(env, true);
   return 0;
 }
 
