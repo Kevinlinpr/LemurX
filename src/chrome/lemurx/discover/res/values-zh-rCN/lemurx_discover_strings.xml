@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 The LemurX Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file. -->
+<resources>
+    <string name="lemurx_discover_loading">加载中…</string>
+    <string name="lemurx_discover_load_more">加载更多</string>
+    <string name="lemurx_discover_no_more">没有更多了</string>
+    <string name="lemurx_discover_empty">暂无新闻，点按刷新</string>
+    <string name="lemurx_discover_failed_retry">新闻加载失败，点按重试</string>
+    <string name="lemurx_discover_load_more_failed">加载更多失败，点按重试</string>
+</resources>

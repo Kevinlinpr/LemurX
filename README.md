@@ -77,6 +77,7 @@ src/               overlay — files that do not exist upstream, mirrored at the
   chrome/lemurx/lua/                   init.lua, tutorial, examples, docs
   chrome/lemurx/luakit/                luakit-compatible runtime: kernel/, lib/, lousy/, config/
   chrome/lemurx/brand/                 Android branding: launcher icons, app_name, logo drawables
+  chrome/lemurx/discover/              strings for the NTP Discover news stream
   chrome/app/theme/lemurx/             BRANDING + product logos (branding_path_component)
   components/resources/*/lemurx/       chrome://version logo
   components/vector_icons/lemurx/      product.icon (QR code centre, etc.)
@@ -115,6 +116,33 @@ resource file:
 
 Regenerate all assets from the master logo with
 `python3 tools/brand/gen_brand_assets.py` (needs Pillow), then `tools/apply.py`.
+
+### Discover (new tab page news)
+
+Chromium's Discover feed renders through the proprietary xsurface library,
+which is only a stub in public builds, so upstream can never show anything but
+"can't refresh". LemurX keeps the whole upstream surface — the "Discover"
+header, its on/off switch, the `ARTICLES_LIST_VISIBLE` pref — and swaps only the
+content stream: `FeedSurfaceCoordinator.createFeedStream()` returns
+`LemurXDiscoverStream` (`src/chrome/android/java/.../lemurx/`) instead of
+`FeedStream`.
+
+- Data: the Lemur news service, `GET {base}/lemur/news/meta` (country / language
+  / category targets) and `GET {base}/lemur/news/headlines?country&lang&category&page&pageSize`
+  (50 per page, auto-loads the next page near the bottom).
+- Look: the Lemur Discover card — title (16sp, max 3 lines) beside a 98×76dp
+  12dp-rounded thumbnail, "source · time" in 10sp below, 16dp between cards.
+  Views are plain Android widgets fed to Chromium's `FeedListContentManager`
+  as `NativeViewContent`, so the NTP scroll, header and thumbnail capture all
+  behave as upstream.
+- Base URL: `--lemurx-discover-url=…` > `lemurx_settings` key
+  `discover.base_url` > built-in default (currently the debug service
+  `http://192.168.1.111:18888/`; the production host is `RELEASE_BASE_URL` in
+  the same file). `discover.enabled=false` in `lemurx_settings` restores the
+  upstream `FeedStream`.
+- Independent of Lua: the stream does not go through the Lua runtime, so it is
+  unaffected by the master switch; scripts that want to own the home page do so
+  with `lemurx.skin` / `lemurx.ui` as before.
 
 ## Build
 

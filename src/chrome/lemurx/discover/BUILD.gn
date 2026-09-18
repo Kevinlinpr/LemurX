@@ -1,0 +1,20 @@
+# Copyright 2026 The LemurX Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/android/rules.gni")
+
+assert(is_android)
+
+# Strings for the LemurX Discover (news) stream that replaces the upstream
+# xsurface-backed feed on the new tab page. The Java lives in
+# chrome/android/java/src/org/chromium/chrome/browser/lemurx/LemurXDiscoverStream.java
+# and is compiled into chrome_java; these resources are wired in from
+# chrome/android/BUILD.gn (chrome_app_java_resources deps) so they show up in
+# org.chromium.chrome.R.
+android_resources("discover_resources") {
+  sources = [
+    "res/values-zh-rCN/lemurx_discover_strings.xml",
+    "res/values/lemurx_discover_strings.xml",
+  ]
+}
