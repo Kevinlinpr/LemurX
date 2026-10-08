@@ -1,41 +1,98 @@
-# LemurX
+<p align="center">
+  <img src="docs/images/logo.png" alt="LemurX" width="120">
+</p>
 
-**Official Chromium + embedded Lua. No extension system.**
+<h1 align="center">LemurX</h1>
 
-LemurX is an Android browser built directly on the official Chromium stable
-channel. It removes the WebExtensions API entirely and replaces it with a single,
-much deeper extension surface: **Lua 5.4 embedded in the browser process, in
-every renderer process, and in the native Android shell.**
+<p align="center">
+  <strong>The browser that runs your code.</strong><br>
+  Official Chromium · Android · Lua 5.4 · no extension system
+</p>
 
-The bet is simple. Browser extensions are a sandboxed guest; they see what the
-host chooses to show them. A script in LemurX *is* the host. It can veto a
-navigation before it commits, rewrite every subresource request synchronously
-inside the renderer, hold real main-world DOM handles, register its own URL
-schemes, drive the full DevTools Protocol without a cable, and replace the
-native shell with a widget tree it draws itself.
+<p align="center">
+  <a href="LICENSE">BSD-3-Clause</a>
+  ·
+  <a href="src/chrome/lemurx/lua/docs/LUA_GUIDE.md">Lua guide</a>
+  ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+  ·
+  <a href="SECURITY.md">Security</a>
+</p>
 
-## What a script can do
+LemurX is an Android browser built on the official Chromium stable channel,
+with Lua 5.4 living *inside* the browser process, in every renderer, and in
+the native shell. There is no WebExtensions API. Drop a `.lua` file in
+`files/lua/`, restart, and the browser is yours.
 
-The full reference lives in `src/chrome/lemurx/lua/docs/LUA_GUIDE.md`.
+An extension is a guest. It sees what the host chooses to show it. A script
+here *is* the host: it can veto a navigation before it commits, rewrite every
+subresource request synchronously inside the renderer, hold real main-world
+DOM handles, register its own URL schemes, drive the full DevTools Protocol
+without a cable, and replace the native shell with a widget tree it draws
+itself.
+
+<p align="center">
+  <img src="docs/images/custom.jpg" alt="The toolbar, the page, and the shell are all scriptable" width="720">
+</p>
+
+## Extensions ask permission. Scripts just do it.
+
+A Chrome extension lives in a sandbox on the far side of an API designed to
+keep it out. A LemurX script runs in the browser process, next to Chromium's
+own code.
+
+| Can you… | Chrome extension | LemurX script |
+|---|---|---|
+| Rewrite response bodies on the fly | Headers and redirects only | `net.addRule{ replaceBody = … }` |
+| Put a button on the real toolbar | Popups and side panels | `ui.render("toolbar.end", …)` |
+| Dump, restyle, or tear out any native View | — | `ui.dump()` · `ui.style()` · `ui.replace()` |
+| Full DevTools Protocol on a phone | Desktop, one domain at a time | `cdp.send(tab, "Any.method", …)` |
+| Fetch anything, no CORS, no host permissions | Declare every host up front | `http.fetch(url)` |
+| Read and write Chromium prefs, site permissions, feature flags | — | `prefs.set` · `perm.set` · `features.enabled` |
+| Run Lua inside every renderer, on real DOM handles | — | `page` · `dom_document` · `send-request` |
+| Drive other apps, not just the page | — | `system.tree` · `system.tap` · `agent.run` |
+| Share a script with strangers | Store review | Sandboxed UGC domain, its own `lua_State` |
+
+## Every layer, scriptable
+
+The full reference is [`src/chrome/lemurx/lua/docs/LUA_GUIDE.md`](src/chrome/lemurx/lua/docs/LUA_GUIDE.md).
+`lemurx.help()` prints the same catalog from the REPL.
 
 * **`lemurx.*`** — tabs, network rules, HTTP, files, storage, shell, declarative
   native UI, native view surgery, input, cookies, history, prefs, the whole
-  Chrome DevTools Protocol.
-* **luakit compatibility layer** — the complete C-level Lua API of
-  [luakit](https://luakit.github.io/) reimplemented on Chromium: `widget{}` trees
-  mapped to Android views, `webview` bound to a Tab, `luakit.register_scheme`,
-  `sqlite3`, `regex`, `soup`, `stylesheet`, `timer`, `download`, `ipc_channel`.
-  The standard module set (`window`, `webview`, `modes`, `binds`, `lousy.*`,
-  `follow`, `adblock`, `formfiller`, `session`, the `luakit://` chrome pages, …)
-  is re-implemented clean-room, so an `rc.lua` written for luakit runs on a phone.
-* **Lua in the renderer** — one `lua_State` per renderer process with `page`,
-  `dom_document`, `dom_element` on real V8 handles, a synchronous `send-request`
-  hook on every subresource, `luakit.register_function` to expose Lua to page JS.
+  Chrome DevTools Protocol. Local scripts get the full standard library:
+  `io`, `os`, `debug`, `require`.
+* **luakit, on a phone** — the C-level Lua API of
+  [luakit](https://luakit.github.io/) reimplemented on Chromium: `widget{}`
+  trees mapped to Android views, `webview` bound to a tab,
+  `luakit.register_scheme`, `sqlite3`, `regex`, `soup`, `stylesheet`, `timer`,
+  `download`, `ipc_channel`. The standard module set (`window`, `webview`,
+  `modes`, `binds`, `lousy.*`, `follow`, `adblock`, `formfiller`, `session`,
+  the `luakit://` pages) is a clean-room rewrite, so an `rc.lua` written for
+  luakit runs here.
+* **Lua in the renderer** — one `lua_State` per renderer with `page`,
+  `dom_document`, `dom_element` on real V8 handles, a synchronous
+  `send-request` hook on every subresource, and `luakit.register_function` to
+  expose Lua to page JavaScript.
+* **Two trust domains.** Scripts on your device run with full power. Scripts
+  from other people (`files/lua/ugc/`) get their own `lua_State`, a reduced
+  standard library, and no privileged APIs (`cookie`, `history`, `cdp`,
+  `prefs`, `system`, luakit natives). Text-only `load`, no bytecode. The
+  boundary is enforced at runtime, per state.
 
-Two trust domains: scripts you put on your own device run with full power;
-scripts you install from others (`files/lua/ugc/`) run in their own `lua_State`
-with a reduced standard library and no privileged APIs. The boundary is enforced
-at runtime, per state, not by source inspection.
+```lua
+-- files/lua/10_clean.lua — block a tracker, then strip leftovers in every frame.
+lemurx.net.addRule({
+  match  = "*://*.doubleclick.net/*",
+  action = "block",
+})
+
+lemurx.tabs.on("loaded", function(ev)
+  lemurx.tabs.inject(ev.id, [[
+    document.querySelectorAll('.ad, [id^="ad-"]').forEach(function (e) { e.remove(); })
+  ]], { world = "isolated", frames = "all" })
+end)
+```
 
 ## Official scripts: the popular Chrome extensions, rewritten in Lua
 
