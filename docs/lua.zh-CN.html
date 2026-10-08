@@ -1,0 +1,1389 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-doc-lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LemurX Lua 参考手册 — 全部模块、类与信号</title>
+  <meta name="description" content="用 Lua 5.4 魔改LemurX浏览器的完整参考：浏览器进程里的 lemurx.* API、luakit 兼容层（widget / webview / 自定义 scheme / sqlite3 …）、渲染进程内嵌 Lua 的 page / DOM API。签名、返回值形状、信号、权限规则、示例。">
+  <meta property="og:title" content="LemurX Lua 参考手册">
+  <meta property="og:description" content="lemurx.* · luakit 兼容 · 渲染进程内嵌 Lua。每个模块、每个类、每个信号，全部写下来。">
+  <meta property="og:image" content="assets/logo-512.png">
+  <meta name="theme-color" content="#070b14">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/logo-32.png">
+  <link rel="apple-touch-icon" href="assets/logo-180.png">
+  <link rel="alternate" hreflang="en" href="lua.html">
+  <link rel="alternate" hreflang="zh-CN" href="lua.zh-CN.html">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/docs.css">
+</head>
+<body>
+  <a class="skip" href="#main" data-i18n="page.a1">跳到正文</a>
+
+  <header class="nav" id="nav">
+    <div class="wrap nav__inner">
+      <a class="brand" href="index.html" aria-label="LemurX 首页">
+        <img class="brand__logo" src="assets/logo-180.png" width="36" height="36" alt="">
+        <span class="brand__name">LemurX</span>
+        <span class="brand__tag">lua docs</span>
+      </a>
+      <nav class="nav__links" id="navLinks" aria-label="主导航">
+        <a href="index.html#why" data-i18n="navLinks.a1">Why</a>
+        <a href="index.html#features" data-i18n="navLinks.a2">Features</a>
+        <a href="index.html#code" data-i18n="navLinks.a3">Code</a>
+        <a href="index.html#architecture" data-i18n="navLinks.a4">Architecture</a>
+        <a href="index.html#extensions" data-i18n="navLinks.a5">Extensions</a>
+        <a href="index.html#community" data-i18n="navLinks.a6">Community</a>
+        <a href="index.html#story" data-i18n="navLinks.a7">Story</a>
+        <a href="lua.zh-CN.html" data-i18n="navLinks.a8">Docs</a>
+        <a class="btn btn--small btn--primary" href="index.html#download" data-i18n="navLinks.a9">Download</a>
+      </nav>
+      <label class="lang" title="语言">
+        <span class="lang__icon" aria-hidden="true">🌐</span>
+        <select id="langSelect" aria-label="语言" data-i18n-aria="ui.language"></select>
+      </label>
+      <button class="nav__toggle" id="navToggle" aria-expanded="false" aria-controls="navLinks" aria-label="菜单">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="wrap docs-hero">
+      <p class="eyebrow"><span class="dot"></span> 参考手册 · Lua 5.4 · Chromium · Android</p>
+      <h1>LemurX <span class="grad">Lua 参考手册</span></h1>
+      <p class="lede">
+        脚本能碰到的一切，一页写完。三层能力，一种语言：浏览器进程里的 <code>lemurx.*</code> API；一层与
+        <a href="https://luakit.github.io/docs/" target="_blank" rel="noopener">luakit</a> 完全兼容的接口
+        （<code>widget</code>、<code>webview</code>、<code>luakit.register_scheme</code>、<code>sqlite3</code> …），让 luakit 的
+        <code>rc.lua</code> 和整套 <code>lib/</code> 原样跑在手机上；以及<em>每个渲染进程里</em>一个 Lua 状态，直接拿真 DOM，
+        同步截获每一个请求。
+      </p>
+      <div class="docs-hero__meta">
+        <span>files/lua/*.lua</span><span>Lua 5.4.7</span><span>浏览器进程 · 渲染进程</span>
+        <span>本地特权 · UGC 沙箱</span><span>兼容 rc.lua</span>
+        <a class="docs-hero__lang" href="lua.html?lang=en" hreflang="en" lang="en">English →</a>
+      </div>
+    </div>
+
+    <div class="wrap docs">
+      <!-- ============================================================ 侧栏 -->
+      <aside class="side" aria-label="目录">
+        <details open>
+          <summary>目录</summary>
+          <input class="side__search" id="docSearch" type="search" placeholder="搜索接口（按 / 聚焦）" aria-label="搜索接口">
+          <div class="side__count" id="docSearchCount"></div>
+
+          <h4>页面</h4>
+          <ul>
+            <li><a href="#overview">概览</a></li>
+            <li><a href="#quickstart">五分钟上手</a></li>
+            <li><a href="#conventions">约定与信任域</a></li>
+            <li><a href="#events">事件</a></li>
+            <li><a href="#luakit-compat">luakit 兼容</a></li>
+            <li><a href="#renderer">渲染进程里的 Lua</a></li>
+            <li><a href="#examples">案例脚本</a></li>
+            <li><a href="#recipes">食谱</a></li>
+            <li><a href="#pitfalls">坑与限制</a></li>
+            <li><a href="#ugc-rules">UGC 发布规范</a></li>
+          </ul>
+
+          <h4>模块 · lemurx.*</h4>
+          <ul>
+            <li><a href="#m-core"><code>lemurx</code> 基础</a></li>
+            <li><a href="#m-async"><code>lemurx.async</code> / <code>await</code></a></li>
+            <li><a href="#m-bridge"><code>lemurx.expose</code> / <code>import</code></a></li>
+            <li><a href="#m-tabs"><code>lemurx.tabs</code></a></li>
+            <li><a href="#m-net"><code>lemurx.net</code></a></li>
+            <li><a href="#m-http"><code>lemurx.http</code></a></li>
+            <li><a href="#m-fs"><code>lemurx.fs</code></a></li>
+            <li><a href="#m-storage"><code>storage</code> · <code>clipboard</code> · <code>db</code> · <code>timer</code></a></li>
+            <li><a href="#m-chrome"><code>lemurx.chrome</code></a></li>
+            <li><a href="#m-menu"><code>lemurx.menu</code></a></li>
+            <li><a href="#m-theme"><code>lemurx.theme</code></a></li>
+            <li><a href="#m-ui-render"><code>lemurx.ui.render</code> · <code>h</code></a></li>
+            <li><a href="#m-ui-surgery"><code>lemurx.ui.style</code> · 原生手术</a></li>
+            <li><a href="#m-ui-legacy"><code>lemurx.ui</code> 自动化</a></li>
+            <li><a href="#m-input"><code>lemurx.input</code></a></li>
+            <li><a href="#m-intent"><code>lemurx.intent</code></a></li>
+            <li><a href="#m-priv">特权区：<code>cookie</code> … <code>features</code></a></li>
+            <li><a href="#m-cdp"><code>lemurx.cdp</code></a></li>
+            <li><a href="#m-cdp-helpers"><code>v8</code> · <code>dom</code> · <code>emulation</code> …</a></li>
+            <li><a href="#m-agent"><code>lemurx.agent</code> · <code>system</code></a></li>
+            <li><a href="#m-ugc"><code>lemurx.ugc</code> · <code>catalog</code> · <code>help</code></a></li>
+          </ul>
+
+          <h4>模块 · luakit</h4>
+          <ul>
+            <li><a href="#lk-luakit"><code>luakit</code></a></li>
+            <li><a href="#lk-soup"><code>soup</code></a></li>
+            <li><a href="#lk-sqlite3"><code>sqlite3</code></a></li>
+            <li><a href="#lk-stylesheet"><code>stylesheet</code></a></li>
+            <li><a href="#lk-timer"><code>timer</code></a></li>
+            <li><a href="#lk-regex"><code>regex</code></a></li>
+            <li><a href="#lk-utf8"><code>utf8</code></a></li>
+            <li><a href="#lk-xdg"><code>xdg</code></a></li>
+            <li><a href="#lk-msg"><code>msg</code></a></li>
+            <li><a href="#lk-unique"><code>unique</code></a></li>
+            <li><a href="#lk-lfs"><code>lfs</code></a></li>
+            <li><a href="#lk-ipc"><code>ipc_channel</code> · <code>require_web_module</code></a></li>
+            <li><a href="#lk-scheme">自定义 scheme · <code>request</code></a></li>
+          </ul>
+
+          <h4>类 · luakit</h4>
+          <ul>
+            <li><a href="#c-object">对象协议与信号</a></li>
+            <li><a href="#c-widget"><code>widget</code></a></li>
+            <li><a href="#c-webview"><code>widget:webview</code></a></li>
+            <li><a href="#c-window"><code>widget:window</code></a></li>
+            <li><a href="#c-box"><code>widget:box</code></a></li>
+            <li><a href="#c-notebook"><code>widget:notebook</code></a></li>
+            <li><a href="#c-label"><code>widget:label</code></a></li>
+            <li><a href="#c-entry"><code>widget:entry</code></a></li>
+            <li><a href="#c-eventbox"><code>widget:eventbox</code></a></li>
+            <li><a href="#c-overlay"><code>widget:overlay</code> · <code>stack</code></a></li>
+            <li><a href="#c-paned"><code>widget:paned</code></a></li>
+            <li><a href="#c-scrolled"><code>widget:scrolled</code></a></li>
+            <li><a href="#c-image"><code>widget:image</code></a></li>
+            <li><a href="#c-spinner"><code>widget:spinner</code></a></li>
+            <li><a href="#c-drawing_area"><code>widget:drawing_area</code></a></li>
+            <li><a href="#c-download"><code>download</code></a></li>
+          </ul>
+
+          <h4>类 · 渲染进程</h4>
+          <ul>
+            <li><a href="#r-luakit"><code>luakit</code>（web 侧）</a></li>
+            <li><a href="#r-page"><code>page</code></a></li>
+            <li><a href="#r-dom_document"><code>dom_document</code></a></li>
+            <li><a href="#r-dom_element"><code>dom_element</code></a></li>
+            <li><a href="#r-ipc"><code>ipc_channel</code>（web 侧）</a></li>
+          </ul>
+        </details>
+      </aside>
+
+      <!-- ============================================================ 正文 -->
+      <article class="article">
+
+        <!-- ------------------------------------------------ 概览 -->
+        <section id="overview">
+          <p class="kicker">页面</p>
+          <h2>概览</h2>
+          <p>
+            LemurX是 Android 上的 Chromium，浏览器进程里内嵌了一个 Lua 5.4 解释器，跑在自己的一条顺序线程上。脚本就是应用私有目录下的
+            <code>.lua</code> 文件：没有 manifest，没有权限弹窗，脚本和浏览器之间也没有一层"扩展 API"隔着——标签、网络栈、原生 Android
+            界面、DevTools 协议、Chromium 自己的服务，全部通过同一张表 <code>lemurx</code> 来调。
+          </p>
+          <p>三层能力，互相可以组合：</p>
+          <div class="layers">
+            <div class="layer layer--a"><b>lemurx.*</b><span>LemurX原生 API。标签、网络规则、HTTP、文件、存储、浏览器外壳、声明式原生 UI、原生 View 手术、输入、Intent、cookie、历史、prefs、Chrome DevTools 协议。<span class="badge badge--browser">浏览器进程</span></span></div>
+            <div class="layer layer--b"><b>luakit 层</b><span><a href="https://luakit.github.io/docs/" target="_blank" rel="noopener">luakit</a> 全部 C 级 Lua 接口在 Chromium 上的重新实现：<code>widget{}</code> 树映射到 Android View，<code>webview</code> 绑定到 Tab，<code>luakit.register_scheme</code>、<code>sqlite3</code>、<code>regex</code>、<code>soup</code>、<code>stylesheet</code>、<code>timer</code>、<code>download</code>、<code>ipc_channel</code>。luakit 的 <code>lib/</code>、<code>lousy/</code>、<code>rc.lua</code> 原样打包、原样运行。<span class="badge badge--luakit">luakit</span></span></div>
+            <div class="layer layer--c"><b>渲染进程</b><span>每个渲染进程一个 Lua 状态（luakit 的 <em>web extension</em> 模型）：基于主世界 V8 句柄的 <code>page</code>、<code>dom_document</code>、<code>dom_element</code>；每个子资源请求上的同步 <code>send-request</code> 钩子；<code>luakit.register_function</code> 把 Lua 函数暴露给网页 JS；<code>ipc_channel</code> 回到浏览器进程。<span class="badge badge--renderer">渲染进程</span></span></div>
+          </div>
+          <p>本页徽标的含义：</p>
+          <p>
+            <span class="badge badge--browser">browser</span> 在浏览器进程运行 ·
+            <span class="badge badge--renderer">renderer</span> 在渲染进程运行 ·
+            <span class="badge badge--luakit">luakit</span> luakit 兼容接口 ·
+            <span class="badge badge--ugc">UGC ok</span> 沙箱化的分享脚本也能用 ·
+            <span class="badge badge--priv">仅本地</span> UGC 脚本调用会抛 Lua error ·
+            <span class="badge badge--signal">signal</span> 用 <code>add_signal</code> 订阅的事件。
+          </p>
+          <div class="note">
+            <b>该用哪一层？</b> 先用 <code>lemurx.*</code>——它最小、最贴合 Android。需要 luakit 的对象模型（信号、<code>property::</code> 通知）、
+            控件树、自定义 URL scheme，或者在移植 luakit 模块时，用 luakit 层。需要在页面内部<em>同步</em>做决定时——逐请求改写、首帧前 DOM
+            手术、把原生函数暴露给网页脚本——用渲染进程层。
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------ 上手 -->
+        <section id="quickstart">
+          <p class="kicker">页面</p>
+          <h2>五分钟上手</h2>
+          <h3>脚本放哪</h3>
+          <div class="tbl-scroll">
+          <table class="tbl">
+            <tr><th>路径</th><th>信任域</th><th>加载时机</th></tr>
+            <tr><td><code>/data/data/&lt;包名&gt;/files/lua/*.lua</code></td><td><span class="badge badge--priv">本地 · 全部能力</span></td><td>启动时，按文件名排序</td></tr>
+            <tr><td><code>/data/data/&lt;包名&gt;/files/lua/ugc/*.lua</code></td><td><span class="badge badge--ugc">UGC · 沙箱</span></td><td>本地脚本之后，每个文件一个 <code>lua_State</code></td></tr>
+            <tr><td><code>files/luakit/</code>（<code>lib/</code> <code>config/</code> <code>data/</code>）</td><td><span class="badge badge--luakit">luakit 安装目录</span></td><td>从 APK 种子化；<code>config/</code> 归你，永不覆盖</td></tr>
+            <tr><td>apk 内 <code>assets/lua/init.lua</code></td><td>运行时自带</td><td>最先。定义 <code>lemurx.*</code> 便捷函数，随后加载 luakit 内核</td></tr>
+          </table>
+          </div>
+          <p>建议命名 <code>10_xxx.lua</code>、<code>20_xxx.lua</code>——数字决定加载顺序。首次启动会把二十个场景的 <code>00_tutorial.lua</code> 复制到你的目录里。</p>
+
+          <h3>第一个脚本</h3>
+          <div class="code">
+            <div class="code__bar"><b>files/lua/10_hello.lua</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">lemurx.tabs.on("loaded", function(ev)
+    lemurx.toast("加载完成：" .. tostring(ev.title))
+end)
+
+lemurx.ui.render("toolbar.end", lemurx.ui.h("icon", {
+    id = "hello", text = "λ", desc = "打个招呼",
+    onClick = function() lemurx.help() end,
+}))</code></pre>
+          </div>
+
+          <h3>推送脚本</h3>
+          <div class="code">
+            <div class="code__bar"><b>shell</b><button class="copy" type="button">复制</button></div>
+<pre><code>adb push 10_hello.lua /sdcard/
+adb shell run-as &lt;包名&gt; cp /sdcard/10_hello.lua files/lua/10_hello.lua
+# 重启LemurX生效</code></pre>
+          </div>
+
+          <h3>调试</h3>
+          <ul>
+            <li><code>lemurx.log(...)</code> / <code>print(...)</code> 写 logcat，tag <code>LemurX</code>。luakit 的 <code>msg.*</code> 也落在同一处。</li>
+            <li><code>lemurx.help()</code> 打印模块清单；<code>lemurx.help("tabs")</code> 只打一个模块。</li>
+            <li>回调里的错误会被捕获并带 traceback 打日志——一个脚本挂不掉另一个，Lua 也永远不会让页面崩掉。</li>
+            <li><code>lemurx.ui.dump()</code> / <code>lemurx.ui.shell()</code> 打印带 id 的原生 View 树，供 <code>ui.style</code> 和手术查询用。</li>
+          </ul>
+        </section>
+
+        <!-- ------------------------------------------------ 约定 -->
+        <section id="conventions">
+          <p class="kicker">页面</p>
+          <h2>约定与信任域</h2>
+
+          <h3>线程模型</h3>
+          <p>所有脚本跑在浏览器进程里<b>一条顺序 Lua 线程</b>上。绝大多数 <code>lemurx.*</code> 调用是同步的：需要 UI 线程的操作会投递过去并等待。
+            回调（事件、点击、定时器、HTTP 结果）都在 Lua 线程送达，不存在并发问题。UI 线程从不阻塞等 Lua：Lua 忙时需要返回值的 Java 回调会被直接拒绝而不是等待。
+            唯一的例外是 luakit 控件的 <code>key-press</code> 裁决——UI 线程会等这个结果，等待期间协作式地执行 Lua 排队的控件操作。</p>
+          <ul>
+            <li>不要忙等（<code>while os.time() &lt; t</code>），用 <code>lemurx.timer.after / every</code>。</li>
+            <li>同步 <code>lemurx.http.fetch</code> 最多阻塞 Lua 线程 20 秒（UGC）/ 120 秒（本地）——所有脚本的回调都排在它后面。用回调形式或 <a href="#m-async"><code>lemurx.async</code></a>。</li>
+            <li><code>tabs.eval</code>、<code>cdp.send</code>、<code>ui.*</code> 同步但很快（等的是 UI 或渲染进程，几十毫秒）。</li>
+          </ul>
+
+          <h3>返回值</h3>
+          <ul>
+            <li>查询类返回 table：<code>{ok=true, ...}</code> 或 <code>{ok=false, error="原因"}</code>。</li>
+            <li>动作类返回 boolean。</li>
+            <li>"找不到"返回 <code>nil</code>，不抛异常。</li>
+            <li>参数类型错误、UGC 调特权接口会<b>抛错</b>。拿不准就 <code>pcall</code>。</li>
+          </ul>
+
+          <h3>本地 vs UGC</h3>
+          <p>你自己设备上的脚本不设限。限制只落在"别人写的、你装进来的"脚本（<b>UGC</b>，<code>files/lua/ugc/</code>）上。</p>
+          <div class="tbl-scroll">
+          <table class="tbl tbl--wrap">
+            <tr><th></th><th>本地 <code>files/lua/*.lua</code></th><th>UGC <code>files/lua/ugc/*.lua</code></th></tr>
+            <tr><td>Lua 状态</td><td>所有本地脚本共享一个主 <code>lua_State</code></td><td><b>每个文件一个独立 <code>lua_State</code></b></td></tr>
+            <tr><td>标准库</td><td>全开：<code>io os debug package require dofile loadfile load</code>（含字节码）</td><td><code>base table string math utf8 coroutine</code>；<code>load</code> 只收文本；无 <code>dofile/loadfile/require</code></td></tr>
+            <tr><td><code>lemurx.*</code></td><td>全部</td><td>除 <span class="badge badge--priv">仅本地</span> 条目外全部</td></tr>
+            <tr><td>luakit 层</td><td>有（内核跑在主状态里）</td><td>无</td></tr>
+            <tr><td><code>require</code></td><td><code>files/lua/?.lua</code> <code>files/lua/?/init.lua</code> <code>files/lua/lib/?.lua</code> + luakit <code>config/</code> <code>lib/</code></td><td>—</td></tr>
+            <tr><td><code>lemurx.isPrivileged()</code></td><td><code>true</code></td><td><code>false</code></td></tr>
+            <tr><td><code>lemurx.scriptName()</code></td><td><code>""</code></td><td><code>"ugc/xxx.lua"</code></td></tr>
+            <tr><td><code>fs</code> 监狱</td><td><code>files/lua</code></td><td><code>files/lua/ugc</code></td></tr>
+            <tr><td><code>http.fetch</code> 限制</td><td>8 MB · 120 s · 任意 scheme</td><td>2 MB · 20 s · 仅 http(s)</td></tr>
+          </table>
+          </div>
+          <p>UGC 脚本禁用：<code>lemurx.cookie history downloads perm cdp v8 dom ax blink prefs data page network emulation overlay css</code>、
+            <code>net.addRule</code> 的 <code>requestBody/replaceRequestBody</code>、任意 <code>intent</code> action、以及整个 luakit 层。
+            特权是<em>运行时按状态</em>判的，不看源码——UGC 里动态拼出来的代码仍是 UGC。</p>
+          <div class="note">
+            <b>为什么要独立状态？</b> 共享状态下，一个 UGC 文件只要覆盖 <code>lemurx.tabs.eval</code>，等你的回调下次调到它，就在你的特权下跑了它的代码（confused deputy）。
+            独立状态让这一类攻击整体消失，本地脚本因此不需要做任何防御。<b>为什么 <code>load</code> 只收文本？</b> Lua VM 不校验字节码，精心构造的字节码等于在浏览器进程里任意读写内存。
+          </div>
+          <p>本地脚本用 <a href="#m-bridge"><code>lemurx.expose</code></a> 显式把能力交给 UGC；UGC 用 <code>lemurx.import</code> 取。值按 JSON 过界，函数永远过不去。</p>
+        </section>
+
+        <!-- ------------------------------------------------ 事件 -->
+        <section id="events">
+          <p class="kicker">页面</p>
+          <h2>事件</h2>
+          <p>两套事件风格并存。<code>lemurx.*</code> 用 <code>module.on(name, fn)</code>；luakit 层用对象协议 <code>obj:add_signal(name, fn)</code>（见 <a href="#c-object">对象协议</a>）。两者都在 Lua 线程送达。</p>
+          <div class="code">
+            <div class="code__bar"><b>lemurx.* 事件</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">-- 标签生命周期。ev = {id, url, title, incognito, loading, canGoBack, canGoForward, muted, event, eventUrl}
+lemurx.tabs.on("started" | "document" | "loaded" | "created" | "closed" | "selected", function(ev) end)
+--  started  = 开始导航        document = DOM 可用（注入的最佳时机）
+--  loaded   = 加载完成        created / closed / selected = 标签栏变化
+
+-- 外壳事件
+lemurx.chrome.on("omnibox", function(ev) end)   -- {focus=true|false, text}
+lemurx.chrome.on("back",    function(ev) end)   -- {id, url, title}
+lemurx.chrome.on("menu",    function(ev) end)   -- {id, title, lua}
+
+-- 返回键。注册后返回键归你；想放行就调 lemurx.chrome.back()
+lemurx.input.onBack(function(ev) end)
+lemurx.input.interceptBack(false)               -- 交还系统
+
+-- DevTools 事件（仅本地）
+lemurx.cdp.on("Network.responseReceived" | "*", function(ev) end)  -- {method, tab, params}
+
+-- 定时器（毫秒，最小 10）
+local id = lemurx.timer.every(60000, function() end)
+lemurx.timer.after(2000, function() end)
+lemurx.timer.cancel(id)</code></pre>
+          </div>
+          <div class="code">
+            <div class="code__bar"><b>luakit 风格信号</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">local webview = require("webview")
+webview.add_signal("init", function(view)                 -- 每个 webview，含原生开的标签
+    view:add_signal("navigation-request", function(v, uri, reason)
+        if uri:find("ads%.example") then return false end -- 否决：这次导航根本不会发生
+    end)
+    view:add_signal("property::title", function(v) msg.info("标题变为 %s", v.title) end)
+end)</code></pre>
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------ luakit 兼容 -->
+        <section id="luakit-compat">
+          <p class="kicker">页面</p>
+          <h2>luakit 兼容</h2>
+          <p><a href="https://luakit.github.io/" target="_blank" rel="noopener">luakit</a> 是整个界面都用 Lua 写的 WebKitGTK 浏览器。LemurX把 luakit 暴露给 Lua 的每一个 C 级接口——全局表、对象协议、全部控件类型、webview、自定义 scheme、web extension（渲染进程）侧——在 Chromium 和 Android 上重新实现了一遍。
+            luakit 自己的纯 Lua 层（<code>lib/</code>、<code>lib/lousy/</code>、<code>config/rc.lua</code>、<code>config/theme.lua</code>）逐字节打包，正常 <code>require</code>。
+            也就是说 <code>require("webview")</code>、<code>require("window")</code>、<code>chrome.add(...)</code>、<code>modes</code>、<code>binds</code>、<code>adblock</code>、<code>follow</code>、<code>formfiller</code>、<code>userscripts</code>…全都能用。</p>
+
+          <h3>开启 luakit 外壳</h3>
+          <p>内核总是加载（所以 <code>widget{}</code>、<code>sqlite3{}</code>、<code>luakit.register_scheme</code> 对你的脚本随时可用）。<code>rc.lua</code> 是否运行——它会把整个外壳交给 luakit 的 <code>window.lua</code>：notebook、标签条、状态栏、vi 式模式——由一个开关决定：</p>
+          <div class="code">
+            <div class="code__bar"><b>切换 rc.lua</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">lemurx.storage.set("luakit_rc", "1")        -- 启动时运行 config/rc.lua（luakit 外壳）
+lemurx.storage.set("luakit_autowrap", "1")  -- 把每个原生 Tab 包成 luakit webview（默认开）
+-- 像在桌面一样编辑 files/luakit/config/rc.lua 和 theme.lua</code></pre>
+          </div>
+
+          <h3>目录</h3>
+          <div class="tbl-scroll">
+          <table class="tbl">
+            <tr><th>luakit</th><th>LemurX</th></tr>
+            <tr><td><code>luakit.install_path</code> / <code>install_paths.install_dir</code></td><td><code>files/luakit</code>（<code>lib/</code> 在里面）</td></tr>
+            <tr><td><code>luakit.config_dir</code> / <code>xdg.config_dir</code></td><td><code>files/luakit/config</code> —— 归你；web 模块优先在这里解析</td></tr>
+            <tr><td><code>luakit.data_dir</code></td><td><code>files/luakit/data</code> —— sqlite 文件、会话</td></tr>
+            <tr><td><code>luakit.cache_dir</code></td><td><code>cache/luakit</code></td></tr>
+            <tr><td><code>xdg.download_dir</code>、<code>pictures_dir</code> …</td><td><code>Environment.getExternalStoragePublicDirectory(...)</code></td></tr>
+          </table>
+          </div>
+
+          <h3>刻意的差异</h3>
+          <ul>
+            <li><b>像素按 dp，字号按 sp。</b> Pango 字体串（<code>"monospace bold 12"</code>）和 label 里的 Pango markup 会被翻译。</li>
+            <li><b>webview 就是 Tab。</b> <code>widget{type="webview"}</code> 创建一个真实的 Chromium Tab；把它放进 <code>notebook</code>/<code>box</code>，Tab 内容就挪进该控件的矩形。<code>notebook:switch()</code> 会选中原生 Tab，反之亦然。</li>
+            <li><b>navigation-request 是 NavigationThrottle。</b> 返回 <code>false</code> 在提交前取消：不闪白、不进历史。</li>
+            <li><b>自定义 scheme</b> 同时服务导航<em>和子资源</em>；没人 <code>finish</code> 的请求 30 秒后超时而非永久挂起；完全没有处理器的 scheme 立刻返回 404。</li>
+            <li><b><code>regex</code> 是 RE2</b>，不是 PCRE：没有反向引用和后行断言。</li>
+            <li><b><code>luakit.spawn</code></b> 真的起进程（<code>/system/bin/sh</code> 可用）；<code>unique.is_running()</code> 永远 <code>false</code>（一个包一个进程）。</li>
+            <li><b>web 模块摸不到文件系统</b>（Chromium 渲染进程沙箱）：渲染进程里的 <code>lfs</code> 是行为一致的空实现。</li>
+            <li>Lua 是 <b>5.4</b>；兼容层为 luakit 5.1 时代的 <code>lib/</code> 补了 <code>unpack</code>、<code>loadstring</code>、<code>setfenv/getfenv</code>、<code>table.getn/maxn</code>、<code>math.pow</code>、<code>string.gfind</code>、<code>package.loaders</code>。</li>
+          </ul>
+          <div class="note">
+            <b>许可。</b> luakit 的 <code>lib/</code> 和 <code>lousy/</code> 是 GPLv3，作为独立 Lua 文件连同许可证一起分发。LemurX的内核（<code>kernel/*.lua</code>、C++ 与 Java 宿主）是依据 luakit 文档独立实现的，不派生于 luakit 的 C 源码。
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------ 渲染进程 -->
+        <section id="renderer">
+          <p class="kicker">页面</p>
+          <h2>渲染进程里的 Lua</h2>
+          <p>每个渲染进程都有自己的 Lua 状态，相当于 luakit 的 <em>web extension</em>。由浏览器侧 <code>require_web_module("name")</code> 加载；模块源码先在 <code>files/luakit/config/</code>、再在 <code>files/luakit/lib/</code> 解析，经 Mojo 下发。
+            模块里能看到 <code>luakit</code>、<code>page</code>、<code>dom_document</code>、<code>dom_element</code>、<code>ipc_channel</code>、<code>msg</code>、<code>soup</code> 和安全的标准库。</p>
+          <p>它和 content script 的区别：</p>
+          <ul>
+            <li><b>真 DOM 句柄，主世界。</b> <code>dom_element</code> 包着一个 V8 节点句柄。同一节点永远是同一个 Lua 对象（可做表键、可用 <code>==</code> 比较）。读写都是同步的。</li>
+            <li><b>不是 script 标签。</b> 页面 CSP 管不到；页面也看不见、干扰不了 Lua 状态。</li>
+            <li><b>同步请求钩子。</b> <code>page</code> 的 <code>send-request</code> 信号在每个子资源离开进程前触发——返回字符串重定向、<code>false</code> 拦截、就地改 <code>headers</code> 表。底层是 <code>URLLoaderThrottle</code>。</li>
+            <li><b>把原生函数挂到 <code>window</code>。</b> <code>luakit.register_function(uri_pattern, name, fn)</code> 让 <code>window[name](...)</code> 返回一个由 Lua resolve 的 Promise。</li>
+            <li><b>双向 IPC。</b> <code>ipc_channel</code> 双向发信号，可以定向到某个页面，也可以广播到所有渲染进程。</li>
+          </ul>
+          <div class="code">
+            <div class="code__bar"><b>files/luakit/config/probe_wm.lua（渲染进程侧）</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">local ui = ipc_channel("probe_wm")
+
+luakit.add_signal("page-created", function(page)
+    page:add_signal("send-request", function(p, uri, headers)
+        if uri:find("doubleclick%.net") then return false end        -- 拦截
+        headers["DNT"] = "1"                                            -- 改请求头
+        if uri:sub(1, 7) == "http://" then return "https://" .. uri:sub(8) end  -- 重定向
+    end)
+    page:add_signal("document-loaded", function(p)
+        for _, a in ipairs(p.document.body:query("a[target=_blank]")) do a.attr.target = "_self" end
+        ui:emit_signal("links_fixed", p.id, #p.document.body:query("a"))
+    end)
+end)
+
+luakit.register_function("^https?://", "lemurPing", function(page, resolve, reject, msg)
+    resolve("pong: " .. tostring(msg))    -- 网页 JS：await lemurPing("hi")
+end)</code></pre>
+          </div>
+          <div class="code">
+            <div class="code__bar"><b>files/lua/20_probe.lua（浏览器侧）</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">local wm = require_web_module("probe_wm")
+wm:add_signal("links_fixed", function(_, page_id, n)
+    lemurx.toast(("标签 %d：%d 个链接"):format(page_id, n))
+end)
+wm:emit_signal("rules", { block = {} })              -- 广播到所有渲染进程
+wm:emit_signal(view, "rules", { block = {} })        -- 或只发给承载这个 webview 的渲染进程</code></pre>
+          </div>
+          <p>完整的渲染进程 API 见 <a href="#r-luakit">类 · 渲染进程</a>。</p>
+        </section>
+
+        <!-- ------------------------------------------------ 案例 -->
+        <section id="examples">
+          <p class="kicker">页面</p>
+          <h2>案例脚本</h2>
+          <p>七个完整的单文件脚本，每个都做了扩展做不到的事。它们在仓库的 <code>chrome/lemur/lua/examples/</code> 下；随便丢一个进 <code>files/lua/</code> 即可。</p>
+          <div class="ex-grid">
+            <div class="ex"><b>10_shell_remix.lua</b><p>把LemurX改成只读新闻 App：持久皮肤、网页上方一条原生站点切换条、真正的主页按钮换成"回顶部"、返回键改道、自定义底栏菜单。</p><small>lemurx.theme · ui.render · ui.replace · input.onBack · menu</small></div>
+            <div class="ex"><b>20_renderer_dom_lua.lua</b><p>渲染进程里的 Lua 遍历主世界 DOM，统计追踪器、把 <code>_blank</code> 链接改成本页打开、注入一条提示栏，并暴露 <code>window.lemurHistory()</code>，通过 IPC 查浏览器历史库。</p><small>page · dom_element · register_function · ipc_channel</small></div>
+            <div class="ex"><b>30_request_surgeon.lua</b><p>每个子资源请求同步经过 Lua：拦追踪器、去 <code>utm_*</code>/<code>fbclid</code>、http→https 升级、加 DNT、裁 Referer。规则从浏览器侧热更新，不用刷新页面。</p><small>send-request · ipc_channel · ui.render</small></div>
+            <div class="ex"><b>40_custom_scheme.lua</b><p><code>lua://dash</code> 是现场生成的页面：实时标签列表、截图、历史搜索；<code>lua://tabs</code> 是 JSON 接口；<code>lua://file/…</code> 发本地文件。网页 JS 用 <code>await luaDash(...)</code> 调回 Lua。</p><small>register_scheme · scheme-request · request:finish · register_function</small></div>
+            <div class="ex"><b>50_native_widget_shell.lua</b><p>用 luakit <code>widget{}</code> 搭的 vim 风外壳：横向标签条、装着真实 Tab 的 notebook、状态栏、命令行（<code>:o :t :d :n :p :zi :q</code>）。一个 window 盖住原生工具栏。</p><small>widget:window · notebook · box · entry · label · eventbox · key-press</small></div>
+            <div class="ex"><b>60_navigation_gatekeeper.lua</b><p>提交前否决导航：拆中间跳转页、AMP 跳回原站、夜间短视频站的冷静页、拦跨站弹窗；全部记入 sqlite，在 <code>lua://gate</code> 查看。</p><small>navigation-request · new-window-decision · load_string · sqlite3</small></div>
+            <div class="ex"><b>70_cdp_lab.lua</b><p>手机上的 DevTools：每站记忆 3G 弱网、假 GPS、时区、桌面 UA、CPU 降速；从 <code>Network.*</code> 事件实时统计请求；一键生成带指标和截图的 HTML"体检"报告。</p><small>cdp.attach · cdp.send · cdp.on · tabs.screenshot · fs.write</small></div>
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------ 食谱 -->
+        <section id="recipes">
+          <p class="kicker">页面</p>
+          <h2>食谱</h2>
+          <h3>站点自动换肤</h3>
+          <div class="code"><div class="code__bar"><b>skin.lua</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">local skins = { ["bilibili.com"] = "sakura", ["github.com"] = "midnight", ["zhihu.com"] = "paper" }
+lemurx.tabs.on("selected", function(ev)
+    for host, name in pairs(skins) do
+        if ev.url and ev.url:find(host, 1, true) then return lemurx.theme.apply(name) end
+    end
+    lemurx.theme.apply("forest")
+end)</code></pre></div>
+
+          <h3>每站记忆：桌面版 / 缩放 / 静音</h3>
+          <div class="code"><div class="code__bar"><b>memory.lua</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">local function host_of(url) return (url or ""):match("^%a+://([^/]+)") or "" end
+lemurx.tabs.on("document", function(ev)
+    local cfg = lemurx.storage.get("site:" .. host_of(ev.url))
+    if not cfg then return end
+    if cfg:find("desktop") then lemurx.tabs.setDesktop(ev.id, true) end
+    if cfg:find("zoom150") then lemurx.tabs.setZoom(ev.id, 150) end
+    if cfg:find("mute")    then lemurx.tabs.mute(ev.id, true) end
+end)
+-- 记录：lemurx.storage.set("site:example.com", "desktop,zoom150")</code></pre></div>
+
+          <h3>阅读模式开关</h3>
+          <div class="code"><div class="code__bar"><b>reader.lua</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">local reading = false
+local function set_reading(on)
+    reading = on
+    lemurx.chrome.controls(on and "hidden" or "both")
+    lemurx.chrome.setPullRefresh(not on)
+    local t = lemurx.tabs.current()
+    if t then
+        lemurx.tabs.inject(t.id, on and [[
+            (function(){var s=document.createElement('style');s.id='lemur-read';
+            s.textContent='header,nav,aside,[class*=banner],[class*=fixed]{display:none!important}';
+            document.head.appendChild(s)})()
+        ]] or "document.getElementById('lemur-read')?.remove()")
+    end
+end
+lemurx.ui.render("page.float", lemurx.ui.h("button", { id = "rd", text = "阅读", onClick = function() set_reading(not reading) end }))</code></pre></div>
+
+          <h3>防手滑返回</h3>
+          <div class="code"><div class="code__bar"><b>back.lua</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">local armed = false
+lemurx.input.onBack(function()
+    if armed then armed = false; lemurx.input.interceptBack(false); lemurx.chrome.back(); return end
+    armed = true
+    lemurx.toast("再按一次返回")
+    lemurx.timer.after(2000, function() armed = false end)
+end)</code></pre></div>
+
+          <h3>跨域抓数据做浮窗</h3>
+          <div class="code"><div class="code__bar"><b>fx.lua</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">local h = lemurx.ui.h
+lemurx.timer.every(60000, function()
+    lemurx.http.fetch("https://api.exchangerate.host/latest?base=USD&symbols=CNY", nil, function(r)
+        if not r.ok then return end
+        local rate = r.body:match('"CNY":([%d%.]+)')
+        lemurx.ui.render("page.float", h("text", { id = "fx", text = "USD/CNY " .. rate,
+            background = "#CC000000", color = "#FFFFFFFF", padding = {10, 6}, radius = 12, y = 120 }))
+    end)
+end)</code></pre></div>
+
+          <h3>用 CDP 读 JS 里的现价</h3>
+          <div class="code"><div class="code__bar"><b>price.lua</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">local t = lemurx.tabs.current()
+lemurx.cdp.attach(t.id)
+local price = lemurx.v8.eval(t.id, "window.__INITIAL_STATE__?.price?.current")
+lemurx.log("现价", price)</code></pre></div>
+
+          <h3>五行写一个 luakit chrome 页</h3>
+          <div class="code"><div class="code__bar"><b>hello_chrome.lua</b><button class="copy" type="button">复制</button></div>
+<pre><code class="lang-lua">local chrome = require("chrome")   -- luakit 的 lib/chrome.lua，原样
+chrome.add("hello", function(view, meta)
+    return "&lt;h1&gt;Hello from Lua&lt;/h1&gt;&lt;p&gt;path: " .. meta.path .. "&lt;/p&gt;"
+end)
+-- 打开 luakit://hello/anything</code></pre></div>
+        </section>
+
+        <!-- ------------------------------------------------ 坑 -->
+        <section id="pitfalls">
+          <p class="kicker">页面</p>
+          <h2>坑与限制</h2>
+          <ul>
+            <li><b><code>net.addRule</code> 与子资源。</b> 浏览器侧规则作用于导航（document / sub_frame）和浏览器发起的请求。要逐请求控制页面子资源，用渲染进程的 <a href="#r-page"><code>send-request</code></a> 信号，它能看到每个 img/script/xhr/fetch。</li>
+            <li><b>对当前标签 <code>tabs.hide</code></b> 会让屏幕空白——先 <code>select</code> 别的标签。</li>
+            <li><b><code>theme.set({dark=...})</code></b> 走LemurX自己的暗色切换，带应用重启标记；别频繁切。</li>
+            <li><b><code>toolbar.*</code> 挂载点</b>宽 150 dp——放一个按钮，最多两个。</li>
+            <li><b><code>page.top / page.bottom</code></b> 是 PopupWindow，横竖屏切换时重建；<code>ui.update</code> 比重新 <code>render</code> 便宜得多。</li>
+            <li><b>UI 调用是阻塞的。</b> 一次回调里别 <code>ui.find</code> 四十次——<code>dump</code> 一次自己在 Lua 里筛。</li>
+            <li><b><code>eval</code> 只返回可 JSON 序列化的值。</b> DOM 节点会变成 <code>nil</code>；要节点就用渲染进程层。</li>
+            <li><b>加载顺序 = 文件名顺序。</b> 跨脚本全局变量要注意数字前缀；更稳的做法是共享代码放 <code>files/lua/lib/</code>，用 <code>require</code>。</li>
+            <li><b>本地脚本拥有完整的 <code>os</code> 和 <code>io</code>。</b> <code>os.exit()</code> 直接杀掉浏览器进程；<code>io.open</code> 能读写应用私有目录任何文件。这是刻意给的自由——别教新手乱用。</li>
+            <li><b>UGC 脚本之间也互相隔离。</b> 通过 <code>lemurx.storage</code> 或本地桥脚本通信。</li>
+            <li><b>桥只传数据，不传函数。</b> import 到的函数不能收 Lua 回调；改成轮询 <code>storage</code> 或订阅事件。</li>
+            <li><b>luakit <code>init</code> 时序。</b> <code>webview.add_signal("init")</code> 只对注册之后创建的 webview 触发。对已存在的标签，遍历 <code>lemurx.tabs.list()</code> 并调 <code>__lk.webview_for_tab(id[, true])</code>（LemurX辅助函数）补挂或包装，案例脚本就是这么做的。</li>
+            <li><b>scheme 请求必须回应。</b> 挂了处理器却始终不调 <code>request:finish</code>，导航 30 秒后失败。</li>
+          </ul>
+        </section>
+
+        <!-- ------------------------------------------------ UGC 规范 -->
+        <section id="ugc-rules">
+          <p class="kicker">页面</p>
+          <h2>UGC 发布规范</h2>
+          <ol>
+            <li>文件放 <code>files/lua/ugc/</code>。降权和状态隔离是自动的，你不需要自己判断。</li>
+            <li>上架前 <code>lemurx.ugc.scan(源码)</code> 必须返回空表。<code>load(字符串)</code> 可用（只收文本）；<code>dofile/loadfile/require/io/os</code> 不存在。</li>
+            <li>凡是等网络的地方用 <code>http.fetch(url, opts, cb)</code> 或 <code>lemurx.async/await</code>。</li>
+            <li>需要本地能力（cookie、登录态请求）时，文档里写清用户要装哪个桥脚本，用 <code>lemurx.import("name")</code> 取，取到 <code>nil</code> 要能降级。</li>
+            <li>不要藏地址栏做钓鱼式全屏。审核会拒。</li>
+            <li>所有对外请求走 <code>lemurx.http.fetch</code>；域名写在文件头注释里。</li>
+            <li>提供 <code>reset</code>：卸载时脚本应能 <code>theme.reset()</code> + <code>ui.unmount("*")</code> + <code>net.clearRules()</code>。</li>
+            <li>版本号写在首行：<code>-- myskin v1.0.0</code>。</li>
+          </ol>
+        </section>
+
+        <!-- ================================================ lemurx.* 模块 -->
+
+        <section id="m-core">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx</code> 基础</h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <dl class="api">
+            <dt><code>lemurx.version</code></dt><dd>运行时版本字符串。</dd>
+            <dt><code>lemurx.log(...)</code></dt><dd>写 logcat（tag <code>LemurX</code>）。<code>print</code> 是别名。参数 <code>tostring</code> 后用 tab 连接。</dd>
+            <dt><code>lemurx.toast(msg)</code></dt><dd>系统 Toast。</dd>
+            <dt><code>lemurx.help([module]) </code></dt><dd>打印接口清单（<a href="#m-ugc"><code>lemurx.catalog</code></a>）或其中一个模块。</dd>
+            <dt><code>lemurx.isPrivileged() -> boolean</code></dt><dd>本地脚本 <code>true</code>，UGC <code>false</code>。</dd>
+            <dt><code>lemurx.scriptName() -> string</code></dt><dd>本地脚本为 <code>""</code>，UGC 为 <code>"ugc/xxx.lua"</code>。</dd>
+            <dt><code>lemurx.open(url[, opts]) -> tabId</code></dt><dd><code>lemurx.tabs.open</code> 的别名。</dd>
+            <dt><code>lemurx.browser.info() -> {isLemurX, versionName, versionCode, chromiumVersion}</code></dt><dd>构建信息：产品标志、应用版本和锁定的 Chromium 版本。</dd>
+          </dl>
+        </section>
+
+        <section id="m-async">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.async</code> · <code>await</code> · <code>sleep</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>协程语法糖，让等网络永远不阻塞共享的 Lua 线程。</p>
+          <dl class="api">
+            <dt><code>lemurx.async(fn)</code></dt><dd>把 <code>fn</code> 作为协程任务运行。内部错误带 traceback 打日志，不吞掉。</dd>
+            <dt><code>lemurx.await(fn, ...) -> results</code></dt><dd>只能在 <code>async</code> 里调。以 <code>fn(..., callback)</code> 调用——任何<em>末参数收回调</em>的函数都行（<code>http.fetch</code>、<code>timer.after</code>、你自己写的）——让出线程，返回回调收到的值。在 <code>async</code> 外调用会抛错。</dd>
+            <dt><code>lemurx.sleep(ms)</code></dt><dd>只能在 <code>async</code> 里调。让出 <code>ms</code> 毫秒。
+<pre>lemurx.async(function()
+    local a = lemurx.await(lemurx.http.fetch, "https://a.example/api")
+    local b = lemurx.await(lemurx.http.fetch, "https://b.example/api", { method = "POST", body = "{}" })
+    lemurx.sleep(300)
+    lemurx.ui.update("fx", { text = a.status .. "/" .. b.status })
+end)</pre></dd>
+          </dl>
+        </section>
+
+        <section id="m-bridge">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.expose</code> · <code>import</code> · <code>exposed</code></h2><span class="badge badge--browser">browser</span></div>
+          <p>本地状态与 UGC 状态之间唯一的门。参数和返回值按 JSON 编组（nil/boolean/number/string/table）；函数永远过不去。被暴露的函数以<em>本地</em>特权执行；内部出错会在 UGC 侧变成 Lua error。</p>
+          <dl class="api">
+            <dt><code>lemurx.expose(name, fn | table)</code><span class="badges"><span class="badge badge--priv">仅本地</span></span></dt><dd>以 <code>name</code> 发布一个函数或一张函数/值的表。非函数成员按值拷贝。</dd>
+            <dt><code>lemurx.import(name) -> proxy | nil</code><span class="badges"><span class="badge badge--ugc">UGC</span></span></dt><dd>拿到本地脚本暴露之物的代理。该名字下没暴露时返回 <code>nil</code>——务必处理。</dd>
+            <dt><code>lemurx.exposed() -> {names}</code></dt><dd>当前已暴露的名字。</dd>
+          </dl>
+        </section>
+
+        <section id="m-tabs">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.tabs</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>Tab 对象是普通表：<code>{id, url, title, incognito, loading, canGoBack, canGoForward, muted}</code>。Tab id 是稳定的整数，同时也是对应 luakit <code>webview</code> 和渲染进程 <code>page</code> 的 <code>id</code>。</p>
+          <dl class="api">
+            <dt><code>lemurx.tabs.list() -> {tab...}</code></dt><dd>当前模型里的全部标签。</dd>
+            <dt><code>lemurx.tabs.current() -> tab | nil</code></dt><dd>选中的标签。</dd>
+            <dt><code>lemurx.tabs.open(url[, {background=, hidden=, incognito=}]) -> tabId</code></dt><dd>打开标签。<code>hidden</code> 创建但不显示（适合抓取）。</dd>
+            <dt><code>lemurx.tabs.close(id)</code> · <code>select(id)</code> · <code>hide(id)</code> · <code>show(id)</code> · <code>freeze(id)</code></dt><dd>标签栏操作。<code>freeze</code> 丢弃渲染进程但保留条目。</dd>
+            <dt><code>lemurx.tabs.navigate(id, url)</code> · <code>reload(id)</code> · <code>reloadBypassCache(id)</code> · <code>stop(id)</code></dt><dd>加载控制。</dd>
+            <dt><code>lemurx.tabs.back(id)</code> · <code>forward(id)</code> · <code>go(id, index)</code> · <code>offset(id, n)</code></dt><dd>历史导航；<code>go</code> 取绝对条目索引，<code>offset</code> 取相对偏移。</dd>
+            <dt><code>lemurx.tabs.history(id) -> {ok, current, entries={{index,url,virtualUrl,title,transition,timestamp}...}, canGoBack, canGoForward}</code></dt><dd>该标签的 NavigationController。</dd>
+            <dt><code>lemurx.tabs.frames(id) -> {main={...}, frames={...}}</code></dt><dd>RenderFrameHost 树。</dd>
+            <dt><code>lemurx.tabs.eval(id, js) -> value</code></dt><dd>在主框架的<b>主世界</b>执行 JavaScript，返回可 JSON 序列化的结果。</dd>
+            <dt><code>lemurx.tabs.inject(id, js[, {world="isolated"|"main", frames="main"|"all"}])</code></dt><dd>种脚本。默认隔离世界（不受页面 CSP 和页面 JS 干扰）、仅主框架。<code>frames="all"</code> 能打进 iframe。</dd>
+            <dt><code>lemurx.tabs.html(id) -> string</code></dt><dd>当前文档的 <code>outerHTML</code>。</dd>
+            <dt><code>lemurx.tabs.screenshot(id[, {base64=true}]) -> {ok, path, abs, width, height[, data]}</code></dt><dd>可见内容的 JPEG，存在 <code>lua/captures</code> 下；要求时 <code>data</code> 为 base64。</dd>
+            <dt><code>lemurx.tabs.setDesktop(id, on)</code></dt><dd>这个标签用桌面 UA + 视口。</dd>
+            <dt><code>lemurx.tabs.setZoom(id, percent)</code> · <code>getZoom(id) -> percent</code></dt><dd>页面缩放。</dd>
+            <dt><code>lemurx.tabs.mute(id, on)</code> · <code>isMuted(id) -> boolean</code></dt><dd>静音。</dd>
+            <dt><code>lemurx.tabs.setUserAgent(id, ua)</code></dt><dd>后续导航与 <code>navigator.userAgent</code> 用的 UA。</dd>
+            <dt><code>lemurx.tabs.setHeaders(id, {["X-Foo"]="bar"})</code></dt><dd>这个标签的导航附加请求头。</dd>
+            <dt><code>lemurx.tabs.setJavaScript(on)</code> · <code>isJavaScript() -> boolean</code></dt><dd>全局 JavaScript 开关。</dd>
+            <dt><code>lemurx.tabs.viewport([id]) -> {x, y, w, h, contentOffsetY, pageScale, density, viewportWidth, viewportHeight, scrollX, scrollY}</code></dt><dd>网页内容区在屏幕上的位置，以及 CSS 像素到屏幕像素的映射。<a href="#m-agent"><code>lemurx.agent</code></a> 用它把网页元素和原生控件统一到同一坐标系。</dd>
+            <dt><code>lemurx.tabs.on(event, fn)</code><span class="badges"><span class="badge badge--signal">event</span></span></dt><dd><code>"started" | "document" | "loaded" | "created" | "closed" | "selected"</code>。<code>fn(ev)</code> 收到 tab 表外加 <code>event</code>、<code>eventUrl</code>。见 <a href="#events">事件</a>。</dd>
+          </dl>
+        </section>
+
+        <section id="m-net">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.net</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>在浏览器网络路径上对导航和浏览器发起的请求生效的声明式规则。它能改写<em>响应体</em>——任何扩展 API 都不允许这么做。逐子资源的逻辑请用渲染进程的 <a href="#r-page"><code>send-request</code></a> 信号。</p>
+          <dl class="api">
+            <dt><code>lemurx.net.addRule(rule) -> ruleId</code></dt><dd>
+<pre>lemurx.net.addRule({
+    match = "*://*.doubleclick.net/*",           -- 通配 URL、host 片段，或 "&lt;all_urls&gt;"
+    action = "block" | "redirect" | "modify",
+    types = { "document", "sub_frame", "script", "image", "xmlhttprequest", "media" },
+    redirectUrl = "https://...",
+    requestHeaders = { ["X-Foo"] = "bar" },      removeRequestHeaders = { "Cookie" },
+    responseHeaders = { ["X-Bar"] = "baz" },     removeResponseHeaders = { "Content-Security-Policy" },
+    replaceBody = { ["old"] = "new" },           -- 或 { {from=, to=} }；文本类响应 ≤ 2 MB
+    requestBody = "...",                         -- 仅本地：整段替换 POST 体
+    replaceRequestBody = { a = "b" },            -- 仅本地
+})</pre></dd>
+            <dt><code>lemurx.net.removeRule(id)</code> · <code>clearRules()</code> · <code>listRules() -> {rule...}</code></dt><dd>规则管理。规则不跨重启持久，在脚本里重新添加。</dd>
+          </dl>
+        </section>
+
+        <section id="m-http">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.http</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>由浏览器进程发起的请求：没有 CORS，不带 cookie。UGC：仅 http(s)、2 MB、20 秒。本地：8 MB、120 秒。</p>
+          <dl class="api">
+            <dt><code>lemurx.http.fetch(url[, opts][, cb]) -> response | requestId</code></dt><dd>
+              <p><code>opts = {method, headers, body, timeout, redirect=true, binary=false}</code>。响应：<code>{ok, status, headers, url, bytes, body[, base64=true]}</code>。</p>
+              <p>带 <code>cb</code> 时立刻返回请求 id，响应稍后在 Lua 线程送达——<b>优先用这种形式</b>，或用 <code>lemurx.await</code>。</p></dd>
+            <dt><code>lemurx.http.save(url, path[, opts]) -> {ok, ...}</code></dt><dd>抓取后写入 <code>lemurx.fs</code>（路径相对 fs 根）。</dd>
+          </dl>
+        </section>
+
+        <section id="m-fs">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.fs</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>带监狱的文件访问。路径相对 <code>root()</code>；<code>..</code> 跳出会被拒。本地脚本另有完整 <code>io</code> 库可访问监狱之外。</p>
+          <dl class="api">
+            <dt><code>lemurx.fs.root() -> path</code></dt><dd>本地为 <code>files/lua</code>，UGC 为 <code>files/lua/ugc</code>。</dd>
+            <dt><code>lemurx.fs.read(path[, {base64=true}]) -> {ok, path, size, data}</code></dt><dd>读文件。</dd>
+            <dt><code>lemurx.fs.write(path, data[, {append=true, base64=true}]) -> boolean</code></dt><dd>写 / 追加。</dd>
+            <dt><code>lemurx.fs.list(path) -> {{name, size, dir, mtime}...}</code></dt><dd>目录列表。</dd>
+            <dt><code>lemurx.fs.exists(path)</code> · <code>mkdir(path)</code> · <code>remove(path)</code></dt><dd>返回 boolean。</dd>
+          </dl>
+        </section>
+
+        <section id="m-storage">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>storage</code> · <code>clipboard</code> · <code>db</code> · <code>timer</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <dl class="api">
+            <dt><code>lemurx.storage.get(key[, default]) -> string</code> · <code>set(key, value)</code> · <code>delete(key)</code> · <code>list() -> {keys}</code></dt><dd>持久化字符串 KV。</dd>
+            <dt><code>lemurx.clipboard.get() -> string</code> · <code>set(text)</code></dt><dd>系统剪贴板。</dd>
+            <dt><code>lemurx.db.exec(sql[, {bind...}]) -> {ok, rowsAffected}</code></dt><dd>SQLite，文件 <code>files/lua/lemurx.db</code>。要独立数据库用 luakit 的 <a href="#lk-sqlite3"><code>sqlite3{}</code></a>。</dd>
+            <dt><code>lemurx.db.query(sql[, {bind...}]) -> {ok, rows={{col=value}...}}</code></dt><dd>查询，行为表。</dd>
+            <dt><code>lemurx.timer.after(ms, fn) -> id</code> · <code>every(ms, fn) -> id</code> · <code>cancel(id)</code></dt><dd>Lua 线程上的定时器。最小 10 ms。</dd>
+          </dl>
+        </section>
+
+        <section id="m-chrome">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.chrome</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>浏览器外壳：工具栏、底栏、地址栏、系统栏。颜色用 <code>"#AARRGGBB"</code>。</p>
+          <dl class="api">
+            <dt><code>lemurx.chrome.controls("shown"|"hidden"|"both")</code></dt><dd>顶栏 / 底栏随滚动的策略。</dd>
+            <dt><code>lemurx.chrome.hideUrlBar(on)</code> · <code>fullscreen(on)</code></dt><dd>隐藏地址栏 / 沉浸式。</dd>
+            <dt><code>lemurx.chrome.setUrlBarText(text)</code> · <code>getUrlBarText() -> string</code> · <code>focusUrlBar(on)</code></dt><dd>地址栏文字与焦点。</dd>
+            <dt><code>lemurx.chrome.setToolbarColor(argb)</code> · <code>setStatusBarColor(argb)</code></dt><dd>即时颜色（要持久用 <a href="#m-theme"><code>theme.set</code></a>）。</dd>
+            <dt><code>lemurx.chrome.setDarkMode(on)</code> · <code>isDarkMode() -> boolean</code></dt><dd>暗色模式。会打上应用重启标记。</dd>
+            <dt><code>lemurx.chrome.setPullRefresh(on)</code></dt><dd>下拉刷新手势。</dd>
+            <dt><code>lemurx.chrome.setMenuButtonVisible(on)</code> · <code>hideBottomToolbar(on)</code></dt><dd>菜单按钮；地址栏两侧的按钮组。</dd>
+            <dt><code>lemurx.chrome.hideButton("back"|"forward"|"home"|"tabs"|"tools"|"menu"|"search", on)</code></dt><dd>单个外壳按钮。</dd>
+            <dt><code>lemurx.chrome.back()</code> · <code>forward()</code></dt><dd>触发外壳自己的后退 / 前进（包括"交给系统处理返回"）。</dd>
+            <dt><code>lemurx.chrome.info() -> {controls, darkMode, urlBarText, urlBarFocused}</code></dt><dd>当前外壳状态。</dd>
+            <dt><code>lemurx.chrome.on("omnibox"|"back"|"menu", fn)</code><span class="badges"><span class="badge badge--signal">event</span></span></dt><dd>见 <a href="#events">事件</a>。</dd>
+          </dl>
+        </section>
+
+        <section id="m-menu">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.menu</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>底栏抽屉菜单（<code>main</code>、<code>expand</code>、<code>second</code> 三页）。</p>
+          <dl class="api">
+            <dt><code>lemurx.menu.add({id, title, page="main"|"expand"|"second", onClick=fn})</code></dt><dd>加一项；<code>onClick(ev)</code>，<code>ev = {id, title}</code>。</dd>
+            <dt><code>lemurx.menu.remove(id)</code> · <code>clear()</code></dt><dd>移除你加的项。</dd>
+            <dt><code>lemurx.menu.hide(name[, on=true])</code></dt><dd>按名字隐藏内置项（如 <code>"history"</code>、<code>"EXTENSION_STORE"</code>）；<code>lemurx.menu.list()</code> 能看到名字。</dd>
+            <dt><code>lemurx.menu.on(name, fn)</code></dt><dd>截获内置项：跑你的处理器，不再走默认逻辑。</dd>
+            <dt><code>lemurx.menu.invoke(name)</code></dt><dd>手动触发内置项的默认逻辑。</dd>
+            <dt><code>lemurx.menu.list() -> {main={...}, expand={...}, second={...}}</code></dt><dd>抽屉里现在有什么。</dd>
+          </dl>
+        </section>
+
+        <section id="m-theme">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.theme</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>持久化皮肤，每次启动和 Activity 重建时自动重放。</p>
+          <dl class="api">
+            <dt><code>lemurx.theme.set(theme)</code></dt><dd>合并语义——只传要改的键。
+<pre>lemurx.theme.set({
+    toolbar = "#FF1B5E20", statusBar = "#FF0D3B13", navBar = "#FF1B5E20", bottomBar = "#FF1B5E20",
+    iconTint = "#FFE8F5E9", accent = "#FF00C853",   -- accent = ui.render 里 button 的默认底色
+    dark = true,
+    hideButtons = { "tools" },
+    urlBarHidden = false, bottomBarHidden = false, menuButton = true, pullRefresh = false,
+})</pre>
+              <p>要删掉某个键，先 <code>reset()</code> 再重设（Lua 表里表达不了 <code>nil</code> 值）。</p></dd>
+            <dt><code>lemurx.theme.get() -> {ok, theme, dark}</code></dt><dd>当前持久化的主题。</dd>
+            <dt><code>lemurx.theme.reset()</code></dt><dd>清掉主题并尽力还原默认。</dd>
+            <dt><code>lemurx.theme.apply(name[, extra])</code></dt><dd>应用预设（<code>"forest" | "paper" | "midnight" | "sakura"</code>）并合并 <code>extra</code>。</dd>
+            <dt><code>lemurx.theme.presets.&lt;name&gt;</code></dt><dd>预设表——可以自己加。</dd>
+          </dl>
+        </section>
+
+        <section id="m-ui-render">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.ui.render</code> · <code>h</code> · <code>update</code> · <code>unmount</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>声明式原生 Android View 树，挂到外壳的命名挂载点上。回调就是普通 Lua 函数。同一挂载点再次 render 即替换；Activity 重建或底栏样式切换后自动重挂。</p>
+          <h4>挂载点（<code>lemurx.ui.slots()</code>）</h4>
+          <div class="tbl-scroll">
+          <table class="tbl">
+            <tr><th>slot</th><th>位置</th></tr>
+            <tr><td><code>toolbar.start</code> / <code>toolbar.end</code></td><td>顶栏左 / 右按钮条（150 dp）</td></tr>
+            <tr><td><code>bottom.start</code> / <code>bottom.bar</code></td><td>底栏第一格 / 末尾</td></tr>
+            <tr><td><code>page.top</code> / <code>page.bottom</code></td><td>网页正上方 / 正下方通栏</td></tr>
+            <tr><td><code>page.center</code> / <code>page.float</code></td><td>居中 / 浮动在网页上（<code>gravity</code>、<code>x</code>、<code>y</code>）</td></tr>
+            <tr><td><code>view:&lt;原生 id&gt;</code></td><td><code>ui.dump()</code> 里看到的任意 ViewGroup</td></tr>
+          </table>
+          </div>
+          <dl class="api">
+            <dt><code>lemurx.ui.h(type, props[, children]) -> node</code></dt><dd>构造节点。类型：<code>row column stack scroll hscroll text button icon image edit switch progress divider spacer</code>。</dd>
+            <dt><code>lemurx.ui.render(slot, node)</code></dt><dd>把树挂到挂载点。
+<pre>local h = lemurx.ui.h
+lemurx.ui.render("page.top", h("row", { background = "#E61B5E20", padding = {12, 6} }, {
+    h("text",   { id = "st", text = "状态", color = "#FFFFFFFF", weight = 1, maxLines = 1, ellipsize = true }),
+    h("switch", { id = "sw", text = "桌面版", color = "#FFFFFFFF",
+                  onChange = function(ev) lemurx.tabs.setDesktop(lemurx.tabs.current().id, ev.checked) end }),
+    h("button", { id = "close", text = "收起", onClick = function() lemurx.ui.unmount("page.top") end }),
+}))</pre></dd>
+            <dt><code>lemurx.ui.update(id, props)</code></dt><dd>就地改已挂载节点的属性（便宜；优先于重新 render）。</dd>
+            <dt><code>lemurx.ui.unmount(slot | id | "*")</code></dt><dd>拆掉一个挂载点的树、一个节点、或全部——包括 <code>replace</code>/<code>insert</code> 种下的树，被换下的原生 View 会放回。</dd>
+            <dt><code>lemurx.ui.slots() -> {slot...}</code></dt><dd>可用挂载点名。</dd>
+          </dl>
+          <h4>节点属性</h4>
+          <div class="tbl-scroll">
+          <table class="tbl tbl--wrap">
+            <tr><th>组</th><th>属性</th></tr>
+            <tr><td>通用</td><td><code>id</code> · <code>width</code>/<code>height</code>（<code>"match"</code> <code>"wrap"</code> dp 数字）· <code>weight</code> <code>gravity</code> <code>align</code> · <code>padding</code>/<code>margin</code>（<code>8</code>、<code>{h,v}</code>、<code>{l,t,r,b}</code>、<code>{left=8}</code>、<code>paddingH/V</code>、<code>marginH/V</code>）· <code>background</code>（<code>"#AARRGGBB"</code>、<code>"drawable:名"</code>、<code>{color, radius, stroke, strokeColor, gradient={...}, orientation, ripple=true}</code>）· <code>radius visible enabled alpha elevation rotation desc tooltip minWidth minHeight</code> · <code>onClick onLongClick onChange</code></td></tr>
+            <tr><td>文本类（text/button/edit/switch）</td><td><code>text color size</code>(sp) <code>bold italic font</code>（<code>"monospace"</code> <code>"serif"</code> <code>"file:x.ttf"</code>）<code>maxLines ellipsize singleLine underline strike lineSpacing</code></td></tr>
+            <tr><td>icon / image</td><td><code>icon</code>（<code>"ic_xxx"</code> apk 内 drawable、<code>"android:ic_menu_search"</code>、<code>"file:icons/a.png"</code>、<code>"data:image/png;base64,…"</code>），没图时 <code>text</code> 兜底（emoji 很好用），<code>tint</code>，<code>scale</code>（<code>fit crop center fill</code>）</td></tr>
+            <tr><td>edit</td><td><code>hint value inputType</code>（<code>text number url password multiline</code>）<code>maxLength hintColor</code>；每次输入 <code>onChange</code> 触发 <code>ev.action="change"</code>，键盘确认 <code>"submit"</code>，<code>ev.text</code> 是当前内容</td></tr>
+            <tr><td>switch</td><td><code>checked</code>；<code>onChange</code> 收 <code>ev.checked</code></td></tr>
+            <tr><td>progress</td><td><code>value max indeterminate color</code></td></tr>
+          </table>
+          </div>
+          <p>回调参数统一：<code>ev = {id, action="click"|"longclick"|"change"|"submit", slot, text?, checked?}</code>。</p>
+        </section>
+
+        <section id="m-ui-surgery">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.ui.style</code> · <code>replace</code> · <code>insert</code> · <code>detach</code> · <code>move</code> · <code>on</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>外壳就是普通 Android View。Lua 可以改样式、替换、在旁边插入、摘走、挪位置、接管点击——包括 Dialog 和 PopupWindow（工具抽屉）里的 View。操作按查询条件记录，Activity 重建后重放。</p>
+          <p><b>查询</b>：<code>{id=, text=, desc=, class=, clickable=, max=}</code>——<code>id</code> 是资源名或 Lua 节点 id，<code>text</code>/<code>class</code> 按包含匹配。已知外壳 id：<code>toolbar toolbar_buttons_left toolbar_buttons home_button tab_switcher_button tab_back_button tab_forward_button menu_tools menu_button_lemur location_bar url_bar search_box search_box_text ivLogo ntp_favorites</code>。</p>
+          <dl class="api">
+            <dt><code>lemurx.ui.style(query, style)</code></dt><dd>对现有 View 应用节点属性（与 <code>render</code> 同一套）。<code>once=true</code> 不重放。
+<pre>lemurx.ui.style({ id = "url_bar" }, { size = 16, bold = true })
+lemurx.ui.style({ class = "TabSwitcherButtonView" }, { tint = "#FFFF5252" })
+lemurx.ui.style({ text = "历史" }, { background = "#FF000000", once = true })</pre></dd>
+            <dt><code>lemurx.ui.replace(query, node)</code></dt><dd>把原生 View 换成 Lua 树，占同一布局位置。<code>unmount(id | "*")</code> 放回原件。</dd>
+            <dt><code>lemurx.ui.insert(query, node[, {position="after"|"before"|"into"}])</code></dt><dd>在原生 View 旁边（或里面）插一棵 Lua 树。</dd>
+            <dt><code>lemurx.ui.detach(query)</code> · <code>restore([query])</code></dt><dd>把原生 View 从父容器摘走；放回它（或全部摘走的）。</dd>
+            <dt><code>lemurx.ui.move(query, {parent=, index=, before=, after=})</code></dt><dd>给原生 View 换父容器或调顺序。</dd>
+            <dt><code>lemurx.ui.on(query, "click"|"longclick"|"touch"|"focus"|"text", fn[, {consume=true, move=, max=}]) -> {key}</code></dt><dd>接管原生 View 的事件。<code>consume=false</code> 让原逻辑也跑。</dd>
+            <dt><code>lemurx.ui.off(key | "*")</code></dt><dd>移除处理器。</dd>
+            <dt><code>lemurx.ui.shell() -> {found, ids, rects}</code></dt><dd>已知外壳 View id、是否存在、坐标。</dd>
+            <dt><code>lemurx.ui.children(query) -> {nodes}</code></dt><dd>ViewGroup 的子节点。</dd>
+          </dl>
+        </section>
+
+        <section id="m-ui-legacy">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.ui</code> 自动化与对话框</h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <dl class="api">
+            <dt><code>lemurx.ui.dump([{maxDepth=12, maxNodes=800, gone=true}]) -> {ok, nodes, windows, roots}</code></dt><dd><em>所有</em>窗口（Activity、Dialog、PopupWindow）的完整 View 树。</dd>
+            <dt><code>lemurx.ui.find(query) -> {ok, count, nodes={{class,id,text,desc,clickable,enabled,visible,x,y,w,h}...}}</code></dt><dd>查找 View。</dd>
+            <dt><code>lemurx.ui.click(query)</code> · <code>longClick(query)</code></dt><dd>执行点击。</dd>
+            <dt><code>lemurx.ui.setText(query, text)</code> · <code>getText(query) -> string</code></dt><dd>TextView 内容。</dd>
+            <dt><code>lemurx.ui.visible(query, on)</code> · <code>enabled(query, on)</code></dt><dd>显隐 / 可用。</dd>
+            <dt><code>lemurx.ui.show({id, type="button"|"text"|"edit", text, gravity, x, y, background, color, textSize, radius, paddingH, paddingV, width, height, hint, onClick}) -> id</code></dt><dd>单个浮动控件（旧接口；<code>render</code> 已取代它）。</dd>
+            <dt><code>lemurx.ui.remove(id)</code> · <code>clear()</code></dt><dd>移除浮动控件。</dd>
+            <dt><code>lemurx.ui.dialog({title, message, ok, cancel, onOk=fn, onCancel=fn})</code></dt><dd>原生对话框；回调收 <code>{id, action}</code>。</dd>
+            <dt><code>lemurx.ui.prompt({title, hint, value, onOk=fn})</code></dt><dd>文本输入框；<code>onOk(ev)</code>，<code>ev.text</code>。</dd>
+            <dt><code>lemurx.ui.alert(title, message[, okText])</code></dt><dd>简单提示。</dd>
+            <dt><code>lemurx.ui.tap(x, y[, "dp"])</code> · <code>longPress(x, y)</code> · <code>swipe(x1, y1, x2, y2[, ms])</code></dt><dd>按<b>屏幕坐标</b>合成触摸，落到最上层窗口（Activity / Dialog / PopupWindow）。与 <code>dump</code>/<code>find</code> 节点的 <code>x, y</code> 同一坐标系。</dd>
+            <dt><code>lemurx.ui.screenshot([{scale=, quality=, base64=}]) -> {ok, path, abs, width, height, scale[, data]}</code></dt><dd>整个浏览器窗口（外壳 + 网页）的 JPEG，存到 <code>lua/captures</code>。</dd>
+          </dl>
+          <p><code>dump</code>/<code>find</code> 返回的每个节点都带 <code>ref</code>；<code>lemurx.ui.click({ref=12})</code> 可以精确指回这个 View。</p>
+        </section>
+
+        <section id="m-input">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.input</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>坐标默认 dp、相对网页内容区。</p>
+          <dl class="api">
+            <dt><code>lemurx.input.tap(x, y[, tabId[, "dp"|"px"]])</code></dt><dd>也可 <code>tap({x=, y=, tab=, unit=})</code>。</dd>
+            <dt><code>lemurx.input.swipe(x1, y1, x2, y2[, durationMs[, tabId]])</code></dt><dd>滑动。</dd>
+            <dt><code>lemurx.input.type(text[, tabId])</code></dt><dd>写入当前焦点。</dd>
+            <dt><code>lemurx.input.key("enter"|"back"|"tab"|"space"|"esc"|"delete"[, tabId])</code></dt><dd>按键。</dd>
+            <dt><code>lemurx.input.onBack(fn)</code><span class="badges"><span class="badge badge--signal">event</span></span></dt><dd>接管返回键。<code>fn(ev)</code>；想放行调 <code>lemurx.chrome.back()</code>。</dd>
+            <dt><code>lemurx.input.interceptBack(on)</code></dt><dd><code>false</code> 把返回键交还系统。</dd>
+          </dl>
+        </section>
+
+        <section id="m-intent">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.intent</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC 受限</span></div>
+          <dl class="api">
+            <dt><code>lemurx.intent.startActivity({action, url, package, extras})</code></dt><dd>发 Android Intent。UGC 仅允许 <code>VIEW SEND SENDTO WEB_SEARCH MAIN</code> 与 <code>lemurx.*</code> action。</dd>
+            <dt><code>lemurx.intent.sendBroadcast({action, extras})</code></dt><dd>广播 Intent（同样的 UGC 限制）。</dd>
+          </dl>
+        </section>
+
+        <section id="m-priv">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2>特权区：<code>cookie</code> · <code>history</code> · <code>downloads</code> · <code>perm</code> · <code>prefs</code> · <code>data</code> · <code>features</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--priv">仅本地</span></div>
+          <dl class="api">
+            <dt><code>lemurx.cookie.get(url) -> {{name, value, domain, path, secure, httpOnly, expires}...}</code></dt><dd>某 URL 的 cookie。</dd>
+            <dt><code>lemurx.cookie.set(url, "name=value; path=/; secure")</code></dt><dd>Set-Cookie 语法。</dd>
+            <dt><code>lemurx.history.query([text]) -> {{url, title, timestamp, domain}...}</code></dt><dd>搜索浏览历史。</dd>
+            <dt><code>lemurx.downloads.list() -> {...}</code> · <code>enqueue(url[, tabId]) -> id</code></dt><dd>下载管理器。</dd>
+            <dt><code>lemurx.perm.set(origin, type, "allow"|"block"|"ask")</code> · <code>get(origin, type)</code></dt><dd><code>type</code>：<code>geolocation camera microphone notifications javascript cookies images popups sound autoplay</code>。</dd>
+            <dt><code>lemurx.prefs.get(name[, "bool"|"int"|"double"|"string"|"long"]) -> {ok, name, exists, value, isDefault, managed}</code></dt><dd>Chromium PrefService。</dd>
+            <dt><code>lemurx.prefs.set(name, value)</code> · <code>set(name, type, value)</code> · <code>clear(name)</code></dt><dd>写 / 重置 pref。</dd>
+            <dt><code>lemurx.data.clear({"history","cache","site_data"}[, "15m"|"hour"|"day"|"week"|"all"])</code></dt><dd>BrowsingDataRemover。</dd>
+            <dt><code>lemurx.features.enabled(name) -> boolean</code> · <code>param(feature, key) -> string</code></dt><dd>只读 <code>ChromeFeatureList</code>。</dd>
+          </dl>
+        </section>
+
+        <section id="m-cdp">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.cdp</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--priv">仅本地</span></div>
+          <p>整张 Chrome DevTools 协议，进程内直连——不用 USB、不用电脑、没有黄色警告条。attach 时自动 enable <code>Runtime</code> 和 <code>Page</code>；其他域首次调用自动 enable。</p>
+          <dl class="api">
+            <dt><code>lemurx.cdp.attach(tabId)</code> · <code>detach(tabId)</code></dt><dd>attach 到标签的 DevToolsAgentHost。</dd>
+            <dt><code>lemurx.cdp.send(tabId, method, params[, timeoutMs | {timeout=, sessionId=}]) -> {ok, id, result} | {ok=false, error}</code></dt><dd>同步命令。
+<pre>lemurx.cdp.send(tab, "DOM.getDocument", { depth = 1 })
+lemurx.cdp.send(tab, "Network.emulateNetworkConditions", { offline = false, latency = 300, downloadThroughput = 51200, uploadThroughput = 25600 })</pre></dd>
+            <dt><code>lemurx.cdp.on(method | "*", fn)</code><span class="badges"><span class="badge badge--signal">event</span></span></dt><dd>协议事件：<code>fn({method, tab, params})</code>。</dd>
+            <dt><code>lemurx.cdp.targets() -> {{id, type, title, url, ...}...}</code></dt><dd>所有 target：page、iframe、worker、service_worker、browser。</dd>
+            <dt><code>lemurx.cdp.host(targetId | "browser", method, params)</code></dt><dd>对任意 target 发消息，包括浏览器 target。</dd>
+            <dt><code>lemurx.cdp.inspect(tabId, x, y)</code> · <code>version()</code></dt><dd>点命中测试 / 协议版本。</dd>
+          </dl>
+        </section>
+
+        <section id="m-cdp-helpers">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>v8</code> · <code>dom</code> · <code>ax</code> · <code>blink</code> · <code>page</code> · <code>network</code> · <code>emulation</code> · <code>overlay</code> · <code>css</code> · <code>runtime</code> · <code>sw</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--priv">仅本地</span></div>
+          <p><code>cdp.send</code> 的薄封装，定义在 <code>init.lua</code>。<code>tab</code> 是标签 id。</p>
+          <dl class="api">
+            <dt><code>lemurx.v8.eval(tab, expr[, opts]) -> value, raw</code></dt><dd><code>Runtime.evaluate</code>，值已解包。</dd>
+            <dt><code>lemurx.v8.call(tab, fnSource, argsJson) -> value</code></dt><dd><code>Runtime.callFunctionOn</code>。</dd>
+            <dt><code>lemurx.dom.document(tab)</code> · <code>query(tab, selector)</code> · <code>box(tab, selector)</code></dt><dd>DOM 树、选择器对应的节点 id、盒模型。</dd>
+            <dt><code>lemurx.ax.tree(tab)</code></dt><dd>完整无障碍树，Lua 表。</dd>
+            <dt><code>lemurx.blink.frames(tab)</code> · <code>metrics(tab)</code></dt><dd>框架树；<code>Performance.getMetrics</code> 转成 name→value 表。</dd>
+            <dt><code>lemurx.page.navigate(tab, url)</code> · <code>reload(tab, ignoreCache)</code> · <code>stop(tab)</code> · <code>enablePaint(tab, on)</code> · <code>cookies(tab)</code> · <code>screenshot(tab, opts)</code></dt><dd><code>Page.*</code>；<code>screenshot</code> 委托给 <code>tabs.screenshot</code>。</dd>
+            <dt><code>lemurx.network.enable(tab)</code> · <code>setOffline(tab, on)</code> · <code>emulate(tab, {latency, download, upload})</code> · <code>clear(tab)</code> · <code>headers(tab, {...})</code></dt><dd><code>Network.*</code>：离线、限速、附加请求头。</dd>
+            <dt><code>lemurx.emulation.setUA(tab, ua)</code> · <code>setDevice(tab, {width, height, scale, mobile})</code> · <code>setGeo(tab, lat, lng)</code> · <code>setTimezone(tab, id)</code> · <code>setTouch(tab, on)</code></dt><dd><code>Emulation.*</code>。</dd>
+            <dt><code>lemurx.overlay.inspect(tab[, mode])</code> · <code>hide(tab)</code></dt><dd>审查模式高亮层。</dd>
+            <dt><code>lemurx.css.getComputed(tab, nodeId)</code></dt><dd>节点的计算样式。</dd>
+            <dt><code>lemurx.runtime.contexts(tab)</code></dt><dd>执行上下文。</dd>
+            <dt><code>lemurx.sw.targets()</code> · <code>send(target, method, params)</code></dt><dd>Service Worker target 与消息。</dd>
+          </dl>
+        </section>
+
+        <section id="m-agent">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.agent</code> · <code>lemurx.system</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--priv">仅本地</span></div>
+          <p>GUI Agent「观察 → 决策 → 执行」里的观察和执行两步；决策交给脚本自己接的模型（<code>lemurx.http</code> 就够）。三层能力，不调用就等于不存在：<b>网页</b>（<code>tabs.screenshot</code>、set-of-marks、CDP）、<b>浏览器外壳</b>（<code>ui.screenshot</code>、<code>ui.dump/find</code>）、<b>其他 App</b>（<code>lemurx.system.*</code>，一个需要用户在「设置 › 无障碍」里开一次的 <code>AccessibilityService</code>）。所有元素统一为<b>屏幕像素</b>坐标，网页元素经 <code>lemurx.tabs.viewport()</code> 换算。</p>
+          <dl class="api">
+            <dt><code>lemurx.agent.observe([opts]) -> obs</code></dt><dd>一次观察：<code>{mode="browser"|"system", tab, viewport, screenshot, elements={...}}</code>。<code>opts</code>：<code>{tab, screenshot=true, scale=0.5, quality=60, base64=false, web=true, maxWeb=120, text=false, native=true, maxNative=200, system=nil|true|false}</code>。<code>system=nil</code> 表示自动：无障碍服务已连接且前台不是 LemurX 时改看整机 UI 树（<code>mode="system"</code>）。</dd>
+            <dt><code>lemurx.agent.describe(obs[, opts]) -> string</code></dt><dd>给模型看的紧凑文本：每个元素一行，带 <code>ref</code> —— <code>w7</code>（网页元素，<code>data-lemurx-mark</code>）、<code>n12</code>（原生控件）、<code>s5</code>（其他 App 节点），以及角色、文本和 <code>@(x,y w×h)</code>。</dd>
+            <dt><code>lemurx.agent.act(action[, obs]) -> result</code></dt><dd>按 <code>ref</code> 或屏幕坐标执行，并为每一层选最可靠的路径（网页 → 相对网页 View 的 <code>input.tap</code>，<code>via="js"</code> 改为 <code>el.click()</code>；原生 → <code>performClick</code>，句柄失效退回坐标；系统 → <code>performAction</code>，再退回手势）。动作：<code>tap|click{ref|x,y,long,dx,dy,via}</code> <code>longPress</code> <code>type|text{text,ref,clear,enter,append}</code> <code>swipe|scroll{dir,ref,distance,duration|x1,y1,x2,y2}</code> <code>key{key}</code> <code>back</code> <code>home</code> <code>recents</code> <code>notifications</code> <code>navigate{url}</code> <code>open{url}</code> <code>eval{js}</code> <code>launch{package|url}</code> <code>wait{ms}</code> <code>screenshot</code> <code>done{result}</code>。也接受裸字符串（<code>"back"</code>）。</dd>
+            <dt><code>lemurx.agent.run(policy[, opts])</code></dt><dd>循环。<code>policy(obs, text, step)</code> 返回下一步动作表，返回 <code>nil</code> 或 <code>{type="done"}</code> 结束。<code>opts</code>：<code>{maxSteps=20, settle=600, onStep=fn(step, obs, action, result), onDone=fn(out)}</code>。在 <code>lemurx.async</code> 里跑；协程外调用时结果走 <code>onDone</code>。</dd>
+            <dt><code>lemurx.agent.mark(tab[, {max, text}])</code> · <code>find(obs, "文本" | {role="button"})</code> · <code>look([opts])</code> · <code>wait(ms)</code></dt><dd>单独打标；从观察结果里挑元素；观察并记住，之后 <code>act</code> 不传 <code>obs</code>；等待。</dd>
+          </dl>
+          <p><code>lemurx.system.*</code> 等价于不需要 shell 权限的 <code>adb shell uiautomator dump</code> / <code>input tap</code> / <code>screencap</code>。默认关闭；开着时用户随时能在系统设置里关掉；Lua 总开关关掉后不再接受调用；UGC 脚本完全拿不到它。</p>
+          <dl class="api">
+            <dt><code>lemurx.system.status() -> {connected, enabledInSettings, canScreenshot, component}</code></dt><dd>服务状态。</dd>
+            <dt><code>lemurx.system.openSettings()</code> · <code>ensure() -> boolean</code></dt><dd>带用户去「设置 › 无障碍」开启「LemurX 自动化」；LemurX 不会自己开。<code>ensure</code> 没开就跳设置页，返回是否就绪。</dd>
+            <dt><code>lemurx.system.foreground() -> {package, class, title, self}</code> · <code>windows()</code></dt><dd>前台是什么。</dd>
+            <dt><code>lemurx.system.tree([{flat=true, interactiveOnly=true, all=false, maxNodes=1500}])</code></dt><dd>无障碍节点树；节点 <code>{ref, class, id, text, desc, clickable, editable, …, x, y, w, h}</code>，屏幕像素。</dd>
+            <dt><code>lemurx.system.find("文本" | {id=, text=, clickable=, editable=, package=})</code></dt><dd>查节点。</dd>
+            <dt><code>lemurx.system.click(ref | query)</code> · <code>longClick</code> · <code>focus</code> · <code>scroll(ref, "down"|"up"|…)</code></dt><dd>对节点 <code>performAction</code>。</dd>
+            <dt><code>lemurx.system.setText(ref | {editable=true}, text)</code></dt><dd><code>ACTION_SET_TEXT</code>，退路是剪贴板粘贴。</dd>
+            <dt><code>lemurx.system.tap(x, y)</code> · <code>longPress(x, y)</code> · <code>swipe(x1, y1, x2, y2[, ms])</code></dt><dd><code>dispatchGesture</code>，屏幕像素。</dd>
+            <dt><code>lemurx.system.global("back"|"home"|"recents"|"notifications"|"quickSettings"|"lock"|"power")</code></dt><dd><code>performGlobalAction</code>。</dd>
+            <dt><code>lemurx.system.screenshot([{scale=0.5}])</code></dt><dd>整屏 JPEG（API 30+）。</dd>
+            <dt><code>lemurx.system.launch(package | url | {action=, data=, extras=})</code></dt><dd>启动其他 App。</dd>
+            <dt><code>lemurx.system.on("window"|"content"|"click"|"focus"|"text"|"notification"|"connected"|"disconnected", fn)</code><span class="badges"><span class="badge badge--signal">event</span></span></dt><dd>无障碍事件。订阅即打开事件派发（底层 <code>system.events(true)</code>）。</dd>
+          </dl>
+        </section>
+
+        <section id="m-ugc">
+          <p class="kicker">模块 · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.ugc</code> · <code>catalog</code> · <code>help</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <dl class="api">
+            <dt><code>lemurx.ugc.forbidden -> {patterns}</code></dt><dd>UGC 禁用的特权名字列表。</dd>
+            <dt><code>lemurx.ugc.scan(source) -> {hits}</code></dt><dd>对脚本源码做禁用项静态扫描。只是给作者的提示；真正的边界在运行时。</dd>
+            <dt><code>lemurx.catalog -> {{name, title, priv, apis={...}}...}</code></dt><dd>机器可读的接口清单，<code>lemurx.help()</code> 的数据源。</dd>
+          </dl>
+        </section>
+
+        <!-- ================================================ luakit 模块 -->
+
+        <section id="lk-luakit">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>luakit</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span><span class="badge badge--priv">仅本地</span></div>
+          <p>全局 <code>luakit</code> 表（luakit 的 <code>clib/luakit.c</code>）。属性：<code>config_dir data_dir cache_dir execpath confpath resource_path</code>(rw) <code>verbose nounique dev_paths enable_spell_checking</code>(rw) <code>spell_checking_languages</code>(rw) <code>process_limit</code>(rw) <code>options website_data webkit2 windows webkit_version webkit_user_agent_version chromium_version selection install_path install_paths version web_process_id</code>。</p>
+          <dl class="api">
+            <dt><code>luakit.register_scheme(name)</code></dt><dd>注册 URL scheme。它的请求以 <code>scheme-request::&lt;name&gt;</code> 信号到达发起的 <code>webview</code>。见 <a href="#lk-scheme">自定义 scheme</a>。</dd>
+            <dt><code>luakit.spawn(cmd[, callback(exit_reason, exit_status)]) -> pid</code></dt><dd>异步起进程。<code>cmd</code> 按 shell 规则拆词（<code>g_shell_parse_argv</code> 的够用子集）。</dd>
+            <dt><code>luakit.spawn_sync(cmd) -> status, stdout, stderr</code></dt><dd>起进程并等待。</dd>
+            <dt><code>luakit.exec(cmd)</code></dt><dd>Android 上没有替换进程的语义；行为同 <code>spawn</code>。</dd>
+            <dt><code>luakit.time() -> seconds</code></dt><dd>单调时钟秒数。</dd>
+            <dt><code>luakit.uri_encode(s[, allowed])</code> · <code>uri_decode(s[, illegal])</code></dt><dd>百分号编码。</dd>
+            <dt><code>luakit.idle_add(fn)</code> · <code>idle_remove(fn) -> boolean</code></dt><dd>空闲时执行一次（<code>fn</code> 返回 <code>true</code> 会再排一次）。</dd>
+            <dt><code>luakit.allow_certificate(host, cert)</code></dt><dd>为某 host 信任证书（<code>webview:allow_certificate</code> 用）。</dd>
+            <dt><code>luakit.save_file(title, window, default_folder, default_name) -> path | nil</code></dt><dd>保存对话框。</dd>
+            <dt><code>luakit.wch_lower(s)</code> · <code>wch_upper(s)</code></dt><dd>Unicode 大小写映射。</dd>
+            <dt><code>luakit.clear_favicon_database()</code></dt><dd>占位空操作（favicon 由 Chromium 管）。</dd>
+            <dt><code>luakit.quit()</code></dt><dd>退出浏览器进程。</dd>
+            <dt><code>luakit.add_signal(name, fn)</code> · <code>emit_signal</code> · <code>remove_signal</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>模块级信号：<code>"page-created"(page)</code> 与 <code>"web-extension-created"</code>（渲染进程侧）、<code>"download-start"(download, view)</code>、<code>"can-close"</code>、<code>"scheme-request::&lt;name&gt;"</code>。</dd>
+          </dl>
+        </section>
+
+        <section id="lk-soup">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>soup</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span><span class="badge badge--renderer">renderer</span></div>
+          <dl class="api">
+            <dt><code>soup.parse_uri(str) -> {scheme, user, password, host, port, path, query, fragment} | nil</code></dt><dd>用 GURL 解析。没写 scheme 默认补 <code>http://</code>。</dd>
+            <dt><code>soup.uri_tostring(tbl) -> string</code></dt><dd><code>parse_uri</code> 的逆。</dd>
+            <dt><code>soup.proxy_uri</code></dt><dd><code>"default" | "no_proxy" | "http://host:port"</code> …（读写）。</dd>
+            <dt><code>soup.accept_policy</code></dt><dd><code>"always" | "never" | "no_third_party"</code>（读写）。</dd>
+            <dt><code>soup.cookies_storage</code></dt><dd>为兼容保留的路径值；cookie 库由 Chromium 自管。</dd>
+          </dl>
+        </section>
+
+        <section id="lk-sqlite3">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>sqlite3</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>每个对象一条独立连接（luakit 的 history、bookmarks、quickmarks、adblock 各开各的）。相对文件名落到 <code>luakit.data_dir</code>。</p>
+          <dl class="api">
+            <dt><code>sqlite3{ filename = path } -> db</code></dt><dd>打开或创建。</dd>
+            <dt><code>db:exec(sql[, bindings]) -> rows | nil</code></dt><dd>允许多语句。绑定：位置 <code>{1=..., 2=...}</code> 或命名 <code>{[":name"]=...}</code>。行是按列名索引的表。</dd>
+            <dt><code>db:compile(sql) -> statement</code> · <code>stmt:exec([bindings]) -> rows</code></dt><dd>预编译语句。</dd>
+            <dt><code>db:changes() -> n</code> · <code>db:close()</code> · <code>db.filename</code></dt><dd>上一条语句影响行数；关闭；只读路径。</dd>
+          </dl>
+        </section>
+
+        <section id="lk-stylesheet">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>stylesheet</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>stylesheet{ source = "body { ... }" } -> ss</code></dt><dd>用户样式表对象。</dd>
+            <dt><code>ss.source</code></dt><dd>读写。修改后所有挂了它的 webview 重新注入。</dd>
+            <dt><code>view.stylesheets[ss] = true | false</code></dt><dd>挂到 / 从 <a href="#c-webview">webview</a> 摘下；每次 commit 都应用。</dd>
+          </dl>
+        </section>
+
+        <section id="lk-timer">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>timer</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>timer{ interval = ms } -> t</code></dt><dd>创建（未启动）。</dd>
+            <dt><code>t:start()</code> · <code>t:stop()</code></dt><dd>启动 / 停止。</dd>
+            <dt><code>t.started</code> · <code>t.interval</code></dt><dd>只读状态；interval 可读写（运行中改会重启）。</dd>
+            <dt><code>"timeout"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>每个周期触发一次，直到 stop。</dd>
+          </dl>
+        </section>
+
+        <section id="lk-regex">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>regex</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>regex{ pattern = "^https?://" } -> r</code></dt><dd>用 RE2 编译。PCRE 独有语法（反向引用、后行断言）在构造时报错。</dd>
+            <dt><code>r:match(s) -> boolean</code> · <code>r.pattern</code></dt><dd>部分匹配；只读 pattern。</dd>
+          </dl>
+        </section>
+
+        <section id="lk-utf8">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>utf8</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span><span class="badge badge--renderer">renderer</span></div>
+          <p>Lua 5.4 标准 <code>utf8</code> 库，保留 luakit 的差异：<code>utf8.len</code> 对无效序列返回字节长度而不是 <code>nil</code>；<code>string.wlen</code> 由 5.1 兼容层提供。</p>
+        </section>
+
+        <section id="lk-xdg">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>xdg</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>xdg.cache_dir</code> · <code>config_dir</code> · <code>data_dir</code></dt><dd>应用私有目录。</dd>
+            <dt><code>xdg.desktop_dir</code> · <code>documents_dir</code> · <code>download_dir</code> · <code>music_dir</code> · <code>pictures_dir</code> · <code>public_share_dir</code> · <code>templates_dir</code> · <code>videos_dir</code></dt><dd>外部公共存储目录。</dd>
+            <dt><code>xdg.system_data_dirs</code> · <code>system_config_dirs</code></dt><dd>数组。未知键返回 <code>nil</code>。</dd>
+          </dl>
+        </section>
+
+        <section id="lk-msg">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>msg</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span><span class="badge badge--renderer">renderer</span></div>
+          <dl class="api">
+            <dt><code>msg.fatal(fmt, ...)</code> · <code>error</code> · <code>warn</code> · <code>info</code> · <code>verbose</code> · <code>debug</code></dt><dd>格式化日志写 logcat，带调用模块名。渲染进程侧的消息转发到浏览器进程。</dd>
+            <dt><code>"log"(time, level, group, text)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd><code>msg.add_signal("log", fn)</code>——<code>log_chrome</code> 就是这样构建 <code>luakit://log</code> 的。</dd>
+          </dl>
+        </section>
+
+        <section id="lk-unique">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>unique</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>unique.new(name)</code> · <code>is_running() -> false</code> · <code>send_message(str)</code></dt><dd>单实例控制。Android 一个包一个进程，<code>is_running</code> 永远 <code>false</code>；外部入口（Intent 打开链接）以 <code>"message"(msg, screen)</code> 信号回放，<code>unique_instance.lua</code> 无需改动。</dd>
+          </dl>
+        </section>
+
+        <section id="lk-lfs">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>lfs</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>lfs.attributes(path[, name])</code> · <code>symlinkattributes</code> · <code>dir(path)</code> · <code>mkdir</code> · <code>rmdir</code> · <code>chdir</code> · <code>currentdir</code> · <code>touch</code></dt><dd>luakit <code>lib/</code> 用到的 LuaFileSystem 子集，底层 POSIX <code>stat/opendir</code>。<code>dir</code> 返回含 <code>.</code> 和 <code>..</code> 的迭代器。渲染进程里的 <code>lfs</code> 是与沙箱一致的空实现。</dd>
+          </dl>
+        </section>
+
+        <section id="lk-ipc">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2><code>ipc_channel</code> · <code>require_web_module</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>浏览器 ↔ 渲染进程通信（luakit 的 <code>clib/ipc.c</code> + <code>web_module.c</code>）。传输层是 Mojo。渲染进程尚不存在时发出的信号会排队，等它上线后回放，保留 luakit"页面创建时 web 模块已就位"的时序假设。</p>
+          <dl class="api">
+            <dt><code>require_web_module(name) -> ipc_channel</code></dt><dd>把 <code>name.lua</code> 加载进每个渲染进程（现有的和将来的）。先在 <code>files/luakit/config/</code>、再在 <code>files/luakit/lib/</code> 解析。返回同名 channel。</dd>
+            <dt><code>ipc_channel(name) -> ch</code></dt><dd>取或建一个命名 channel。</dd>
+            <dt><code>ch:emit_signal([view, ]name, ...)</code></dt><dd>发到所有渲染进程，或只发到承载 <code>view</code>（<code>webview</code> 或其 id）的那个。参数按 JSON 编组。</dd>
+            <dt><code>ch:add_signal(name, fn(ch, ...))</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>接收渲染进程发来的信号。luakit 惯例：需要知道来源时，web 模块把 <code>page.id</code> 作为第一个参数传。</dd>
+          </dl>
+        </section>
+
+        <section id="lk-scheme">
+          <p class="kicker">模块 · luakit</p>
+          <div class="modhead"><h2>自定义 scheme · <code>request</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p><code>luakit.register_scheme("foo")</code> 之后，<code>foo://</code> 的每次导航<em>和子资源</em>都以 <code>"scheme-request::foo"(view, uri, request)</code> 信号送到发起的 webview（来源是 worker 时退到当前选中标签的 webview）。<code>luakit://</code> 由 <code>lib/chrome.lua</code> 注册，服务 luakit 全部 chrome 页面。</p>
+          <dl class="api">
+            <dt><code>request:finish(data[, mime])</code></dt><dd>发送响应。可以稍后（异步）调用，30 秒内。</dd>
+            <dt><code>request.finished -> boolean</code></dt><dd>只读。</dd>
+            <dt><code>"scheme-request::&lt;name&gt;"(view, uri, request)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>在 <code>webview</code> 上。不 finish 直接返回可以留给其他处理器；完全没有处理器的 scheme 立刻 404。
+<pre>luakit.register_scheme("lua")
+webview.add_signal("init", function(view)
+    view:add_signal("scheme-request::lua", function(v, uri, request)
+        if uri:match("^lua://tabs") then
+            request:finish(__luakit.json_encode(lemurx.tabs.list()), "application/json")
+        end
+    end)
+end)</pre></dd>
+          </dl>
+        </section>
+
+        <!-- ================================================ luakit 类 -->
+
+        <section id="c-object">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2>对象协议与信号</h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span><span class="badge badge--renderer">renderer</span></div>
+          <p>每个 luakit 对象（<code>widget</code>、<code>download</code>、<code>timer</code>、<code>page</code>、<code>dom_element</code> …）遵循同一套协议：</p>
+          <ul>
+            <li><code>type(obj)</code> 返回类名（<code>"widget"</code>、<code>"page"</code> …）。<code>pairs</code> 可遍历对象的公开属性。</li>
+            <li>属性像字段一样读写；写成功后发 <code>"property::&lt;name&gt;"</code> 信号。</li>
+            <li><code>obj:add_signal(name, fn)</code> · <code>obj:emit_signal(name, ...)</code> · <code>obj:remove_signal(name, fn)</code> · <code>obj:remove_signals(name)</code>。</li>
+            <li>处理器按注册顺序以 <code>fn(obj, ...)</code> 调用。<b>第一个返回非 nil 的处理器终止传播</b>，其返回值就是 <code>emit_signal</code> 的返回值（luakit 的 <code>LUA_MULTRET</code> 语义）——<code>navigation-request</code> 返回 <code>false</code> 否决就是靠这个。</li>
+            <li>类本身也有模块级信号：<code>widget.add_signal("create", fn(w))</code>、<code>luakit.add_signal(...)</code>。</li>
+            <li><code>destroy</code> 之后只能读 <code>obj.is_alive</code>；其余访问报错。</li>
+          </ul>
+        </section>
+
+        <section id="c-widget">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p><code>widget{ type = "...", &lt;props&gt; }</code> 构造控件。除 webview 外的每种类型背后都是 Java 宿主 <code>LemurXWidgetHost</code> 持有的一个真实 Android View；属性读写和方法调用同步过去，事件异步回来——只有 <code>key-press</code> 例外，UI 线程要等它"吃不吃掉"的裁决。</p>
+          <p>类型：<code>window hbox vbox hpaned vpaned notebook overlay stack eventbox scrolled label entry image spinner drawing_area webview</code>。</p>
+          <dl class="api">
+            <dt><code>w.type</code> · <code>w.parent</code> · <code>w.is_alive</code></dt><dd>只读。</dd>
+            <dt><code>w.visible</code> · <code>w.focused</code> · <code>w.can_focus</code> · <code>w.tooltip</code> · <code>w.opacity</code></dt><dd>读写。</dd>
+            <dt><code>w.width</code> · <code>w.height</code> · <code>w.min_size</code> · <code>w.margin</code> · <code>w.margin_left/right/top/bottom</code> · <code>w.align</code></dt><dd>几何，单位 dp。<code>align = { h = "left"|"center"|"right"|"fill", v = ... }</code>。</dd>
+            <dt><code>w.bg</code> · <code>w.fg</code> · <code>w.font</code> · <code>w.css</code></dt><dd>GTK/CSS 颜色（<code>"#rrggbb"</code>、颜色名）、Pango 字体串（<code>"monospace bold 12"</code>，字号 sp）、CSS 子集。</dd>
+            <dt><code>w:show()</code> · <code>w:hide()</code> · <code>w:focus()</code> · <code>w:destroy()</code></dt><dd>通用方法。</dd>
+            <dt><code>w:send_key(key, mods)</code> · <code>w:query_tooltip()</code> · <code>w:css_reset()</code> · <code>w:rect() -> {x, y, w, h}</code></dt><dd>合成按键；tooltip 文本；重置 CSS；屏幕矩形。</dd>
+            <dt><code>widget.add_signal("create", fn(w))</code><span class="badges"><span class="badge badge--signal">class signal</span></span></dt><dd>每个新控件都触发——<code>webview.lua</code>/<code>window.lua</code> 靠它初始化。</dd>
+            <dt><code>"key-press"(w, mods, key)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>返回 <code>true</code> 表示吃掉。<code>mods</code> 是 <code>"Control" "Shift" "Mod1"</code>… 的表；<code>key</code> 是 GDK keysym 名（<code>"Escape"</code>、<code>"Return"</code>、<code>"a"</code>）。</dd>
+            <dt><code>"button-press"</code> · <code>"button-release"</code> · <code>"button-double-click"(w, mods, button)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>指针 / 触摸事件（button 1）。挂上处理器才会启用宿主侧监听。</dd>
+            <dt><code>"mouse-enter"</code> · <code>"mouse-leave"</code> · <code>"scroll"</code> · <code>"focus"</code> · <code>"unfocus"</code> · <code>"resize"</code> · <code>"parent-set"</code> · <code>"destroy"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>其他控件事件。</dd>
+          </dl>
+        </section>
+
+        <section id="c-webview">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:webview</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>luakit 的 webview <em>就是</em>LemurX的一个 Tab。<code>widget{type="webview"}</code> 会开一个 Tab；<code>luakit_autowrap</code> 开着时（默认），用户在原生界面开的每个 Tab 也会被包装，所以 <code>webview.add_signal("init")</code> 和 <code>luakit.windows</code> 类的代码都能看到它们。<code>view.id</code> 等于 tab id，也等于渲染进程的 <code>page.id</code>。把 webview 放进 <code>notebook</code> 或 <code>box</code>，Tab 内容就挪进该控件的矩形。</p>
+          <dl class="api">
+            <dt><code>view.uri</code></dt><dd>读写——赋值即导航。</dd>
+            <dt><code>view.title</code> · <code>view.progress</code> · <code>view.is_loading</code> · <code>view.is_playing_audio</code> · <code>view.private</code> · <code>view.id</code> · <code>view.web_process_id</code> · <code>view.hovered_uri</code> · <code>view.favicon</code> · <code>view.favicon_uri</code> · <code>view.certificate</code> · <code>view.source</code></dt><dd>只读状态。<code>certificate</code> 为 PEM。</dd>
+            <dt><code>view.session_state</code></dt><dd>读写序列化的导航历史（<code>session.lua</code>、<code>undoclose.lua</code> 用）。</dd>
+            <dt><code>view.history -> {index, items={{uri, title}...}}</code></dt><dd>前进后退列表。</dd>
+            <dt><code>view.scroll -> {x, y, xmax, ymax, xpage_size, ypage_size}</code></dt><dd>读写滚动位置。</dd>
+            <dt><code>view.zoom_level</code> · <code>view.user_agent</code> · <code>view.enable_javascript</code> · <code>view.editable</code> · <code>view.enable_scripts</code></dt><dd>读写设置。所有 WebKitSettings 键（<code>default_font_size</code> …）都接受，Chromium 有对应项的会映射。</dd>
+            <dt><code>view.stylesheets</code></dt><dd>集合式的表：<code>view.stylesheets[ss] = true</code>。见 <a href="#lk-stylesheet"><code>stylesheet</code></a>。</dd>
+            <dt><code>view.inspector</code> · <code>view:show_inspector()</code> · <code>close_inspector()</code></dt><dd>这个标签的 DevTools 前端。</dd>
+            <dt><code>view:go_back()</code> · <code>go_forward()</code> · <code>can_go_back()</code> · <code>can_go_forward()</code> · <code>reload()</code> · <code>reload_bypass_cache()</code> · <code>stop()</code> · <code>loading()</code></dt><dd>导航控制。</dd>
+            <dt><code>view:eval_js(script[, {source=, callback=fn(ret, err)}])</code></dt><dd>主世界求值；带 <code>callback</code> 时异步。</dd>
+            <dt><code>view:load_string(html, base_uri)</code></dt><dd>显示生成的 HTML，不发网络请求、不进历史。</dd>
+            <dt><code>view:search(text, case_sensitive, forward, wrap)</code> · <code>search_next()</code> · <code>search_previous()</code> · <code>clear_search()</code></dt><dd>页内查找。</dd>
+            <dt><code>view:ssl_trusted() -> boolean | nil</code> · <code>allow_certificate(host, cert)</code></dt><dd>TLS 状态。</dd>
+            <dt><code>view:save(path)</code> · <code>view:crash()</code> · <code>view:set_pdfjs(on)</code></dt><dd>保存页面（MHTML）；杀掉渲染进程；PDF 查看器偏好。</dd>
+            <dt><code>"load-status"(view, status, uri, err)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd><code>status</code>：<code>"provisional" | "redirected" | "committed" | "first-visual" | "finished" | "failed"</code>。</dd>
+            <dt><code>"navigation-request"(view, uri, reason) -> false</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>返回 <code>false</code> 取消。实现为 <code>NavigationThrottle</code>：什么都不加载，不进历史。<code>reason</code> 与 luakit 一致（<code>"link-clicked"</code>、<code>"form-submitted"</code>、<code>"back-forward"</code>、<code>"reload"</code>、<code>"form-resubmitted"</code>、<code>"other"</code>）。</dd>
+            <dt><code>"new-window-decision"(view, uri, reason) -> false</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>弹窗 / <code>target=_blank</code>。返回 <code>false</code> 拦截；否则新标签被包装并设置 <code>parent_view</code>。</dd>
+            <dt><code>"scheme-request::&lt;name&gt;"(view, uri, request)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>见 <a href="#lk-scheme">自定义 scheme</a>。</dd>
+            <dt><code>"favicon"</code> · <code>"crashed"</code> · <code>"web-extension-loaded"</code> · <code>"property::uri"</code> · <code>"property::title"</code> · <code>"property::progress"</code> · <code>"property::is_playing_audio"</code> …<span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>状态变化。</dd>
+          </dl>
+        </section>
+
+        <section id="c-window">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:window</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>盖在 Activity 内容视图上的全屏 <code>FrameLayout</code>。显示 window 会隐藏原生工具栏和底栏；销毁（或隐藏）最后一个 window 时恢复。<code>luakit.windows</code> 列出活着的 window。</p>
+          <dl class="api">
+            <dt><code>win.child</code></dt><dd>唯一的子控件。</dd>
+            <dt><code>win.title</code> · <code>win.decorated</code> · <code>win.urgency_hint</code> · <code>win.fullscreen</code> · <code>win.maximized</code> · <code>win.screen</code> · <code>win.root_win_xid</code></dt><dd>为兼容接受；<code>fullscreen</code> 映射到沉浸模式。</dd>
+            <dt><code>win:set_default_size(w, h)</code></dt><dd>期望尺寸 dp；<code>0</code> 表示占满。</dd>
+            <dt><code>win:set_dark_mode(on)</code></dt><dd>覆盖层的暗色提示。</dd>
+            <dt><code>"destroy"</code> · <code>"can-close"</code> · <code>"delete-event"</code> · <code>"key-press"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>窗口信号。子控件没吃掉的硬件键会到达 window 的 <code>key-press</code>。</dd>
+          </dl>
+        </section>
+
+        <section id="c-box">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:box</code>（<code>hbox</code> / <code>vbox</code>）</h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>一个 <code>LinearLayout</code>。</p>
+          <dl class="api">
+            <dt><code>box.homogeneous</code> · <code>box.spacing</code></dt><dd>子项等宽；间距 dp。</dd>
+            <dt><code>box:pack(child[, {expand=, fill=, padding=, start=false}])</code></dt><dd>追加（<code>start=false</code> 即 <code>pack_end</code> 语义）。<code>expand</code> 变成 layout weight。</dd>
+            <dt><code>box:reorder(child, index)</code></dt><dd>移动子项（1 起）。</dd>
+            <dt><code>box:remove(child)</code> · <code>box:replace(old, new)</code></dt><dd>移除 / 替换。</dd>
+            <dt><code>box.children -> {widget...}</code></dt><dd>当前子项。</dd>
+            <dt><code>"add"(box, child)</code> · <code>"remove"(box, child)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>子项变化。</dd>
+          </dl>
+        </section>
+
+        <section id="c-notebook">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:notebook</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>页签通常是 webview。切页会选中对应的原生 Tab，原生选中 Tab 也会切 notebook。索引从 1 起；<code>-1</code> 表示最后一页。</p>
+          <dl class="api">
+            <dt><code>nb:append(child) -> index</code> · <code>nb:insert(index, child) -> index</code></dt><dd>添加页。</dd>
+            <dt><code>nb:remove(child)</code></dt><dd>移除页（控件本身保留）。</dd>
+            <dt><code>nb:count() -> n</code> · <code>nb:current() -> index</code></dt><dd>页数；当前页索引。</dd>
+            <dt><code>nb:atindex(i) -> widget</code> · <code>nb[i]</code> · <code>nb:indexof(child) -> index | nil</code></dt><dd>双向查找。</dd>
+            <dt><code>nb:switch(i)</code> · <code>nb:reorder(child, i)</code></dt><dd>选中 / 移动页。</dd>
+            <dt><code>nb:set_title(child, text)</code> · <code>get_title(child)</code></dt><dd>页签标签（<code>show_tabs</code> 时用）。</dd>
+            <dt><code>nb.show_tabs</code> · <code>nb.show_border</code></dt><dd>内置页签条开关（luakit 的 <code>window.lua</code> 自己画标签条并把它藏起来）。</dd>
+            <dt><code>"switch-page"(nb, view, index)</code> · <code>"page-added"(nb, view, index)</code> · <code>"page-removed"(nb, view)</code> · <code>"page-reordered"(nb, view, index)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>页生命周期。</dd>
+          </dl>
+        </section>
+
+        <section id="c-label">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:label</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>label.text</code></dt><dd>Pango markup（<code>&lt;span foreground='#fff' weight='bold'&gt;</code>、<code>&lt;b&gt;</code>、<code>&lt;i&gt;</code>、<code>&lt;u&gt;</code>、<code>&lt;tt&gt;</code>）翻译成 Android <code>Spanned</code>。</dd>
+            <dt><code>label.fg</code> · <code>label.bg</code> · <code>label.font</code> · <code>label.padding</code> · <code>label.align</code> · <code>label.textwidth</code> · <code>label.selectable</code></dt><dd>样式。<code>textwidth</code> 以字符计（0 = 不限）；超出时省略号。</dd>
+          </dl>
+        </section>
+
+        <section id="c-entry">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:entry</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>一个 <code>EditText</code>。聚焦时弹出软键盘。</p>
+          <dl class="api">
+            <dt><code>entry.text</code> · <code>entry.position</code> · <code>entry.show_frame</code> · <code>entry.fg/bg/font</code></dt><dd>内容、光标位置、边框、样式。</dd>
+            <dt><code>entry:insert_text(text[, position])</code> · <code>entry:select_region(start[, end])</code></dt><dd>编辑辅助。</dd>
+            <dt><code>"changed"(entry)</code> · <code>"activate"(entry)</code> · <code>"key-press"(entry, mods, key)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>文本变化；输入法"完成"/回车；按键（返回 <code>true</code> 吃掉——luakit 的 <code>modes</code>/<code>binds</code> 靠这个）。</dd>
+          </dl>
+        </section>
+
+        <section id="c-eventbox">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:eventbox</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>eb.child</code> · <code>eb.bg</code></dt><dd>单个子控件；背景。</dd>
+            <dt><code>"button-press"</code> · <code>"button-release"</code> · <code>"button-double-click"</code> · <code>"mouse-enter"</code> · <code>"mouse-leave"</code> · <code>"scroll"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>触摸 → GTK 风格指针事件。luakit 的标签条就是一排 eventbox。</dd>
+          </dl>
+        </section>
+
+        <section id="c-overlay">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:overlay</code> · <code>widget:stack</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>overlay.child</code> · <code>overlay:pack(child)</code> · <code>overlay:remove(child)</code></dt><dd>一个 <code>FrameLayout</code>：一个主子控件，上面叠覆盖层。</dd>
+            <dt><code>stack:pack(child)</code> · <code>stack.visible_child</code> · <code>stack.homogeneous</code></dt><dd>同一时刻只显示一个子控件。</dd>
+          </dl>
+        </section>
+
+        <section id="c-paned">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:paned</code>（<code>hpaned</code> / <code>vpaned</code>）</h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>paned:pack1(child[, resize, shrink])</code> · <code>pack2(child[, resize, shrink])</code></dt><dd>两个子控件水平或垂直分割。</dd>
+            <dt><code>paned.top/bottom</code> · <code>paned.left/right</code> · <code>paned.position</code></dt><dd>按方向取子控件；分隔条位置 dp。</dd>
+          </dl>
+        </section>
+
+        <section id="c-scrolled">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:scrolled</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>scrolled.child</code> · <code>scrolled.scrollbars</code> · <code>scrolled.scroll -> {x, y, xmax, ymax}</code></dt><dd>按子控件方向选 <code>ScrollView</code>/<code>HorizontalScrollView</code>；滚动位置可读写。</dd>
+          </dl>
+        </section>
+
+        <section id="c-image">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:image</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>image:filename(path)</code></dt><dd>从文件加载（luakit 的标签图标在 <code>resources/icons/</code>）。</dd>
+            <dt><code>image:icon(name[, size])</code></dt><dd>按名字取图标（apk drawable 或 Android 系统图标）。</dd>
+            <dt><code>image:scale(w, h)</code></dt><dd>缩放到 dp。</dd>
+            <dt><code>image:set_favicon_for_uri(uri) -> boolean</code></dt><dd>显示 Chromium 为 <code>uri</code> 保存的 favicon（<code>tab_favicons.lua</code>）。</dd>
+          </dl>
+        </section>
+
+        <section id="c-spinner">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:spinner</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>spinner:start()</code> · <code>spinner:stop()</code> · <code>spinner.started</code></dt><dd>不定进度的 <code>ProgressBar</code>。</dd>
+          </dl>
+        </section>
+
+        <section id="c-drawing_area">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>widget:drawing_area</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>da:invalidate()</code> · <code>da.bg</code> · <code>da.min_size</code></dt><dd>一个由你定尺寸、定颜色的普通 View；适合做分隔线或色块仪表。</dd>
+          </dl>
+        </section>
+
+        <section id="c-download">
+          <p class="kicker">类 · luakit</p>
+          <div class="modhead"><h2><code>download</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>download{ uri = "https://..." } -> d</code> · <code>d:start()</code> · <code>d:cancel()</code></dt><dd>创建并控制下载（经LemurX下载管理器）。</dd>
+            <dt><code>d.uri</code> · <code>d.destination</code>(rw) · <code>d.allow_overwrite</code>(rw) · <code>d.status</code> · <code>d.progress</code> · <code>d.current_size</code> · <code>d.total_size</code> · <code>d.content_length</code> · <code>d.mime_type</code> · <code>d.suggested_filename</code> · <code>d.elapsed_time</code> · <code>d.error</code></dt><dd><code>status ∈ "created" | "started" | "cancelled" | "failed" | "finished"</code>。</dd>
+            <dt><code>"decide-destination"(d, suggested)</code> · <code>"created-destination"(d, path)</code> · <code>"error"(d, msg)</code> · <code>"finished"(d)</code> · <code>"property::*"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>下载生命周期；<code>luakit.add_signal("download-start", fn(d, view))</code> 能接到浏览器自己发起的下载。</dd>
+          </dl>
+        </section>
+
+        <!-- ================================================ 渲染进程类 -->
+
+        <section id="r-luakit">
+          <p class="kicker">类 · 渲染进程</p>
+          <div class="modhead"><h2><code>luakit</code>（web 模块侧）</h2><span class="badge badge--luakit">luakit</span><span class="badge badge--renderer">renderer</span></div>
+          <p>在用 <a href="#lk-ipc"><code>require_web_module</code></a> 加载的 web 模块里可用。每个渲染进程一个 Lua 状态；一个进程可能承载多个页面。</p>
+          <dl class="api">
+            <dt><code>luakit.web_process_id</code> · <code>luakit.version</code> · <code>luakit.install_path</code> · <code>luakit.resource_path</code></dt><dd>进程标识与路径。</dd>
+            <dt><code>luakit.add_signal("page-created", fn(page))</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>本进程创建了一个主框架。在这里挂 <code>page</code> 的信号。</dd>
+            <dt><code>luakit.register_function(uri_pattern, name, fn(page, resolve, reject, ...))</code></dt><dd>对 URL 匹配该 Lua pattern 的文档，定义返回 Promise 的 <code>window[name](...)</code>。参数以 Lua 值到达（DOM 节点为 <code>dom_element</code>）；调 <code>resolve(value)</code> 或 <code>reject(err)</code>，可以稍后调。<code>fn</code> 抛错自动 reject。</dd>
+            <dt><code>luakit.idle_add(fn)</code> · <code>idle_remove(fn)</code> · <code>luakit.time()</code> · <code>uri_encode</code> · <code>uri_decode</code> · <code>wch_lower</code> · <code>wch_upper</code></dt><dd>与浏览器侧相同。</dd>
+          </dl>
+        </section>
+
+        <section id="r-page">
+          <p class="kicker">类 · 渲染进程</p>
+          <div class="modhead"><h2><code>page</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--renderer">renderer</span></div>
+          <p>进程里每个主框架一个 <code>page</code>。<code>page.id</code> 等于浏览器侧的 <code>webview.id</code> / tab id，web 模块和 UI 进程说话时能点名标签。</p>
+          <dl class="api">
+            <dt><code>page.uri</code> · <code>page.id</code></dt><dd>当前 URL；tab id。</dd>
+            <dt><code>page.document -> dom_document</code></dt><dd>活的文档。</dd>
+            <dt><code>page:eval_js(script[, {source=}]) -> value | nil, err</code></dt><dd>同步主世界求值。结果是 JS 函数时返回可调用的 Lua 函数。</dd>
+            <dt><code>page:wrap_js(body[, {argnames}]) -> fn</code></dt><dd>把一段 JS 函数体编译成 Lua 可调用的函数。</dd>
+            <dt><code>"send-request"(page, uri, headers) -> string | false | nil</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>该页面的每个子资源请求，在发出之前同步触发。返回字符串重定向、<code>false</code> 拦截、不返回放行。对 <code>headers</code> 表的修改会应用。底层是渲染进程的 <code>URLLoaderThrottle</code>。</dd>
+            <dt><code>"document-loaded"(page)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>主框架的 DOMContentLoaded。</dd>
+            <dt><code>"destroy"(page)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>框架消失。</dd>
+          </dl>
+        </section>
+
+        <section id="r-dom_document">
+          <p class="kicker">类 · 渲染进程</p>
+          <div class="modhead"><h2><code>dom_document</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--renderer">renderer</span></div>
+          <dl class="api">
+            <dt><code>doc.body -> dom_element</code></dt><dd>body 元素。</dd>
+            <dt><code>doc.window -> {scroll_x, scroll_y, inner_width, inner_height}</code></dt><dd>视口指标。</dd>
+            <dt><code>doc:query(css) -> {dom_element...}</code></dt><dd><code>querySelectorAll</code>，返回 Lua 数组。</dd>
+            <dt><code>doc:create_element(tag[, attrs[, inner_text]]) -> dom_element</code></dt><dd>创建游离元素。</dd>
+            <dt><code>doc:element_from_point(x, y) -> dom_element | nil</code></dt><dd>命中测试。</dd>
+            <dt><code>"destroy"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>文档卸载。</dd>
+          </dl>
+        </section>
+
+        <section id="r-dom_element">
+          <p class="kicker">类 · 渲染进程</p>
+          <div class="modhead"><h2><code>dom_element</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--renderer">renderer</span></div>
+          <p>主世界 V8 节点句柄。身份保持：同一页面内同一节点得到同一个 Lua 对象，所以 <code>a == b</code> 和把元素当表键都成立。所有操作同步。</p>
+          <dl class="api">
+            <dt><code>el.tag_name</code> · <code>el.text_content</code> · <code>el.inner_html</code> · <code>el.child_count</code> · <code>el.src</code> · <code>el.href</code> · <code>el.value</code> · <code>el.checked</code> · <code>el.type</code></dt><dd>常用属性（DOM 允许处可写）。</dd>
+            <dt><code>el.parent</code> · <code>el.first_child</code> · <code>el.last_child</code> · <code>el.prev_sibling</code> · <code>el.next_sibling</code> · <code>el.document</code> · <code>el.owner_document</code></dt><dd>树导航。</dd>
+            <dt><code>el.attr.&lt;name&gt;</code> · <code>el.style.&lt;name&gt;</code></dt><dd>属性与内联样式代理：<code>el.attr.target = "_self"</code>、<code>el.style.display = "none"</code>。</dd>
+            <dt><code>el.rect -> {left, top, width, height}</code> · <code>el:client_rects()</code></dt><dd>几何。</dd>
+            <dt><code>el:query(css) -> {dom_element...}</code></dt><dd>子树内 <code>querySelectorAll</code>。</dd>
+            <dt><code>el:append(child)</code> · <code>el:remove()</code></dt><dd>修改。</dd>
+            <dt><code>el:click()</code> · <code>el:focus()</code> · <code>el:submit()</code></dt><dd>动作。</dd>
+            <dt><code>el:add_event_listener(type, capture, fn(el, event))</code> · <code>remove_event_listener(type, capture, fn)</code></dt><dd>DOM 事件进 Lua。<code>event</code> 是 JS 对象代理（读属性、调方法如 <code>event:preventDefault()</code>）。</dd>
+            <dt><code>"destroy"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>页面卸载时对该页所有元素发。</dd>
+          </dl>
+        </section>
+
+        <section id="r-ipc">
+          <p class="kicker">类 · 渲染进程</p>
+          <div class="modhead"><h2><code>ipc_channel</code>（web 模块侧）</h2><span class="badge badge--luakit">luakit</span><span class="badge badge--renderer">renderer</span></div>
+          <dl class="api">
+            <dt><code>ipc_channel(name) -> ui</code></dt><dd>浏览器里 <code>require_web_module(name)</code> 返回的那条 channel 在渲染进程这一端。</dd>
+            <dt><code>ui:emit_signal(name, ...)</code></dt><dd>发到浏览器进程。接收方需要知道是哪个标签时，把 <code>page.id</code> 放第一个参数。</dd>
+            <dt><code>ui:add_signal(name, fn(ch, page, ...))</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>接收浏览器发来的信号。<code>page</code> 是目标页面，广播时为 <code>nil</code>——与 luakit 一致。</dd>
+          </dl>
+          <div class="note note--ok">
+            <b>以上就是全部接口。</b> 如果缺了你需要的东西，在设备上跑 <code>lemurx.help()</code> 会打印你手上这个构建的清单；上面每个模块在代码树里都有对应的测试 harness。
+          </div>
+        </section>
+
+      </article>
+    </div>
+  </main>
+
+  <button class="totop" type="button" aria-label="回到顶部">↑</button>
+
+  <footer class="footer">
+    <div class="wrap footer__inner">
+      <div class="footer__brand">
+        <img src="assets/logo-32.png" width="24" height="24" alt="">
+        <span>LemurX</span>
+      </div>
+      <nav class="footer__links" aria-label="页脚">
+        <a href="index.html#features" data-i18n="page.a3">Features</a>
+        <a href="index.html#code" data-i18n="page.a4">Code</a>
+        <a href="index.html#architecture" data-i18n="page.a5">Architecture</a>
+        <a href="index.html#extensions" data-i18n="page.a6">Extensions</a>
+        <a href="index.html#community" data-i18n="page.a7">Community</a>
+        <a href="index.html#story" data-i18n="page.a8">Story</a>
+        <a href="lua.zh-CN.html" data-i18n="page.a9">Docs</a>
+        <a href="index.html#download" data-i18n="page.a10">Download</a>
+      </nav>
+      <p class="footer__legal" data-i18n="page.p11">基于 Chromium 构建。Lua 版权归 PUC-Rio。luakit 版权归 luakit 团队（GPLv3，作为独立文件分发）。Chrome、Edge 及所示扩展名称为其各自所有者的商标。你的设备，你的规则。</p>
+    </div>
+  </footer>
+
+  <script src="js/main.js" defer></script>
+  <script src="js/docs.js" defer></script>
+</body>
+</html>

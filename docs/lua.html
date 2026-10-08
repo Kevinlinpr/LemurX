@@ -1,0 +1,1407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LemurX Lua Reference — every module, class and signal</title>
+  <meta name="description" content="Complete reference for scripting LemurX in Lua 5.4: the lemurx.* browser-process API, the luakit-compatible widget/webview/scheme layer, and the renderer-embedded page/DOM API. Signatures, return shapes, signals, privilege rules, examples.">
+  <meta property="og:title" content="LemurX Lua Reference">
+  <meta property="og:description" content="lemurx.* · luakit compatibility · renderer-embedded Lua. Every module, class and signal, written down.">
+  <meta property="og:image" content="assets/logo-512.png">
+  <meta name="theme-color" content="#070b14">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/logo-32.png">
+  <link rel="apple-touch-icon" href="assets/logo-180.png">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/docs.css">
+</head>
+<body>
+  <a class="skip" href="#main" data-i18n="page.a1">Skip to content</a>
+
+  <header class="nav" id="nav">
+    <div class="wrap nav__inner">
+      <a class="brand" href="index.html" aria-label="LemurX home">
+        <img class="brand__logo" src="assets/logo-180.png" width="36" height="36" alt="">
+        <span class="brand__name">LemurX</span>
+        <span class="brand__tag">lua docs</span>
+      </a>
+      <nav class="nav__links" id="navLinks" aria-label="Primary">
+        <a href="index.html#why" data-i18n="navLinks.a1">Why</a>
+        <a href="index.html#features" data-i18n="navLinks.a2">Features</a>
+        <a href="index.html#code" data-i18n="navLinks.a3">Code</a>
+        <a href="index.html#architecture" data-i18n="navLinks.a4">Architecture</a>
+        <a href="index.html#extensions" data-i18n="navLinks.a5">Extensions</a>
+        <a href="index.html#community" data-i18n="navLinks.a6">Community</a>
+        <a href="index.html#story" data-i18n="navLinks.a7">Story</a>
+        <a href="lua.html" data-i18n="navLinks.a8">Docs</a>
+        <a class="btn btn--small btn--primary" href="index.html#download" data-i18n="navLinks.a9">Download</a>
+      </nav>
+      <label class="lang" title="Language">
+        <span class="lang__icon" aria-hidden="true">🌐</span>
+        <select id="langSelect" aria-label="Language" data-i18n-aria="ui.language"></select>
+      </label>
+      <button class="nav__toggle" id="navToggle" aria-expanded="false" aria-controls="navLinks" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="wrap docs-hero">
+      <p class="eyebrow"><span class="dot"></span> Reference · Lua 5.4 · Chromium · Android</p>
+      <h1>The LemurX <span class="grad">Lua Reference.</span></h1>
+      <p class="lede">
+        Everything a script can touch, in one page. Three layers, one language: the <code>lemurx.*</code> API in the browser
+        process, a <a href="https://luakit.github.io/docs/" target="_blank" rel="noopener">luakit</a>-compatible layer
+        (<code>widget</code>, <code>webview</code>, <code>luakit.register_scheme</code>, <code>sqlite3</code>, …) so luakit's
+        <code>rc.lua</code> and its whole <code>lib/</code> run unmodified on a phone, and a Lua state <em>inside every renderer</em>
+        with the real DOM and a synchronous hook on every request.
+      </p>
+      <div class="docs-hero__meta">
+        <span>files/lua/*.lua</span><span>Lua 5.4.7</span><span>browser process · renderer process</span>
+        <span>local privileged · UGC sandboxed</span><span>rc.lua compatible</span>
+      </div>
+    </div>
+
+    <div class="wrap docs">
+      <!-- ============================================================ SIDEBAR -->
+      <aside class="side" aria-label="Reference index">
+        <details open>
+          <summary>Index</summary>
+          <input class="side__search" id="docSearch" type="search" placeholder="Search the reference  ( / )" aria-label="Search the reference">
+          <div class="side__count" id="docSearchCount"></div>
+
+          <h4>Pages</h4>
+          <ul>
+            <li><a href="#overview">Overview</a></li>
+            <li><a href="#quickstart">Quick start</a></li>
+            <li><a href="#conventions">Conventions &amp; trust domains</a></li>
+            <li><a href="#events">Events</a></li>
+            <li><a href="#luakit-compat">luakit compatibility</a></li>
+            <li><a href="#renderer">Lua in the renderer</a></li>
+            <li><a href="#examples">Showcase scripts</a></li>
+            <li><a href="#recipes">Recipes</a></li>
+            <li><a href="#pitfalls">Pitfalls &amp; limits</a></li>
+            <li><a href="#ugc-rules">Publishing UGC scripts</a></li>
+          </ul>
+
+          <h4>Modules · lemurx.*</h4>
+          <ul>
+            <li><a href="#m-core"><code>lemurx</code> core</a></li>
+            <li><a href="#m-async"><code>lemurx.async</code> / <code>await</code></a></li>
+            <li><a href="#m-bridge"><code>lemurx.expose</code> / <code>import</code></a></li>
+            <li><a href="#m-tabs"><code>lemurx.tabs</code></a></li>
+            <li><a href="#m-net"><code>lemurx.net</code></a></li>
+            <li><a href="#m-http"><code>lemurx.http</code></a></li>
+            <li><a href="#m-fs"><code>lemurx.fs</code></a></li>
+            <li><a href="#m-storage"><code>storage</code> · <code>clipboard</code> · <code>db</code> · <code>timer</code></a></li>
+            <li><a href="#m-chrome"><code>lemurx.chrome</code></a></li>
+            <li><a href="#m-menu"><code>lemurx.menu</code></a></li>
+            <li><a href="#m-theme"><code>lemurx.theme</code></a></li>
+            <li><a href="#m-ui-render"><code>lemurx.ui.render</code> · <code>h</code></a></li>
+            <li><a href="#m-ui-surgery"><code>lemurx.ui.style</code> · surgery</a></li>
+            <li><a href="#m-ui-legacy"><code>lemurx.ui</code> automation</a></li>
+            <li><a href="#m-input"><code>lemurx.input</code></a></li>
+            <li><a href="#m-intent"><code>lemurx.intent</code></a></li>
+            <li><a href="#m-priv">Privileged: <code>cookie</code> … <code>features</code></a></li>
+            <li><a href="#m-cdp"><code>lemurx.cdp</code></a></li>
+            <li><a href="#m-cdp-helpers"><code>v8</code> · <code>dom</code> · <code>emulation</code> …</a></li>
+            <li><a href="#m-agent"><code>lemurx.agent</code> · <code>system</code></a></li>
+            <li><a href="#m-ugc"><code>lemurx.ugc</code> · <code>catalog</code> · <code>help</code></a></li>
+          </ul>
+
+          <h4>Modules · luakit</h4>
+          <ul>
+            <li><a href="#lk-luakit"><code>luakit</code></a></li>
+            <li><a href="#lk-soup"><code>soup</code></a></li>
+            <li><a href="#lk-sqlite3"><code>sqlite3</code></a></li>
+            <li><a href="#lk-stylesheet"><code>stylesheet</code></a></li>
+            <li><a href="#lk-timer"><code>timer</code></a></li>
+            <li><a href="#lk-regex"><code>regex</code></a></li>
+            <li><a href="#lk-utf8"><code>utf8</code></a></li>
+            <li><a href="#lk-xdg"><code>xdg</code></a></li>
+            <li><a href="#lk-msg"><code>msg</code></a></li>
+            <li><a href="#lk-unique"><code>unique</code></a></li>
+            <li><a href="#lk-lfs"><code>lfs</code></a></li>
+            <li><a href="#lk-ipc"><code>ipc_channel</code> · <code>require_web_module</code></a></li>
+            <li><a href="#lk-scheme">Custom schemes · <code>request</code></a></li>
+          </ul>
+
+          <h4>Classes · luakit</h4>
+          <ul>
+            <li><a href="#c-object">Object protocol &amp; signals</a></li>
+            <li><a href="#c-widget"><code>widget</code></a></li>
+            <li><a href="#c-webview"><code>widget:webview</code></a></li>
+            <li><a href="#c-window"><code>widget:window</code></a></li>
+            <li><a href="#c-box"><code>widget:box</code></a></li>
+            <li><a href="#c-notebook"><code>widget:notebook</code></a></li>
+            <li><a href="#c-label"><code>widget:label</code></a></li>
+            <li><a href="#c-entry"><code>widget:entry</code></a></li>
+            <li><a href="#c-eventbox"><code>widget:eventbox</code></a></li>
+            <li><a href="#c-overlay"><code>widget:overlay</code> · <code>stack</code></a></li>
+            <li><a href="#c-paned"><code>widget:paned</code></a></li>
+            <li><a href="#c-scrolled"><code>widget:scrolled</code></a></li>
+            <li><a href="#c-image"><code>widget:image</code></a></li>
+            <li><a href="#c-spinner"><code>widget:spinner</code></a></li>
+            <li><a href="#c-drawing_area"><code>widget:drawing_area</code></a></li>
+            <li><a href="#c-download"><code>download</code></a></li>
+          </ul>
+
+          <h4>Classes · renderer</h4>
+          <ul>
+            <li><a href="#r-luakit"><code>luakit</code> (web)</a></li>
+            <li><a href="#r-page"><code>page</code></a></li>
+            <li><a href="#r-dom_document"><code>dom_document</code></a></li>
+            <li><a href="#r-dom_element"><code>dom_element</code></a></li>
+            <li><a href="#r-ipc"><code>ipc_channel</code> (web)</a></li>
+          </ul>
+        </details>
+      </aside>
+
+      <!-- ============================================================ ARTICLE -->
+      <article class="article">
+
+        <!-- ------------------------------------------------ OVERVIEW -->
+        <section id="overview">
+          <p class="kicker">Pages</p>
+          <h2>Overview</h2>
+          <p>
+            LemurX is Chromium for Android with a Lua 5.4 interpreter living inside the browser process, on its own sequenced
+            thread. Scripts are plain <code>.lua</code> files in the app's private directory. There is no manifest, no
+            permission prompt and no extension API standing between the script and the browser: a script talks to tabs,
+            the network stack, the native Android UI, the DevTools Protocol and Chromium's own services through one
+            table, <code>lemurx</code>.
+          </p>
+          <p>Three layers are available, and they compose:</p>
+          <div class="layers">
+            <div class="layer layer--a"><b>lemurx.*</b><span>The native LemurX API. Tabs, network rules, HTTP, files, storage, the browser shell, declarative native UI, native-view surgery, input, intents, cookies, history, prefs, the Chrome DevTools Protocol. <span class="badge badge--browser">browser process</span></span></div>
+            <div class="layer layer--b"><b>luakit layer</b><span><a href="https://luakit.github.io/docs/" target="_blank" rel="noopener">luakit</a>'s entire C-level Lua surface, re-implemented on Chromium: <code>widget{}</code> trees mapped to Android views, <code>webview</code> bound to a tab, <code>luakit.register_scheme</code>, <code>sqlite3</code>, <code>regex</code>, <code>soup</code>, <code>stylesheet</code>, <code>timer</code>, <code>download</code>, <code>ipc_channel</code>. luakit's <code>lib/</code>, <code>lousy/</code> and <code>rc.lua</code> ship as-is and run. <span class="badge badge--luakit">luakit</span></span></div>
+            <div class="layer layer--c"><b>renderer</b><span>A Lua state in every renderer process (luakit's <em>web extension</em> model): <code>page</code>, <code>dom_document</code>, <code>dom_element</code> over main-world V8 handles, the synchronous <code>send-request</code> hook on every subresource, <code>luakit.register_function</code> to expose Lua to page JavaScript, <code>ipc_channel</code> back to the browser process. <span class="badge badge--renderer">renderer process</span></span></div>
+          </div>
+          <p>How to read the badges used throughout this page:</p>
+          <p>
+            <span class="badge badge--browser">browser</span> runs in the browser process ·
+            <span class="badge badge--renderer">renderer</span> runs in a renderer process ·
+            <span class="badge badge--luakit">luakit</span> luakit-compatible API ·
+            <span class="badge badge--ugc">UGC ok</span> allowed in sandboxed shared scripts ·
+            <span class="badge badge--priv">local only</span> refused (Lua error) in UGC scripts ·
+            <span class="badge badge--signal">signal</span> an event you subscribe to with <code>add_signal</code>.
+          </p>
+          <div class="note">
+            <b>Which layer should I use?</b> Reach for <code>lemurx.*</code> first — it is the smallest, most Android-shaped API.
+            Use the luakit layer when you want luakit's object model (signals, <code>property::</code> notifications), its
+            widget tree, custom URL schemes, or when porting luakit modules. Use the renderer layer when a decision has to be
+            made synchronously inside the page: per-request rewriting, DOM surgery before first paint, exposing native
+            functions to page scripts.
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------ QUICK START -->
+        <section id="quickstart">
+          <p class="kicker">Pages</p>
+          <h2>Quick start</h2>
+          <h3>Where scripts live</h3>
+          <div class="tbl-scroll">
+          <table class="tbl">
+            <tr><th>Path</th><th>Trust</th><th>Loaded</th></tr>
+            <tr><td><code>/data/data/&lt;pkg&gt;/files/lua/*.lua</code></td><td><span class="badge badge--priv">local · full power</span></td><td>At startup, sorted by file name</td></tr>
+            <tr><td><code>/data/data/&lt;pkg&gt;/files/lua/ugc/*.lua</code></td><td><span class="badge badge--ugc">UGC · sandboxed</span></td><td>After local scripts, one <code>lua_State</code> each</td></tr>
+            <tr><td><code>files/luakit/</code> (<code>lib/</code> <code>config/</code> <code>data/</code>)</td><td><span class="badge badge--luakit">luakit install</span></td><td>Seeded from the APK; <code>config/</code> is yours and never overwritten</td></tr>
+            <tr><td>apk <code>assets/lua/init.lua</code></td><td>runtime</td><td>First. Defines the <code>lemurx.*</code> sugar, then the luakit kernel loads</td></tr>
+          </table>
+          </div>
+          <p>Name files <code>10_xxx.lua</code>, <code>20_xxx.lua</code> — the number is the load order. The first run copies a
+            twenty-scene <code>00_tutorial.lua</code> next to yours.</p>
+
+          <h3>First script</h3>
+          <div class="code">
+            <div class="code__bar"><b>files/lua/10_hello.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">lemurx.tabs.on("loaded", function(ev)
+    lemurx.toast("Loaded: " .. tostring(ev.title))
+end)
+
+lemurx.ui.render("toolbar.end", lemurx.ui.h("icon", {
+    id = "hello", text = "λ", desc = "Say hi",
+    onClick = function() lemurx.help() end,
+}))</code></pre>
+          </div>
+
+          <h3>Pushing a script</h3>
+          <div class="code">
+            <div class="code__bar"><b>shell</b><button class="copy" type="button">Copy</button></div>
+<pre><code>adb push 10_hello.lua /sdcard/
+adb shell run-as &lt;pkg&gt; cp /sdcard/10_hello.lua files/lua/10_hello.lua
+# restart LemurX</code></pre>
+          </div>
+
+          <h3>Debugging</h3>
+          <ul>
+            <li><code>lemurx.log(...)</code> / <code>print(...)</code> go to logcat, tag <code>LemurX</code>. luakit's <code>msg.*</code> ends up in the same place.</li>
+            <li><code>lemurx.help()</code> prints the module catalog; <code>lemurx.help("tabs")</code> one module.</li>
+            <li>Errors in callbacks are caught and logged with a traceback — one script cannot take down another, and Lua can never crash a page.</li>
+            <li><code>lemurx.ui.dump()</code> / <code>lemurx.ui.shell()</code> print the native view tree with ids, for <code>ui.style</code> and surgery queries.</li>
+          </ul>
+        </section>
+
+        <!-- ------------------------------------------------ CONVENTIONS -->
+        <section id="conventions">
+          <p class="kicker">Pages</p>
+          <h2>Conventions &amp; trust domains</h2>
+
+          <h3>Threading</h3>
+          <p>All scripts run on <b>one sequenced Lua thread</b> in the browser process. Most <code>lemurx.*</code> calls are synchronous: a
+            call that needs the UI thread posts there and waits. Callbacks (events, clicks, timers, HTTP results) are delivered on the
+            Lua thread, so there is no concurrency to reason about. The UI thread never blocks on Lua: a Java callback that needs a
+            return value while Lua is busy is refused rather than waited for. The single exception is the luakit widget
+            <code>key-press</code> verdict, which the UI thread awaits while cooperatively draining widget operations Lua enqueues.</p>
+          <ul>
+            <li>Don't spin (<code>while os.time() &lt; t</code>). Use <code>lemurx.timer.after / every</code>.</li>
+            <li>A synchronous <code>lemurx.http.fetch</code> blocks the Lua thread up to 20 s (UGC) / 120 s (local) — every script's callbacks queue behind it. Use the callback form or <a href="#m-async"><code>lemurx.async</code></a>.</li>
+            <li><code>tabs.eval</code>, <code>cdp.send</code>, <code>ui.*</code> are synchronous and fast (they wait on the UI or renderer, tens of milliseconds).</li>
+          </ul>
+
+          <h3>Return values</h3>
+          <ul>
+            <li>Queries return a table: <code>{ok=true, ...}</code> or <code>{ok=false, error="why"}</code>.</li>
+            <li>Actions return a boolean.</li>
+            <li>"Not found" is <code>nil</code>, not an error.</li>
+            <li>Type errors and privileged calls from UGC <b>raise</b>. Wrap with <code>pcall</code> when in doubt.</li>
+          </ul>
+
+          <h3>Local vs UGC</h3>
+          <p>Scripts on your own device are unrestricted. Restrictions apply only to scripts other people wrote that you installed
+            (<b>UGC</b>, <code>files/lua/ugc/</code>).</p>
+          <div class="tbl-scroll">
+          <table class="tbl tbl--wrap">
+            <tr><th></th><th>Local <code>files/lua/*.lua</code></th><th>UGC <code>files/lua/ugc/*.lua</code></th></tr>
+            <tr><td>Lua state</td><td>One shared main <code>lua_State</code></td><td><b>One <code>lua_State</code> per file</b></td></tr>
+            <tr><td>Standard library</td><td>Everything: <code>io os debug package require dofile loadfile load</code> (bytecode allowed)</td><td><code>base table string math utf8 coroutine</code>; <code>load</code> text only; no <code>dofile/loadfile/require</code></td></tr>
+            <tr><td><code>lemurx.*</code></td><td>All</td><td>All except the <span class="badge badge--priv">local only</span> entries</td></tr>
+            <tr><td>luakit layer</td><td>Yes (kernel runs in the main state)</td><td>No</td></tr>
+            <tr><td><code>require</code></td><td><code>files/lua/?.lua</code> <code>files/lua/?/init.lua</code> <code>files/lua/lib/?.lua</code> + luakit <code>config/</code> <code>lib/</code></td><td>—</td></tr>
+            <tr><td><code>lemurx.isPrivileged()</code></td><td><code>true</code></td><td><code>false</code></td></tr>
+            <tr><td><code>lemurx.scriptName()</code></td><td><code>""</code></td><td><code>"ugc/xxx.lua"</code></td></tr>
+            <tr><td><code>fs</code> jail</td><td><code>files/lua</code></td><td><code>files/lua/ugc</code></td></tr>
+            <tr><td><code>http.fetch</code> limits</td><td>8 MB · 120 s · any scheme</td><td>2 MB · 20 s · http(s) only</td></tr>
+          </table>
+          </div>
+          <p>UGC scripts may not use: <code>lemurx.cookie history downloads perm cdp v8 dom ax blink prefs data page network emulation overlay css</code>,
+            <code>net.addRule</code>'s <code>requestBody/replaceRequestBody</code>, arbitrary <code>intent</code> actions, or the luakit layer.
+            Privilege is checked <em>at runtime by state</em>, not by scanning source — dynamic code in UGC is still UGC.</p>
+          <div class="note">
+            <b>Why a separate state?</b> With a shared state a UGC file could overwrite <code>lemurx.tabs.eval</code> and run under your
+            privileges the next time one of your callbacks called it (confused deputy). Separate states remove the class of attack, so
+            local scripts need no defensive coding at all. <b>Why text-only <code>load</code>?</b> The Lua VM does not verify bytecode;
+            crafted bytecode is arbitrary memory access in the browser process.
+          </div>
+          <p>Local scripts hand capabilities to UGC explicitly with <a href="#m-bridge"><code>lemurx.expose</code></a>; UGC picks them up with <code>lemurx.import</code>. Values cross as JSON; functions never cross.</p>
+        </section>
+
+        <!-- ------------------------------------------------ EVENTS -->
+        <section id="events">
+          <p class="kicker">Pages</p>
+          <h2>Events</h2>
+          <p>Two event styles coexist. <code>lemurx.*</code> uses <code>module.on(name, fn)</code>; the luakit layer uses the object protocol
+            <code>obj:add_signal(name, fn)</code> (see <a href="#c-object">Object protocol</a>). Both deliver on the Lua thread.</p>
+          <div class="code">
+            <div class="code__bar"><b>lemurx.* events</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">-- Tab lifecycle. ev = {id, url, title, incognito, loading, canGoBack, canGoForward, muted, event, eventUrl}
+lemurx.tabs.on("started" | "document" | "loaded" | "created" | "closed" | "selected", function(ev) end)
+--  started  = navigation begins       document = DOM available (best moment to inject)
+--  loaded   = load finished           created / closed / selected = tab strip changes
+
+-- Shell events
+lemurx.chrome.on("omnibox", function(ev) end)   -- {focus=true|false, text}
+lemurx.chrome.on("back",    function(ev) end)   -- {id, url, title}
+lemurx.chrome.on("menu",    function(ev) end)   -- {id, title, lua}
+
+-- Back key. Once registered the key is yours; call lemurx.chrome.back() to let it through.
+lemurx.input.onBack(function(ev) end)
+lemurx.input.interceptBack(false)               -- hand it back to the system
+
+-- DevTools events (local only)
+lemurx.cdp.on("Network.responseReceived" | "*", function(ev) end)  -- {method, tab, params}
+
+-- Timers (ms, min 10)
+local id = lemurx.timer.every(60000, function() end)
+lemurx.timer.after(2000, function() end)
+lemurx.timer.cancel(id)</code></pre>
+          </div>
+          <div class="code">
+            <div class="code__bar"><b>luakit-style signals</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">local webview = require("webview")
+webview.add_signal("init", function(view)                 -- every webview, native tabs included
+    view:add_signal("navigation-request", function(v, uri, reason)
+        if uri:find("ads%.example") then return false end -- veto: the navigation never happens
+    end)
+    view:add_signal("property::title", function(v) msg.info("title now %s", v.title) end)
+end)</code></pre>
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------ LUAKIT COMPAT -->
+        <section id="luakit-compat">
+          <p class="kicker">Pages</p>
+          <h2>luakit compatibility</h2>
+          <p><a href="https://luakit.github.io/" target="_blank" rel="noopener">luakit</a> is the WebKitGTK browser whose entire UI is Lua.
+            LemurX re-implements every C-level interface luakit exposes to Lua — the globals, the object protocol, all widget types,
+            the webview, custom schemes, the web-extension (renderer) side — on top of Chromium and Android. luakit's own pure-Lua
+            layer (<code>lib/</code>, <code>lib/lousy/</code>, <code>config/rc.lua</code>, <code>config/theme.lua</code>) is shipped byte-for-byte and
+            <code>require</code>d normally. That means <code>require("webview")</code>, <code>require("window")</code>, <code>chrome.add(...)</code>,
+            <code>modes</code>, <code>binds</code>, <code>adblock</code>, <code>follow</code>, <code>formfiller</code>, <code>userscripts</code>… all work.</p>
+
+          <h3>Enabling the luakit shell</h3>
+          <p>The kernel always loads (so <code>widget{}</code>, <code>sqlite3{}</code>, <code>luakit.register_scheme</code> are available to your
+            scripts). Whether <code>rc.lua</code> runs — which hands the whole shell to luakit's <code>window.lua</code>: notebook, tab strip,
+            status bar, vi-style modes — is a switch:</p>
+          <div class="code">
+            <div class="code__bar"><b>toggle rc.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">lemurx.storage.set("luakit_rc", "1")        -- run config/rc.lua at startup (luakit shell)
+lemurx.storage.set("luakit_autowrap", "1")  -- wrap every native tab as a luakit webview (default on)
+-- edit files/luakit/config/rc.lua and theme.lua like you would on the desktop</code></pre>
+          </div>
+
+          <h3>Directories</h3>
+          <div class="tbl-scroll">
+          <table class="tbl">
+            <tr><th>luakit</th><th>LemurX</th></tr>
+            <tr><td><code>luakit.install_path</code> / <code>install_paths.install_dir</code></td><td><code>files/luakit</code> (<code>lib/</code> inside)</td></tr>
+            <tr><td><code>luakit.config_dir</code> / <code>xdg.config_dir</code></td><td><code>files/luakit/config</code> — yours; web modules resolve here first</td></tr>
+            <tr><td><code>luakit.data_dir</code></td><td><code>files/luakit/data</code> — sqlite files, sessions</td></tr>
+            <tr><td><code>luakit.cache_dir</code></td><td><code>cache/luakit</code></td></tr>
+            <tr><td><code>xdg.download_dir</code>, <code>pictures_dir</code>, …</td><td><code>Environment.getExternalStoragePublicDirectory(...)</code></td></tr>
+          </table>
+          </div>
+
+          <h3>Deliberate differences</h3>
+          <ul>
+            <li><b>Pixels are dp, font sizes are sp.</b> Pango font strings (<code>"monospace bold 12"</code>) and Pango markup in labels are translated.</li>
+            <li><b>Webview is a tab.</b> <code>widget{type="webview"}</code> creates a real Chromium tab; putting it in a <code>notebook</code>/<code>box</code> moves the tab's content into the widget's rectangle. <code>notebook:switch()</code> selects the native tab and vice versa.</li>
+            <li><b>navigation-request is a NavigationThrottle.</b> Returning <code>false</code> cancels before commit; no flash, no history entry.</li>
+            <li><b>Custom schemes</b> serve navigations <em>and</em> subresources; a request nobody <code>finish</code>es times out after 30 s instead of hanging forever; a scheme with no handler at all returns 404 immediately.</li>
+            <li><b><code>regex</code> is RE2</b>, not PCRE: no back-references or look-behind.</li>
+            <li><b><code>luakit.spawn</code></b> runs a real process (<code>/system/bin/sh</code> is available); <code>unique.is_running()</code> is always <code>false</code> (one process per package).</li>
+            <li><b>Web modules cannot touch the file system</b> (Chromium's renderer sandbox): <code>lfs</code> in the renderer is a consistent empty implementation.</li>
+            <li>Lua is <b>5.4</b>; a compatibility shim provides <code>unpack</code>, <code>loadstring</code>, <code>setfenv/getfenv</code>, <code>table.getn/maxn</code>, <code>math.pow</code>, <code>string.gfind</code>, <code>package.loaders</code> for luakit's 5.1-era <code>lib/</code>.</li>
+          </ul>
+          <div class="note">
+            <b>Licensing.</b> luakit's <code>lib/</code> and <code>lousy/</code> are GPLv3 and ship as separate Lua files with their license.
+            LemurX's kernel (<code>kernel/*.lua</code>, the C++ and Java hosts) is an independent implementation written from luakit's documentation and is not derived from luakit's C sources.
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------ RENDERER -->
+        <section id="renderer">
+          <p class="kicker">Pages</p>
+          <h2>Lua in the renderer</h2>
+          <p>Every renderer process hosts its own Lua state, the equivalent of luakit's <em>web extension</em>. It is loaded with
+            <code>require_web_module("name")</code> from the browser side; the module source is resolved from <code>files/luakit/config/</code>
+            then <code>files/luakit/lib/</code> and pushed over Mojo. Inside, a module sees <code>luakit</code>, <code>page</code>,
+            <code>dom_document</code>, <code>dom_element</code>, <code>ipc_channel</code>, <code>msg</code>, <code>soup</code> and the safe standard library.</p>
+          <p>What makes this different from a content script:</p>
+          <ul>
+            <li><b>Real DOM handles, main world.</b> <code>dom_element</code> wraps a V8 node handle. The same node is always the same Lua object (usable as a table key, comparable with <code>==</code>). Reads and writes are synchronous.</li>
+            <li><b>Not a script tag.</b> Page CSP does not apply; the page cannot see or interfere with the Lua state.</li>
+            <li><b>Synchronous request hook.</b> <code>page</code>'s <code>send-request</code> signal fires for every subresource before it leaves the process — return a string to redirect, <code>false</code> to block, edit the <code>headers</code> table in place. Backed by a <code>URLLoaderThrottle</code>.</li>
+            <li><b>Native functions on <code>window</code>.</b> <code>luakit.register_function(uri_pattern, name, fn)</code> makes <code>window[name](...)</code> return a Promise resolved from Lua.</li>
+            <li><b>Two-way IPC.</b> <code>ipc_channel</code> signals in both directions, with targeting to a single page or broadcast to every renderer.</li>
+          </ul>
+          <div class="code">
+            <div class="code__bar"><b>files/luakit/config/probe_wm.lua (renderer side)</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">local ui = ipc_channel("probe_wm")
+
+luakit.add_signal("page-created", function(page)
+    page:add_signal("send-request", function(p, uri, headers)
+        if uri:find("doubleclick%.net") then return false end        -- block
+        headers["DNT"] = "1"                                            -- edit headers
+        if uri:sub(1, 7) == "http://" then return "https://" .. uri:sub(8) end  -- redirect
+    end)
+    page:add_signal("document-loaded", function(p)
+        for _, a in ipairs(p.document.body:query("a[target=_blank]")) do a.attr.target = "_self" end
+        ui:emit_signal("links_fixed", p.id, #p.document.body:query("a"))
+    end)
+end)
+
+luakit.register_function("^https?://", "lemurPing", function(page, resolve, reject, msg)
+    resolve("pong: " .. tostring(msg))    -- page JS: await lemurPing("hi")
+end)</code></pre>
+          </div>
+          <div class="code">
+            <div class="code__bar"><b>files/lua/20_probe.lua (browser side)</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">local wm = require_web_module("probe_wm")
+wm:add_signal("links_fixed", function(_, page_id, n)
+    lemurx.toast(("tab %d: %d links"):format(page_id, n))
+end)
+wm:emit_signal("rules", { block = {} })              -- broadcast to every renderer
+wm:emit_signal(view, "rules", { block = {} })        -- or only the renderer hosting this webview</code></pre>
+          </div>
+          <p>The full renderer API is under <a href="#r-luakit">Classes · renderer</a>.</p>
+        </section>
+
+        <!-- ------------------------------------------------ EXAMPLES -->
+        <section id="examples">
+          <p class="kicker">Pages</p>
+          <h2>Showcase scripts</h2>
+          <p>Seven complete, single-file scripts that each do something no extension can. They live in the repository under
+            <code>chrome/lemur/lua/examples/</code>; drop any of them into <code>files/lua/</code>.</p>
+          <div class="ex-grid">
+            <div class="ex"><b>10_shell_remix.lua</b><p>Turn LemurX into a read-only news app: persistent skin, a native site-switcher strip above the page, the real Home button replaced with "to top", the back key re-routed, custom bottom menu.</p><small>lemurx.theme · ui.render · ui.replace · input.onBack · menu</small></div>
+            <div class="ex"><b>20_renderer_dom_lua.lua</b><p>Lua inside the renderer walks the main-world DOM, counts trackers, retargets <code>_blank</code> links, injects a bar, and exposes <code>window.lemurHistory()</code> which queries the browser's history DB through IPC.</p><small>page · dom_element · register_function · ipc_channel</small></div>
+            <div class="ex"><b>30_request_surgeon.lua</b><p>Every subresource request passes through Lua synchronously: block trackers, strip <code>utm_*</code>/<code>fbclid</code>, upgrade http→https, set DNT, trim Referer. Rules are hot-swapped from the browser side without reloading.</p><small>send-request · ipc_channel · ui.render</small></div>
+            <div class="ex"><b>40_custom_scheme.lua</b><p><code>lua://dash</code> is a page generated on the fly with live tab list, screenshots and history search; <code>lua://tabs</code> is a JSON endpoint; <code>lua://file/…</code> serves local files. Page JS calls back into Lua with <code>await luaDash(...)</code>.</p><small>register_scheme · scheme-request · request:finish · register_function</small></div>
+            <div class="ex"><b>50_native_widget_shell.lua</b><p>A vim-style shell built from luakit <code>widget{}</code>s: horizontal tab strip, notebook holding the real tabs, status bar, command entry (<code>:o :t :d :n :p :zi :q</code>). One window over the native toolbar.</p><small>widget:window · notebook · box · entry · label · eventbox · key-press</small></div>
+            <div class="ex"><b>60_navigation_gatekeeper.lua</b><p>Veto navigations before commit: unwrap redirector pages, jump from AMP to canonical, a night-time cool-down page for short-video sites, block cross-site popups; everything logged to sqlite and served at <code>lua://gate</code>.</p><small>navigation-request · new-window-decision · load_string · sqlite3</small></div>
+            <div class="ex"><b>70_cdp_lab.lua</b><p>DevTools on the phone: per-site memory of 3G throttling, fake GPS, timezone, desktop UA and CPU slow-down; live request counters from <code>Network.*</code> events; a one-tap HTML "check-up" report with metrics and a screenshot.</p><small>cdp.attach · cdp.send · cdp.on · tabs.screenshot · fs.write</small></div>
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------ RECIPES -->
+        <section id="recipes">
+          <p class="kicker">Pages</p>
+          <h2>Recipes</h2>
+          <h3>Per-site skin</h3>
+          <div class="code"><div class="code__bar"><b>skin.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">local skins = { ["github.com"] = "midnight", ["wikipedia.org"] = "paper" }
+lemurx.tabs.on("selected", function(ev)
+    for host, name in pairs(skins) do
+        if ev.url and ev.url:find(host, 1, true) then return lemurx.theme.apply(name) end
+    end
+    lemurx.theme.apply("forest")
+end)</code></pre></div>
+
+          <h3>Per-site memory: desktop mode, zoom, mute</h3>
+          <div class="code"><div class="code__bar"><b>memory.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">local function host_of(url) return (url or ""):match("^%a+://([^/]+)") or "" end
+lemurx.tabs.on("document", function(ev)
+    local cfg = lemurx.storage.get("site:" .. host_of(ev.url))
+    if not cfg then return end
+    if cfg:find("desktop") then lemurx.tabs.setDesktop(ev.id, true) end
+    if cfg:find("zoom150") then lemurx.tabs.setZoom(ev.id, 150) end
+    if cfg:find("mute")    then lemurx.tabs.mute(ev.id, true) end
+end)
+-- remember: lemurx.storage.set("site:example.com", "desktop,zoom150")</code></pre></div>
+
+          <h3>Reader mode toggle</h3>
+          <div class="code"><div class="code__bar"><b>reader.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">local reading = false
+local function set_reading(on)
+    reading = on
+    lemurx.chrome.controls(on and "hidden" or "both")
+    lemurx.chrome.setPullRefresh(not on)
+    local t = lemurx.tabs.current()
+    if t then
+        lemurx.tabs.inject(t.id, on and [[
+            (function(){var s=document.createElement('style');s.id='lemur-read';
+            s.textContent='header,nav,aside,[class*=banner],[class*=fixed]{display:none!important}';
+            document.head.appendChild(s)})()
+        ]] or "document.getElementById('lemur-read')?.remove()")
+    end
+end
+lemurx.ui.render("page.float", lemurx.ui.h("button", { id = "rd", text = "Read", onClick = function() set_reading(not reading) end }))</code></pre></div>
+
+          <h3>Two-tap back</h3>
+          <div class="code"><div class="code__bar"><b>back.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">local armed = false
+lemurx.input.onBack(function()
+    if armed then armed = false; lemurx.input.interceptBack(false); lemurx.chrome.back(); return end
+    armed = true
+    lemurx.toast("Press back again")
+    lemurx.timer.after(2000, function() armed = false end)
+end)</code></pre></div>
+
+          <h3>Cross-origin data in a floating panel</h3>
+          <div class="code"><div class="code__bar"><b>fx.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">local h = lemurx.ui.h
+lemurx.timer.every(60000, function()
+    lemurx.http.fetch("https://api.exchangerate.host/latest?base=USD&symbols=CNY", nil, function(r)
+        if not r.ok then return end
+        local rate = r.body:match('"CNY":([%d%.]+)')
+        lemurx.ui.render("page.float", h("text", { id = "fx", text = "USD/CNY " .. rate,
+            background = "#CC000000", color = "#FFFFFFFF", padding = {10, 6}, radius = 12, y = 120 }))
+    end)
+end)</code></pre></div>
+
+          <h3>Read a price out of page JavaScript with CDP</h3>
+          <div class="code"><div class="code__bar"><b>price.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">local t = lemurx.tabs.current()
+lemurx.cdp.attach(t.id)
+local price = lemurx.v8.eval(t.id, "window.__INITIAL_STATE__?.price?.current")
+lemurx.log("price", price)</code></pre></div>
+
+          <h3>A luakit chrome page in five lines</h3>
+          <div class="code"><div class="code__bar"><b>hello_chrome.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">local chrome = require("chrome")   -- luakit's lib/chrome.lua, unmodified
+chrome.add("hello", function(view, meta)
+    return "&lt;h1&gt;Hello from Lua&lt;/h1&gt;&lt;p&gt;path: " .. meta.path .. "&lt;/p&gt;"
+end)
+-- open luakit://hello/anything</code></pre></div>
+        </section>
+
+        <!-- ------------------------------------------------ PITFALLS -->
+        <section id="pitfalls">
+          <p class="kicker">Pages</p>
+          <h2>Pitfalls &amp; limits</h2>
+          <ul>
+            <li><b><code>net.addRule</code> and subresources.</b> Browser-side rules apply to navigations (document / sub_frame) and browser-initiated requests. For per-request control of page subresources use the renderer's <a href="#r-page"><code>send-request</code></a> signal, which sees every img/script/xhr/fetch.</li>
+            <li><b><code>tabs.hide</code> on the current tab</b> blanks the screen — <code>select</code> another tab first.</li>
+            <li><b><code>theme.set({dark=...})</code></b> goes through LemurX's dark-mode switch and marks the app for restart; avoid toggling it often.</li>
+            <li><b><code>toolbar.*</code> slots</b> are 150 dp wide — one button, maybe two.</li>
+            <li><b><code>page.top / page.bottom</code></b> are PopupWindows and are rebuilt on rotation; <code>ui.update</code> is much cheaper than re-<code>render</code>.</li>
+            <li><b>UI calls block.</b> Don't <code>ui.find</code> forty times in one callback — <code>dump</code> once and filter in Lua.</li>
+            <li><b><code>eval</code> returns JSON-serialisable values only.</b> DOM nodes come back as <code>nil</code>; use the renderer layer if you need nodes.</li>
+            <li><b>Load order is file-name order.</b> Cross-script globals need matching number prefixes; better, put shared code in <code>files/lua/lib/</code> and <code>require</code> it.</li>
+            <li><b>Local scripts have all of <code>os</code> and <code>io</code>.</b> <code>os.exit()</code> kills the browser process; <code>io.open</code> can read and write anything in the app's private directory. That is the point — don't teach it to beginners.</li>
+            <li><b>UGC scripts are isolated from each other</b> too. Communicate through <code>lemurx.storage</code> or a local bridge script.</li>
+            <li><b>The bridge moves data, not functions.</b> An imported function cannot take a Lua callback; poll <code>storage</code> or subscribe to events instead.</li>
+            <li><b>luakit <code>init</code> timing.</b> <code>webview.add_signal("init")</code> only fires for webviews created after registration. For tabs that already exist, walk <code>lemurx.tabs.list()</code> and call <code>__lk.webview_for_tab(id[, true])</code> (LemurX helper) to hook or wrap them, as the showcase scripts do.</li>
+            <li><b>A scheme request must be answered.</b> If a handler is attached but never calls <code>request:finish</code>, the navigation fails after 30 s.</li>
+          </ul>
+        </section>
+
+        <!-- ------------------------------------------------ UGC RULES -->
+        <section id="ugc-rules">
+          <p class="kicker">Pages</p>
+          <h2>Publishing UGC scripts</h2>
+          <ol>
+            <li>Place the file in <code>files/lua/ugc/</code>. Privilege drop and state isolation are automatic; you don't detect anything yourself.</li>
+            <li><code>lemurx.ugc.scan(source)</code> must return an empty table before listing. <code>load(string)</code> works (text only); <code>dofile/loadfile/require/io/os</code> do not exist.</li>
+            <li>Anything that waits for the network uses <code>http.fetch(url, opts, cb)</code> or <code>lemurx.async/await</code>.</li>
+            <li>If you need local capabilities (cookies, logged-in requests), document which bridge script the user must install, fetch it with <code>lemurx.import("name")</code>, and degrade gracefully when it is <code>nil</code>.</li>
+            <li>No phishing-style full-screen with a hidden URL bar. Review rejects it.</li>
+            <li>All outbound requests go through <code>lemurx.http.fetch</code>; list the domains in the file header comment.</li>
+            <li>Provide a <code>reset</code>: on uninstall the script should <code>theme.reset()</code> + <code>ui.unmount("*")</code> + <code>net.clearRules()</code>.</li>
+            <li>Version in the first line: <code>-- myskin v1.0.0</code>.</li>
+          </ol>
+        </section>
+
+        <!-- ================================================ lemurx.* MODULES -->
+
+        <section id="m-core">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx</code> core</h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <dl class="api">
+            <dt><code>lemurx.version</code></dt><dd>Runtime version string.</dd>
+            <dt><code>lemurx.log(...)</code></dt><dd>Write to logcat (tag <code>LemurX</code>). <code>print</code> is an alias. Arguments are <code>tostring</code>ed and tab-joined.</dd>
+            <dt><code>lemurx.toast(msg)</code></dt><dd>System toast.</dd>
+            <dt><code>lemurx.help([module]) </code></dt><dd>Print the API catalog (<a href="#m-ugc"><code>lemurx.catalog</code></a>) or one module of it.</dd>
+            <dt><code>lemurx.isPrivileged() -> boolean</code></dt><dd><code>true</code> in local scripts, <code>false</code> in UGC.</dd>
+            <dt><code>lemurx.scriptName() -> string</code></dt><dd><code>""</code> for local scripts, <code>"ugc/xxx.lua"</code> for UGC.</dd>
+            <dt><code>lemurx.open(url[, opts]) -> tabId</code></dt><dd>Alias of <code>lemurx.tabs.open</code>.</dd>
+            <dt><code>lemurx.browser.info() -> {isLemurX, versionName, versionCode, chromiumVersion}</code></dt><dd>Build information: product flag, app version and the pinned Chromium version.</dd>
+          </dl>
+        </section>
+
+        <section id="m-async">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.async</code> · <code>await</code> · <code>sleep</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>Coroutine sugar so waiting on the network never blocks the shared Lua thread.</p>
+          <dl class="api">
+            <dt><code>lemurx.async(fn)</code></dt><dd>Run <code>fn</code> as a coroutine task. Errors inside are logged with a traceback, not swallowed.</dd>
+            <dt><code>lemurx.await(fn, ...) -> results</code></dt><dd>Inside <code>async</code> only. Calls <code>fn(..., callback)</code> — any function whose <em>last</em> parameter is a callback (<code>http.fetch</code>, <code>timer.after</code>, your own) — yields, and returns what the callback received. Raises when called outside <code>async</code>.</dd>
+            <dt><code>lemurx.sleep(ms)</code></dt><dd>Inside <code>async</code> only. Yields for <code>ms</code> milliseconds.
+<pre>lemurx.async(function()
+    local a = lemurx.await(lemurx.http.fetch, "https://a.example/api")
+    local b = lemurx.await(lemurx.http.fetch, "https://b.example/api", { method = "POST", body = "{}" })
+    lemurx.sleep(300)
+    lemurx.ui.update("fx", { text = a.status .. "/" .. b.status })
+end)</pre></dd>
+          </dl>
+        </section>
+
+        <section id="m-bridge">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.expose</code> · <code>import</code> · <code>exposed</code></h2><span class="badge badge--browser">browser</span></div>
+          <p>The only door between the local state and UGC states. Arguments and results are JSON-marshalled (nil/boolean/number/string/table); functions never cross. Exposed functions run with <em>local</em> privilege; an error inside becomes a Lua error on the UGC side.</p>
+          <dl class="api">
+            <dt><code>lemurx.expose(name, fn | table)</code><span class="badges"><span class="badge badge--priv">local only</span></span></dt><dd>Publish a function or a table of functions/values under <code>name</code>. Non-function members are copied by value.</dd>
+            <dt><code>lemurx.import(name) -> proxy | nil</code><span class="badges"><span class="badge badge--ugc">UGC</span></span></dt><dd>Fetch a proxy for something a local script exposed. <code>nil</code> if nothing is exposed under that name — always handle it.</dd>
+            <dt><code>lemurx.exposed() -> {names}</code></dt><dd>Currently exposed names.</dd>
+          </dl>
+        </section>
+
+        <section id="m-tabs">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.tabs</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>Tab objects are plain tables: <code>{id, url, title, incognito, loading, canGoBack, canGoForward, muted}</code>. Tab ids are stable integers and are also the <code>id</code> of the corresponding luakit <code>webview</code> and renderer <code>page</code>.</p>
+          <dl class="api">
+            <dt><code>lemurx.tabs.list() -> {tab...}</code></dt><dd>All tabs in the current model.</dd>
+            <dt><code>lemurx.tabs.current() -> tab | nil</code></dt><dd>The selected tab.</dd>
+            <dt><code>lemurx.tabs.open(url[, {background=, hidden=, incognito=}]) -> tabId</code></dt><dd>Open a tab. <code>hidden</code> creates it without showing it (useful for scraping).</dd>
+            <dt><code>lemurx.tabs.close(id)</code> · <code>select(id)</code> · <code>hide(id)</code> · <code>show(id)</code> · <code>freeze(id)</code></dt><dd>Tab strip operations. <code>freeze</code> discards the renderer while keeping the entry.</dd>
+            <dt><code>lemurx.tabs.navigate(id, url)</code> · <code>reload(id)</code> · <code>reloadBypassCache(id)</code> · <code>stop(id)</code></dt><dd>Load control.</dd>
+            <dt><code>lemurx.tabs.back(id)</code> · <code>forward(id)</code> · <code>go(id, index)</code> · <code>offset(id, n)</code></dt><dd>History navigation; <code>go</code> takes an absolute entry index, <code>offset</code> a relative one.</dd>
+            <dt><code>lemurx.tabs.history(id) -> {ok, current, entries={{index,url,virtualUrl,title,transition,timestamp}...}, canGoBack, canGoForward}</code></dt><dd>The tab's NavigationController.</dd>
+            <dt><code>lemurx.tabs.frames(id) -> {main={...}, frames={...}}</code></dt><dd>The RenderFrameHost tree.</dd>
+            <dt><code>lemurx.tabs.eval(id, js) -> value</code></dt><dd>Run JavaScript in the <b>main world</b> of the main frame and return its JSON-serialisable result.</dd>
+            <dt><code>lemurx.tabs.inject(id, js[, {world="isolated"|"main", frames="main"|"all"}])</code></dt><dd>Plant a script. Default: isolated world (immune to page CSP and page JS), main frame only. <code>frames="all"</code> reaches iframes.</dd>
+            <dt><code>lemurx.tabs.html(id) -> string</code></dt><dd>Current document <code>outerHTML</code>.</dd>
+            <dt><code>lemurx.tabs.screenshot(id[, {base64=true}]) -> {ok, path, abs, width, height[, data]}</code></dt><dd>JPEG of the visible content, saved under <code>lua/captures</code>; <code>data</code> is base64 when requested.</dd>
+            <dt><code>lemurx.tabs.setDesktop(id, on)</code></dt><dd>Desktop UA + viewport for this tab.</dd>
+            <dt><code>lemurx.tabs.setZoom(id, percent)</code> · <code>getZoom(id) -> percent</code></dt><dd>Page zoom.</dd>
+            <dt><code>lemurx.tabs.mute(id, on)</code> · <code>isMuted(id) -> boolean</code></dt><dd>Audio mute.</dd>
+            <dt><code>lemurx.tabs.setUserAgent(id, ua)</code></dt><dd>UA for later navigations and <code>navigator.userAgent</code>.</dd>
+            <dt><code>lemurx.tabs.setHeaders(id, {["X-Foo"]="bar"})</code></dt><dd>Extra request headers for this tab's navigations.</dd>
+            <dt><code>lemurx.tabs.setJavaScript(on)</code> · <code>isJavaScript() -> boolean</code></dt><dd>Global JavaScript switch.</dd>
+            <dt><code>lemurx.tabs.viewport([id]) -> {x, y, w, h, contentOffsetY, pageScale, density, viewportWidth, viewportHeight, scrollX, scrollY}</code></dt><dd>Where the web content sits on screen and how CSS pixels map to screen pixels. This is what <a href="#m-agent"><code>lemurx.agent</code></a> uses to unify web and native coordinates.</dd>
+            <dt><code>lemurx.tabs.on(event, fn)</code><span class="badges"><span class="badge badge--signal">event</span></span></dt><dd><code>"started" | "document" | "loaded" | "created" | "closed" | "selected"</code>. <code>fn(ev)</code> receives the tab table plus <code>event</code>, <code>eventUrl</code>. See <a href="#events">Events</a>.</dd>
+          </dl>
+        </section>
+
+        <section id="m-net">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.net</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>Declarative rules applied in the browser's network path to navigations and browser-initiated requests. They can rewrite <em>response bodies</em>, which no extension API allows. For per-subresource logic use the renderer <a href="#r-page"><code>send-request</code></a> signal.</p>
+          <dl class="api">
+            <dt><code>lemurx.net.addRule(rule) -> ruleId</code></dt><dd>
+<pre>lemurx.net.addRule({
+    match = "*://*.doubleclick.net/*",           -- wildcard URL, host fragment, or "&lt;all_urls&gt;"
+    action = "block" | "redirect" | "modify",
+    types = { "document", "sub_frame", "script", "image", "xmlhttprequest", "media" },
+    redirectUrl = "https://...",
+    requestHeaders = { ["X-Foo"] = "bar" },      removeRequestHeaders = { "Cookie" },
+    responseHeaders = { ["X-Bar"] = "baz" },     removeResponseHeaders = { "Content-Security-Policy" },
+    replaceBody = { ["old"] = "new" },           -- or { {from=, to=} }; text responses ≤ 2 MB
+    requestBody = "...",                         -- local only: replace the POST body
+    replaceRequestBody = { a = "b" },            -- local only
+})</pre></dd>
+            <dt><code>lemurx.net.removeRule(id)</code> · <code>clearRules()</code> · <code>listRules() -> {rule...}</code></dt><dd>Rule management. Rules do not persist across restarts; re-add them in your script.</dd>
+          </dl>
+        </section>
+
+        <section id="m-http">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.http</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>Requests issued by the browser process: no CORS, cookies not sent. UGC: http(s), 2 MB, 20 s. Local: 8 MB, 120 s.</p>
+          <dl class="api">
+            <dt><code>lemurx.http.fetch(url[, opts][, cb]) -> response | requestId</code></dt><dd>
+              <p><code>opts = {method, headers, body, timeout, redirect=true, binary=false}</code>. Response: <code>{ok, status, headers, url, bytes, body[, base64=true]}</code>.</p>
+              <p>With <code>cb</code> the call returns a request id immediately and the response arrives on the Lua thread later — <b>prefer this form</b>, or use <code>lemurx.await</code>.</p></dd>
+            <dt><code>lemurx.http.save(url, path[, opts]) -> {ok, ...}</code></dt><dd>Fetch, then write into <code>lemurx.fs</code> (path relative to the fs root).</dd>
+          </dl>
+        </section>
+
+        <section id="m-fs">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.fs</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>Jailed file access. Paths are relative to <code>root()</code>; <code>..</code> escaping is refused. Local scripts also have the full <code>io</code> library for anything outside the jail.</p>
+          <dl class="api">
+            <dt><code>lemurx.fs.root() -> path</code></dt><dd><code>files/lua</code> locally, <code>files/lua/ugc</code> for UGC.</dd>
+            <dt><code>lemurx.fs.read(path[, {base64=true}]) -> {ok, path, size, data}</code></dt><dd>Read a file.</dd>
+            <dt><code>lemurx.fs.write(path, data[, {append=true, base64=true}]) -> boolean</code></dt><dd>Write / append.</dd>
+            <dt><code>lemurx.fs.list(path) -> {{name, size, dir, mtime}...}</code></dt><dd>Directory listing.</dd>
+            <dt><code>lemurx.fs.exists(path)</code> · <code>mkdir(path)</code> · <code>remove(path)</code></dt><dd>Booleans.</dd>
+          </dl>
+        </section>
+
+        <section id="m-storage">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>storage</code> · <code>clipboard</code> · <code>db</code> · <code>timer</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <dl class="api">
+            <dt><code>lemurx.storage.get(key[, default]) -> string</code> · <code>set(key, value)</code> · <code>delete(key)</code> · <code>list() -> {keys}</code></dt><dd>Persistent string key/value store.</dd>
+            <dt><code>lemurx.clipboard.get() -> string</code> · <code>set(text)</code></dt><dd>System clipboard.</dd>
+            <dt><code>lemurx.db.exec(sql[, {bind...}]) -> {ok, rowsAffected}</code></dt><dd>SQLite at <code>files/lua/lemurx.db</code>. For separate databases use luakit's <a href="#lk-sqlite3"><code>sqlite3{}</code></a>.</dd>
+            <dt><code>lemurx.db.query(sql[, {bind...}]) -> {ok, rows={{col=value}...}}</code></dt><dd>Query rows as tables.</dd>
+            <dt><code>lemurx.timer.after(ms, fn) -> id</code> · <code>every(ms, fn) -> id</code> · <code>cancel(id)</code></dt><dd>Timers on the Lua thread. Minimum 10 ms.</dd>
+          </dl>
+        </section>
+
+        <section id="m-chrome">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.chrome</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>The browser shell: toolbar, bottom bar, omnibox, system bars. Colors are <code>"#AARRGGBB"</code>.</p>
+          <dl class="api">
+            <dt><code>lemurx.chrome.controls("shown"|"hidden"|"both")</code></dt><dd>How the top/bottom bars react to scrolling.</dd>
+            <dt><code>lemurx.chrome.hideUrlBar(on)</code> · <code>fullscreen(on)</code></dt><dd>Hide the URL bar / go immersive.</dd>
+            <dt><code>lemurx.chrome.setUrlBarText(text)</code> · <code>getUrlBarText() -> string</code> · <code>focusUrlBar(on)</code></dt><dd>Omnibox text and focus.</dd>
+            <dt><code>lemurx.chrome.setToolbarColor(argb)</code> · <code>setStatusBarColor(argb)</code></dt><dd>Immediate colors (use <a href="#m-theme"><code>theme.set</code></a> to persist).</dd>
+            <dt><code>lemurx.chrome.setDarkMode(on)</code> · <code>isDarkMode() -> boolean</code></dt><dd>Dark mode. Marks the app for restart.</dd>
+            <dt><code>lemurx.chrome.setPullRefresh(on)</code></dt><dd>Pull-to-refresh gesture.</dd>
+            <dt><code>lemurx.chrome.setMenuButtonVisible(on)</code> · <code>hideBottomToolbar(on)</code></dt><dd>Menu button; the button groups either side of the URL bar.</dd>
+            <dt><code>lemurx.chrome.hideButton("back"|"forward"|"home"|"tabs"|"tools"|"menu"|"search", on)</code></dt><dd>Individual shell buttons.</dd>
+            <dt><code>lemurx.chrome.back()</code> · <code>forward()</code></dt><dd>Trigger the shell's own back/forward (including "let the system handle back").</dd>
+            <dt><code>lemurx.chrome.info() -> {controls, darkMode, urlBarText, urlBarFocused}</code></dt><dd>Current shell state.</dd>
+            <dt><code>lemurx.chrome.on("omnibox"|"back"|"menu", fn)</code><span class="badges"><span class="badge badge--signal">event</span></span></dt><dd>See <a href="#events">Events</a>.</dd>
+          </dl>
+        </section>
+
+        <section id="m-menu">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.menu</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>The bottom drawer menu (pages <code>main</code>, <code>expand</code>, <code>second</code>).</p>
+          <dl class="api">
+            <dt><code>lemurx.menu.add({id, title, page="main"|"expand"|"second", onClick=fn})</code></dt><dd>Add an item; <code>onClick(ev)</code> with <code>ev = {id, title}</code>.</dd>
+            <dt><code>lemurx.menu.remove(id)</code> · <code>clear()</code></dt><dd>Remove your items.</dd>
+            <dt><code>lemurx.menu.hide(name[, on=true])</code></dt><dd>Hide a built-in item by name (e.g. <code>"history"</code>, <code>"EXTENSION_STORE"</code>); <code>lemurx.menu.list()</code> shows the names.</dd>
+            <dt><code>lemurx.menu.on(name, fn)</code></dt><dd>Intercept a built-in item: your handler runs, the default action does not.</dd>
+            <dt><code>lemurx.menu.invoke(name)</code></dt><dd>Run a built-in item's default action.</dd>
+            <dt><code>lemurx.menu.list() -> {main={...}, expand={...}, second={...}}</code></dt><dd>What is currently in the drawer.</dd>
+          </dl>
+        </section>
+
+        <section id="m-theme">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.theme</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>A persisted skin, replayed automatically on every launch and Activity re-creation.</p>
+          <dl class="api">
+            <dt><code>lemurx.theme.set(theme)</code></dt><dd>Merge semantics — pass only the keys you change.
+<pre>lemurx.theme.set({
+    toolbar = "#FF1B5E20", statusBar = "#FF0D3B13", navBar = "#FF1B5E20", bottomBar = "#FF1B5E20",
+    iconTint = "#FFE8F5E9", accent = "#FF00C853",   -- accent = default button color in ui.render
+    dark = true,
+    hideButtons = { "tools" },
+    urlBarHidden = false, bottomBarHidden = false, menuButton = true, pullRefresh = false,
+})</pre>
+              <p>To delete a key, <code>reset()</code> and set again (a <code>nil</code> value cannot be expressed in a Lua table).</p></dd>
+            <dt><code>lemurx.theme.get() -> {ok, theme, dark}</code></dt><dd>Current persisted theme.</dd>
+            <dt><code>lemurx.theme.reset()</code></dt><dd>Forget the theme and restore defaults as far as possible.</dd>
+            <dt><code>lemurx.theme.apply(name[, extra])</code></dt><dd>Apply a preset (<code>"forest" | "paper" | "midnight" | "sakura"</code>) merged with <code>extra</code>.</dd>
+            <dt><code>lemurx.theme.presets.&lt;name&gt;</code></dt><dd>The preset table — add your own.</dd>
+          </dl>
+        </section>
+
+        <section id="m-ui-render">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.ui.render</code> · <code>h</code> · <code>update</code> · <code>unmount</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>Declarative native Android view trees mounted into named slots of the shell. Callbacks are plain Lua functions. Re-rendering a slot replaces its tree; trees are re-mounted after Activity re-creation or bottom-bar style changes.</p>
+          <h4>Slots (<code>lemurx.ui.slots()</code>)</h4>
+          <div class="tbl-scroll">
+          <table class="tbl">
+            <tr><th>Slot</th><th>Where</th></tr>
+            <tr><td><code>toolbar.start</code> / <code>toolbar.end</code></td><td>Left / right button strip of the top bar (150 dp)</td></tr>
+            <tr><td><code>bottom.start</code> / <code>bottom.bar</code></td><td>First cell / end of the bottom bar</td></tr>
+            <tr><td><code>page.top</code> / <code>page.bottom</code></td><td>Full-width strip directly above / below the web content</td></tr>
+            <tr><td><code>page.center</code> / <code>page.float</code></td><td>Centered / floating over the page (<code>gravity</code>, <code>x</code>, <code>y</code>)</td></tr>
+            <tr><td><code>view:&lt;native id&gt;</code></td><td>Any ViewGroup you find in <code>ui.dump()</code></td></tr>
+          </table>
+          </div>
+          <dl class="api">
+            <dt><code>lemurx.ui.h(type, props[, children]) -> node</code></dt><dd>Build a node. Types: <code>row column stack scroll hscroll text button icon image edit switch progress divider spacer</code>.</dd>
+            <dt><code>lemurx.ui.render(slot, node)</code></dt><dd>Mount a tree into a slot.
+<pre>local h = lemurx.ui.h
+lemurx.ui.render("page.top", h("row", { background = "#E61B5E20", padding = {12, 6} }, {
+    h("text",   { id = "st", text = "status", color = "#FFFFFFFF", weight = 1, maxLines = 1, ellipsize = true }),
+    h("switch", { id = "sw", text = "Desktop", color = "#FFFFFFFF",
+                  onChange = function(ev) lemurx.tabs.setDesktop(lemurx.tabs.current().id, ev.checked) end }),
+    h("button", { id = "close", text = "Hide", onClick = function() lemurx.ui.unmount("page.top") end }),
+}))</pre></dd>
+            <dt><code>lemurx.ui.update(id, props)</code></dt><dd>Change properties of a mounted node in place (cheap; preferred over re-render).</dd>
+            <dt><code>lemurx.ui.unmount(slot | id | "*")</code></dt><dd>Remove a slot's tree, one node, or everything — including trees planted by <code>replace</code>/<code>insert</code>, which puts the native views back.</dd>
+            <dt><code>lemurx.ui.slots() -> {slot...}</code></dt><dd>Available slot names.</dd>
+          </dl>
+          <h4>Node properties</h4>
+          <div class="tbl-scroll">
+          <table class="tbl tbl--wrap">
+            <tr><th>Group</th><th>Properties</th></tr>
+            <tr><td>Common</td><td><code>id</code> · <code>width</code>/<code>height</code> (<code>"match"</code> <code>"wrap"</code> dp) · <code>weight</code> <code>gravity</code> <code>align</code> · <code>padding</code>/<code>margin</code> (<code>8</code>, <code>{h,v}</code>, <code>{l,t,r,b}</code>, <code>{left=8}</code>, <code>paddingH/V</code>, <code>marginH/V</code>) · <code>background</code> (<code>"#AARRGGBB"</code>, <code>"drawable:name"</code>, <code>{color, radius, stroke, strokeColor, gradient={...}, orientation, ripple=true}</code>) · <code>radius visible enabled alpha elevation rotation desc tooltip minWidth minHeight</code> · <code>onClick onLongClick onChange</code></td></tr>
+            <tr><td>Text (text/button/edit/switch)</td><td><code>text color size</code>(sp) <code>bold italic font</code>(<code>"monospace"</code> <code>"serif"</code> <code>"file:x.ttf"</code>) <code>maxLines ellipsize singleLine underline strike lineSpacing</code></td></tr>
+            <tr><td>icon / image</td><td><code>icon</code> (<code>"ic_xxx"</code> APK drawable, <code>"android:ic_menu_search"</code>, <code>"file:icons/a.png"</code>, <code>"data:image/png;base64,…"</code>), <code>text</code> fallback (emoji works), <code>tint</code>, <code>scale</code> (<code>fit crop center fill</code>)</td></tr>
+            <tr><td>edit</td><td><code>hint value inputType</code>(<code>text number url password multiline</code>) <code>maxLength hintColor</code>; <code>onChange</code> fires with <code>ev.action="change"</code> per keystroke and <code>"submit"</code> on IME confirm, <code>ev.text</code> is the content</td></tr>
+            <tr><td>switch</td><td><code>checked</code>; <code>onChange</code> gets <code>ev.checked</code></td></tr>
+            <tr><td>progress</td><td><code>value max indeterminate color</code></td></tr>
+          </table>
+          </div>
+          <p>Callback argument everywhere: <code>ev = {id, action="click"|"longclick"|"change"|"submit", slot, text?, checked?}</code>.</p>
+        </section>
+
+        <section id="m-ui-surgery">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.ui.style</code> · <code>replace</code> · <code>insert</code> · <code>detach</code> · <code>move</code> · <code>on</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>The shell is ordinary Android views. Lua can restyle, replace, insert next to, remove, move, or take over clicks on any of them — including views in Dialogs and PopupWindows (the tools drawer). Operations are recorded by query and replayed after Activity re-creation.</p>
+          <p><b>Query</b>: <code>{id=, text=, desc=, class=, clickable=, max=}</code> — <code>id</code> is a resource name or a Lua node id, <code>text</code>/<code>class</code> match by substring. Known shell ids: <code>toolbar toolbar_buttons_left toolbar_buttons home_button tab_switcher_button tab_back_button tab_forward_button menu_tools menu_button_lemur location_bar url_bar search_box search_box_text ivLogo ntp_favorites</code>.</p>
+          <dl class="api">
+            <dt><code>lemurx.ui.style(query, style)</code></dt><dd>Apply node properties (same set as <code>render</code>) to existing views. <code>once=true</code> disables replay.
+<pre>lemurx.ui.style({ id = "url_bar" }, { size = 16, bold = true })
+lemurx.ui.style({ class = "TabSwitcherButtonView" }, { tint = "#FFFF5252" })
+lemurx.ui.style({ text = "History" }, { background = "#FF000000", once = true })</pre></dd>
+            <dt><code>lemurx.ui.replace(query, node)</code></dt><dd>Swap a native view for a Lua tree, same layout slot. <code>unmount(id | "*")</code> restores the original.</dd>
+            <dt><code>lemurx.ui.insert(query, node[, {position="after"|"before"|"into"}])</code></dt><dd>Insert a Lua tree next to (or into) a native view.</dd>
+            <dt><code>lemurx.ui.detach(query)</code> · <code>restore([query])</code></dt><dd>Take a native view out of its parent; put it (or all detached views) back.</dd>
+            <dt><code>lemurx.ui.move(query, {parent=, index=, before=, after=})</code></dt><dd>Re-parent or reorder a native view.</dd>
+            <dt><code>lemurx.ui.on(query, "click"|"longclick"|"touch"|"focus"|"text", fn[, {consume=true, move=, max=}]) -> {key}</code></dt><dd>Take over an event on native views. <code>consume=false</code> lets the original handler run too.</dd>
+            <dt><code>lemurx.ui.off(key | "*")</code></dt><dd>Remove handlers.</dd>
+            <dt><code>lemurx.ui.shell() -> {found, ids, rects}</code></dt><dd>Known shell view ids with presence and coordinates.</dd>
+            <dt><code>lemurx.ui.children(query) -> {nodes}</code></dt><dd>Children of a ViewGroup.</dd>
+          </dl>
+        </section>
+
+        <section id="m-ui-legacy">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.ui</code> automation &amp; dialogs</h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <dl class="api">
+            <dt><code>lemurx.ui.dump([{maxDepth=12, maxNodes=800, gone=true}]) -> {ok, nodes, windows, roots}</code></dt><dd>The whole view tree across <em>all</em> windows (Activity, Dialogs, PopupWindows).</dd>
+            <dt><code>lemurx.ui.find(query) -> {ok, count, nodes={{class,id,text,desc,clickable,enabled,visible,x,y,w,h}...}}</code></dt><dd>Find views.</dd>
+            <dt><code>lemurx.ui.click(query)</code> · <code>longClick(query)</code></dt><dd>Perform clicks.</dd>
+            <dt><code>lemurx.ui.setText(query, text)</code> · <code>getText(query) -> string</code></dt><dd>TextView contents.</dd>
+            <dt><code>lemurx.ui.visible(query, on)</code> · <code>enabled(query, on)</code></dt><dd>Visibility / enabled state.</dd>
+            <dt><code>lemurx.ui.show({id, type="button"|"text"|"edit", text, gravity, x, y, background, color, textSize, radius, paddingH, paddingV, width, height, hint, onClick}) -> id</code></dt><dd>Single floating control (older API; <code>render</code> supersedes it).</dd>
+            <dt><code>lemurx.ui.remove(id)</code> · <code>clear()</code></dt><dd>Remove floating controls.</dd>
+            <dt><code>lemurx.ui.dialog({title, message, ok, cancel, onOk=fn, onCancel=fn})</code></dt><dd>Native dialog; callbacks get <code>{id, action}</code>.</dd>
+            <dt><code>lemurx.ui.prompt({title, hint, value, onOk=fn})</code></dt><dd>Text prompt; <code>onOk(ev)</code> with <code>ev.text</code>.</dd>
+            <dt><code>lemurx.ui.alert(title, message[, okText])</code></dt><dd>Simple alert.</dd>
+            <dt><code>lemurx.ui.tap(x, y[, "dp"])</code> · <code>longPress(x, y)</code> · <code>swipe(x1, y1, x2, y2[, ms])</code></dt><dd>Synthetic touch in <b>screen coordinates</b>, delivered to the topmost window (Activity, Dialog or PopupWindow). Same coordinate system as the <code>x, y</code> of <code>dump</code>/<code>find</code> nodes.</dd>
+            <dt><code>lemurx.ui.screenshot([{scale=, quality=, base64=}]) -> {ok, path, abs, width, height, scale[, data]}</code></dt><dd>JPEG of the whole browser window (shell + page), saved under <code>lua/captures</code>.</dd>
+          </dl>
+          <p>Every node returned by <code>dump</code>/<code>find</code> carries a <code>ref</code>; <code>lemurx.ui.click({ref=12})</code> addresses that exact view again.</p>
+        </section>
+
+        <section id="m-input">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.input</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <p>Coordinates default to dp relative to the web content area.</p>
+          <dl class="api">
+            <dt><code>lemurx.input.tap(x, y[, tabId[, "dp"|"px"]])</code></dt><dd>Also <code>tap({x=, y=, tab=, unit=})</code>.</dd>
+            <dt><code>lemurx.input.swipe(x1, y1, x2, y2[, durationMs[, tabId]])</code></dt><dd>Swipe gesture.</dd>
+            <dt><code>lemurx.input.type(text[, tabId])</code></dt><dd>Type into the focused element.</dd>
+            <dt><code>lemurx.input.key("enter"|"back"|"tab"|"space"|"esc"|"delete"[, tabId])</code></dt><dd>Key event.</dd>
+            <dt><code>lemurx.input.onBack(fn)</code><span class="badges"><span class="badge badge--signal">event</span></span></dt><dd>Own the back key. <code>fn(ev)</code>; call <code>lemurx.chrome.back()</code> to pass it through.</dd>
+            <dt><code>lemurx.input.interceptBack(on)</code></dt><dd><code>false</code> returns the key to the system.</dd>
+          </dl>
+        </section>
+
+        <section id="m-intent">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.intent</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC restricted</span></div>
+          <dl class="api">
+            <dt><code>lemurx.intent.startActivity({action, url, package, extras})</code></dt><dd>Launch an Android Intent. UGC may only use <code>VIEW SEND SENDTO WEB_SEARCH MAIN</code> and <code>lemurx.*</code> actions.</dd>
+            <dt><code>lemurx.intent.sendBroadcast({action, extras})</code></dt><dd>Broadcast an Intent (same UGC restriction).</dd>
+          </dl>
+        </section>
+
+        <section id="m-priv">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2>Privileged: <code>cookie</code> · <code>history</code> · <code>downloads</code> · <code>perm</code> · <code>prefs</code> · <code>data</code> · <code>features</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--priv">local only</span></div>
+          <dl class="api">
+            <dt><code>lemurx.cookie.get(url) -> {{name, value, domain, path, secure, httpOnly, expires}...}</code></dt><dd>Cookies for a URL.</dd>
+            <dt><code>lemurx.cookie.set(url, "name=value; path=/; secure")</code></dt><dd>Set-Cookie syntax.</dd>
+            <dt><code>lemurx.history.query([text]) -> {{url, title, timestamp, domain}...}</code></dt><dd>Search browsing history.</dd>
+            <dt><code>lemurx.downloads.list() -> {...}</code> · <code>enqueue(url[, tabId]) -> id</code></dt><dd>Download manager.</dd>
+            <dt><code>lemurx.perm.set(origin, type, "allow"|"block"|"ask")</code> · <code>get(origin, type)</code></dt><dd><code>type</code>: <code>geolocation camera microphone notifications javascript cookies images popups sound autoplay</code>.</dd>
+            <dt><code>lemurx.prefs.get(name[, "bool"|"int"|"double"|"string"|"long"]) -> {ok, name, exists, value, isDefault, managed}</code></dt><dd>Chromium PrefService.</dd>
+            <dt><code>lemurx.prefs.set(name, value)</code> · <code>set(name, type, value)</code> · <code>clear(name)</code></dt><dd>Write / reset a pref.</dd>
+            <dt><code>lemurx.data.clear({"history","cache","site_data"}[, "15m"|"hour"|"day"|"week"|"all"])</code></dt><dd>BrowsingDataRemover.</dd>
+            <dt><code>lemurx.features.enabled(name) -> boolean</code> · <code>param(feature, key) -> string</code></dt><dd>Read-only <code>ChromeFeatureList</code>.</dd>
+          </dl>
+        </section>
+
+        <section id="m-cdp">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.cdp</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--priv">local only</span></div>
+          <p>The complete Chrome DevTools Protocol, attached in-process — no USB, no desktop, no warning bar. <code>Runtime</code> and <code>Page</code> are enabled on attach; other domains enable themselves on first use.</p>
+          <dl class="api">
+            <dt><code>lemurx.cdp.attach(tabId)</code> · <code>detach(tabId)</code></dt><dd>Attach to a tab's DevToolsAgentHost.</dd>
+            <dt><code>lemurx.cdp.send(tabId, method, params[, timeoutMs | {timeout=, sessionId=}]) -> {ok, id, result} | {ok=false, error}</code></dt><dd>Synchronous command.
+<pre>lemurx.cdp.send(tab, "DOM.getDocument", { depth = 1 })
+lemurx.cdp.send(tab, "Network.emulateNetworkConditions", { offline = false, latency = 300, downloadThroughput = 51200, uploadThroughput = 25600 })</pre></dd>
+            <dt><code>lemurx.cdp.on(method | "*", fn)</code><span class="badges"><span class="badge badge--signal">event</span></span></dt><dd>Protocol events: <code>fn({method, tab, params})</code>.</dd>
+            <dt><code>lemurx.cdp.targets() -> {{id, type, title, url, ...}...}</code></dt><dd>All targets: page, iframe, worker, service_worker, browser.</dd>
+            <dt><code>lemurx.cdp.host(targetId | "browser", method, params)</code></dt><dd>Send to any target, including the browser target.</dd>
+            <dt><code>lemurx.cdp.inspect(tabId, x, y)</code> · <code>version()</code></dt><dd>Hit-test a point / protocol version.</dd>
+          </dl>
+        </section>
+
+        <section id="m-cdp-helpers">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>v8</code> · <code>dom</code> · <code>ax</code> · <code>blink</code> · <code>page</code> · <code>network</code> · <code>emulation</code> · <code>overlay</code> · <code>css</code> · <code>runtime</code> · <code>sw</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--priv">local only</span></div>
+          <p>Thin wrappers over <code>cdp.send</code>, defined in <code>init.lua</code>. <code>tab</code> is a tab id.</p>
+          <dl class="api">
+            <dt><code>lemurx.v8.eval(tab, expr[, opts]) -> value, raw</code></dt><dd><code>Runtime.evaluate</code> with the value unwrapped.</dd>
+            <dt><code>lemurx.v8.call(tab, fnSource, argsJson) -> value</code></dt><dd><code>Runtime.callFunctionOn</code>.</dd>
+            <dt><code>lemurx.dom.document(tab)</code> · <code>query(tab, selector)</code> · <code>box(tab, selector)</code></dt><dd>DOM tree, node ids for a selector, box model.</dd>
+            <dt><code>lemurx.ax.tree(tab)</code></dt><dd>Full accessibility tree as a Lua table.</dd>
+            <dt><code>lemurx.blink.frames(tab)</code> · <code>metrics(tab)</code></dt><dd>Frame tree; <code>Performance.getMetrics</code> as a name→value table.</dd>
+            <dt><code>lemurx.page.navigate(tab, url)</code> · <code>reload(tab, ignoreCache)</code> · <code>stop(tab)</code> · <code>enablePaint(tab, on)</code> · <code>cookies(tab)</code> · <code>screenshot(tab, opts)</code></dt><dd><code>Page.*</code>; <code>screenshot</code> delegates to <code>tabs.screenshot</code>.</dd>
+            <dt><code>lemurx.network.enable(tab)</code> · <code>setOffline(tab, on)</code> · <code>emulate(tab, {latency, download, upload})</code> · <code>clear(tab)</code> · <code>headers(tab, {...})</code></dt><dd><code>Network.*</code>: offline, throttling, extra headers.</dd>
+            <dt><code>lemurx.emulation.setUA(tab, ua)</code> · <code>setDevice(tab, {width, height, scale, mobile})</code> · <code>setGeo(tab, lat, lng)</code> · <code>setTimezone(tab, id)</code> · <code>setTouch(tab, on)</code></dt><dd><code>Emulation.*</code>.</dd>
+            <dt><code>lemurx.overlay.inspect(tab[, mode])</code> · <code>hide(tab)</code></dt><dd>Inspect-mode highlight overlay.</dd>
+            <dt><code>lemurx.css.getComputed(tab, nodeId)</code></dt><dd>Computed style for a node.</dd>
+            <dt><code>lemurx.runtime.contexts(tab)</code></dt><dd>Execution contexts.</dd>
+            <dt><code>lemurx.sw.targets()</code> · <code>send(target, method, params)</code></dt><dd>Service-worker targets and messaging.</dd>
+          </dl>
+        </section>
+
+        <section id="m-agent">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.agent</code> · <code>lemurx.system</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--priv">local only</span></div>
+          <p>The observe → act half of a GUI agent; deciding is left to whatever model the script talks to over <code>lemurx.http</code>. Three layers, all inert until called: the <b>web page</b> (<code>tabs.screenshot</code>, set-of-marks, CDP), the <b>browser shell</b> (<code>ui.screenshot</code>, <code>ui.dump/find</code>) and <b>other apps</b> (<code>lemurx.system.*</code>, an <code>AccessibilityService</code> the user enables once in Settings › Accessibility). Every element is reported in <b>screen pixels</b>; web elements are mapped through <code>lemurx.tabs.viewport()</code>.</p>
+          <dl class="api">
+            <dt><code>lemurx.agent.observe([opts]) -> obs</code></dt><dd>One observation: <code>{mode="browser"|"system", tab, viewport, screenshot, elements={...}}</code>. <code>opts</code>: <code>{tab, screenshot=true, scale=0.5, quality=60, base64=false, web=true, maxWeb=120, text=false, native=true, maxNative=200, system=nil|true|false}</code>. <code>system=nil</code> means auto: when the accessibility service is connected and LemurX is not in the foreground, the whole-device UI tree is observed instead (<code>mode="system"</code>).</dd>
+            <dt><code>lemurx.agent.describe(obs[, opts]) -> string</code></dt><dd>Compact text for a model: one line per element with a <code>ref</code> — <code>w7</code> (web, <code>data-lemurx-mark</code>), <code>n12</code> (native view), <code>s5</code> (other app) — plus role, text and <code>@(x,y w×h)</code>.</dd>
+            <dt><code>lemurx.agent.act(action[, obs]) -> result</code></dt><dd>Execute by <code>ref</code> or by screen coordinates, choosing the most reliable path per layer (web → <code>input.tap</code> relative to the web view, or <code>el.click()</code> with <code>via="js"</code>; native → <code>performClick</code>, falling back to coordinates; system → <code>performAction</code>, falling back to a gesture). Actions: <code>tap|click{ref|x,y,long,dx,dy,via}</code> <code>longPress</code> <code>type|text{text,ref,clear,enter,append}</code> <code>swipe|scroll{dir,ref,distance,duration|x1,y1,x2,y2}</code> <code>key{key}</code> <code>back</code> <code>home</code> <code>recents</code> <code>notifications</code> <code>navigate{url}</code> <code>open{url}</code> <code>eval{js}</code> <code>launch{package|url}</code> <code>wait{ms}</code> <code>screenshot</code> <code>done{result}</code>. A bare string (<code>"back"</code>) is accepted.</dd>
+            <dt><code>lemurx.agent.run(policy[, opts])</code></dt><dd>The loop. <code>policy(obs, text, step)</code> returns the next action table, or <code>nil</code> / <code>{type="done"}</code> to stop. <code>opts</code>: <code>{maxSteps=20, settle=600, onStep=fn(step, obs, action, result), onDone=fn(out)}</code>. Run it inside <code>lemurx.async</code>; called outside a coroutine the result arrives via <code>onDone</code>.</dd>
+            <dt><code>lemurx.agent.mark(tab[, {max, text}])</code> · <code>find(obs, "text" | {role="button"})</code> · <code>look([opts])</code> · <code>wait(ms)</code></dt><dd>Set-of-marks on its own; pick an element out of an observation; observe and remember so later <code>act</code> calls need no <code>obs</code>; sleep.</dd>
+          </dl>
+          <p><code>lemurx.system.*</code> is the no-root equivalent of <code>adb shell uiautomator dump</code> / <code>input tap</code> / <code>screencap</code>. Off by default; the user can switch it off in system settings at any time; it stops answering when the Lua master switch is off; UGC scripts never see it.</p>
+          <dl class="api">
+            <dt><code>lemurx.system.status() -> {connected, enabledInSettings, canScreenshot, component}</code></dt><dd>Service state.</dd>
+            <dt><code>lemurx.system.openSettings()</code> · <code>ensure() -> boolean</code></dt><dd>Take the user to Settings › Accessibility to enable "LemurX automation" — LemurX never enables it by itself. <code>ensure</code> opens settings when needed and reports readiness.</dd>
+            <dt><code>lemurx.system.foreground() -> {package, class, title, self}</code> · <code>windows()</code></dt><dd>What is in front.</dd>
+            <dt><code>lemurx.system.tree([{flat=true, interactiveOnly=true, all=false, maxNodes=1500}])</code></dt><dd>Accessibility node tree; nodes are <code>{ref, class, id, text, desc, clickable, editable, …, x, y, w, h}</code> in screen pixels.</dd>
+            <dt><code>lemurx.system.find("text" | {id=, text=, clickable=, editable=, package=})</code></dt><dd>Query nodes.</dd>
+            <dt><code>lemurx.system.click(ref | query)</code> · <code>longClick</code> · <code>focus</code> · <code>scroll(ref, "down"|"up"|…)</code></dt><dd><code>performAction</code> on a node.</dd>
+            <dt><code>lemurx.system.setText(ref | {editable=true}, text)</code></dt><dd><code>ACTION_SET_TEXT</code>, falling back to clipboard paste.</dd>
+            <dt><code>lemurx.system.tap(x, y)</code> · <code>longPress(x, y)</code> · <code>swipe(x1, y1, x2, y2[, ms])</code></dt><dd><code>dispatchGesture</code> in screen pixels.</dd>
+            <dt><code>lemurx.system.global("back"|"home"|"recents"|"notifications"|"quickSettings"|"lock"|"power")</code></dt><dd><code>performGlobalAction</code>.</dd>
+            <dt><code>lemurx.system.screenshot([{scale=0.5}])</code></dt><dd>Whole-screen JPEG (API 30+).</dd>
+            <dt><code>lemurx.system.launch(package | url | {action=, data=, extras=})</code></dt><dd>Start another app.</dd>
+            <dt><code>lemurx.system.on("window"|"content"|"click"|"focus"|"text"|"notification"|"connected"|"disconnected", fn)</code><span class="badges"><span class="badge badge--signal">event</span></span></dt><dd>Accessibility events. Subscribing turns event delivery on (<code>system.events(true)</code> underneath).</dd>
+          </dl>
+        </section>
+
+        <section id="m-ugc">
+          <p class="kicker">Modules · lemurx.*</p>
+          <div class="modhead"><h2><code>lemurx.ugc</code> · <code>catalog</code> · <code>help</code></h2><span class="badge badge--browser">browser</span><span class="badge badge--ugc">UGC ok</span></div>
+          <dl class="api">
+            <dt><code>lemurx.ugc.forbidden -> {patterns}</code></dt><dd>The list of privileged names UGC may not use.</dd>
+            <dt><code>lemurx.ugc.scan(source) -> {hits}</code></dt><dd>Static pre-check of a script for forbidden names. A hint for authors; the real boundary is runtime.</dd>
+            <dt><code>lemurx.catalog -> {{name, title, priv, apis={...}}...}</code></dt><dd>Machine-readable API catalog, the source of <code>lemurx.help()</code>.</dd>
+          </dl>
+        </section>
+
+        <!-- ================================================ LUAKIT MODULES -->
+
+        <section id="lk-luakit">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>luakit</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span><span class="badge badge--priv">local only</span></div>
+          <p>The global <code>luakit</code> table (luakit's <code>clib/luakit.c</code>). Properties: <code>config_dir data_dir cache_dir execpath confpath resource_path</code>(rw) <code>verbose nounique dev_paths enable_spell_checking</code>(rw) <code>spell_checking_languages</code>(rw) <code>process_limit</code>(rw) <code>options website_data webkit2 windows webkit_version webkit_user_agent_version chromium_version selection install_path install_paths version web_process_id</code>.</p>
+          <dl class="api">
+            <dt><code>luakit.register_scheme(name)</code></dt><dd>Register a URL scheme. Requests for it arrive as <code>scheme-request::&lt;name&gt;</code> on the originating <code>webview</code>. See <a href="#lk-scheme">Custom schemes</a>.</dd>
+            <dt><code>luakit.spawn(cmd[, callback(exit_reason, exit_status)]) -> pid</code></dt><dd>Run a process asynchronously. <code>cmd</code> is shell-split (a sufficient subset of <code>g_shell_parse_argv</code>).</dd>
+            <dt><code>luakit.spawn_sync(cmd) -> status, stdout, stderr</code></dt><dd>Run and wait.</dd>
+            <dt><code>luakit.exec(cmd)</code></dt><dd>Replace-process semantics are not available on Android; behaves as <code>spawn</code>.</dd>
+            <dt><code>luakit.time() -> seconds</code></dt><dd>Monotonic seconds.</dd>
+            <dt><code>luakit.uri_encode(s[, allowed])</code> · <code>uri_decode(s[, illegal])</code></dt><dd>Percent-encoding.</dd>
+            <dt><code>luakit.idle_add(fn)</code> · <code>idle_remove(fn) -> boolean</code></dt><dd>Run once when idle (<code>fn</code> returning <code>true</code> re-schedules).</dd>
+            <dt><code>luakit.allow_certificate(host, cert)</code></dt><dd>Trust a certificate for a host (used by <code>webview:allow_certificate</code>).</dd>
+            <dt><code>luakit.save_file(title, window, default_folder, default_name) -> path | nil</code></dt><dd>Save dialog.</dd>
+            <dt><code>luakit.wch_lower(s)</code> · <code>wch_upper(s)</code></dt><dd>Unicode case mapping.</dd>
+            <dt><code>luakit.clear_favicon_database()</code></dt><dd>No-op placeholder (Chromium manages favicons).</dd>
+            <dt><code>luakit.quit()</code></dt><dd>Exit the browser process.</dd>
+            <dt><code>luakit.add_signal(name, fn)</code> · <code>emit_signal</code> · <code>remove_signal</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Module-level signals: <code>"page-created"(page)</code> and <code>"web-extension-created"</code> (renderer side), <code>"download-start"(download, view)</code>, <code>"can-close"</code>, <code>"scheme-request::&lt;name&gt;"</code>.</dd>
+          </dl>
+        </section>
+
+        <section id="lk-soup">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>soup</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span><span class="badge badge--renderer">renderer</span></div>
+          <dl class="api">
+            <dt><code>soup.parse_uri(str) -> {scheme, user, password, host, port, path, query, fragment} | nil</code></dt><dd>Parse with GURL. A missing scheme defaults to <code>http://</code>.</dd>
+            <dt><code>soup.uri_tostring(tbl) -> string</code></dt><dd>Inverse of <code>parse_uri</code>.</dd>
+            <dt><code>soup.proxy_uri</code></dt><dd><code>"default" | "no_proxy" | "http://host:port"</code> … (read/write).</dd>
+            <dt><code>soup.accept_policy</code></dt><dd><code>"always" | "never" | "no_third_party"</code> (read/write).</dd>
+            <dt><code>soup.cookies_storage</code></dt><dd>Path value kept for compatibility; Chromium owns the cookie store.</dd>
+          </dl>
+        </section>
+
+        <section id="lk-sqlite3">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>sqlite3</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>One independent connection per object (luakit's history, bookmarks, quickmarks and adblock each open their own). Relative filenames resolve under <code>luakit.data_dir</code>.</p>
+          <dl class="api">
+            <dt><code>sqlite3{ filename = path } -> db</code></dt><dd>Open or create.</dd>
+            <dt><code>db:exec(sql[, bindings]) -> rows | nil</code></dt><dd>Multiple statements allowed. Bindings: <code>{1=..., 2=...}</code> positional or <code>{[":name"]=...}</code> named. Rows are tables keyed by column name.</dd>
+            <dt><code>db:compile(sql) -> statement</code> · <code>stmt:exec([bindings]) -> rows</code></dt><dd>Prepared statements.</dd>
+            <dt><code>db:changes() -> n</code> · <code>db:close()</code> · <code>db.filename</code></dt><dd>Row count of the last statement; close; read-only path.</dd>
+          </dl>
+        </section>
+
+        <section id="lk-stylesheet">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>stylesheet</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>stylesheet{ source = "body { ... }" } -> ss</code></dt><dd>A user stylesheet object.</dd>
+            <dt><code>ss.source</code></dt><dd>Read/write. Changing it re-injects into every webview that has it attached.</dd>
+            <dt><code>view.stylesheets[ss] = true | false</code></dt><dd>Attach / detach to a <a href="#c-webview">webview</a>; applied on every commit.</dd>
+          </dl>
+        </section>
+
+        <section id="lk-timer">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>timer</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>timer{ interval = ms } -> t</code></dt><dd>Create (not started).</dd>
+            <dt><code>t:start()</code> · <code>t:stop()</code></dt><dd>Start / stop.</dd>
+            <dt><code>t.started</code> · <code>t.interval</code></dt><dd>Read-only state; interval is read/write (changing it while running restarts).</dd>
+            <dt><code>"timeout"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Fires every period until stopped.</dd>
+          </dl>
+        </section>
+
+        <section id="lk-regex">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>regex</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>regex{ pattern = "^https?://" } -> r</code></dt><dd>Compile with RE2. PCRE-only syntax (back-references, look-behind) errors at construction.</dd>
+            <dt><code>r:match(s) -> boolean</code> · <code>r.pattern</code></dt><dd>Partial match; read-only pattern.</dd>
+          </dl>
+        </section>
+
+        <section id="lk-utf8">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>utf8</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span><span class="badge badge--renderer">renderer</span></div>
+          <p>Lua 5.4's standard <code>utf8</code> library with luakit's quirks preserved: <code>utf8.len</code> returns the byte length for invalid sequences instead of <code>nil</code>; <code>string.wlen</code> is provided by the 5.1 compatibility shim.</p>
+        </section>
+
+        <section id="lk-xdg">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>xdg</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>xdg.cache_dir</code> · <code>config_dir</code> · <code>data_dir</code></dt><dd>App-private directories.</dd>
+            <dt><code>xdg.desktop_dir</code> · <code>documents_dir</code> · <code>download_dir</code> · <code>music_dir</code> · <code>pictures_dir</code> · <code>public_share_dir</code> · <code>templates_dir</code> · <code>videos_dir</code></dt><dd>Public external storage directories.</dd>
+            <dt><code>xdg.system_data_dirs</code> · <code>system_config_dirs</code></dt><dd>Arrays. Unknown keys return <code>nil</code>.</dd>
+          </dl>
+        </section>
+
+        <section id="lk-msg">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>msg</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span><span class="badge badge--renderer">renderer</span></div>
+          <dl class="api">
+            <dt><code>msg.fatal(fmt, ...)</code> · <code>error</code> · <code>warn</code> · <code>info</code> · <code>verbose</code> · <code>debug</code></dt><dd>Formatted logging to logcat, tagged with the calling module. Renderer-side messages are forwarded to the browser process.</dd>
+            <dt><code>"log"(time, level, group, text)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd><code>msg.add_signal("log", fn)</code> — how <code>log_chrome</code> builds <code>luakit://log</code>.</dd>
+          </dl>
+        </section>
+
+        <section id="lk-unique">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>unique</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>unique.new(name)</code> · <code>is_running() -> false</code> · <code>send_message(str)</code></dt><dd>Single-instance control. Android runs one process per package, so <code>is_running</code> is always <code>false</code>; external entry points (Intents opening links) are replayed as a <code>"message"(msg, screen)</code> signal so <code>unique_instance.lua</code> works unchanged.</dd>
+          </dl>
+        </section>
+
+        <section id="lk-lfs">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>lfs</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>lfs.attributes(path[, name])</code> · <code>symlinkattributes</code> · <code>dir(path)</code> · <code>mkdir</code> · <code>rmdir</code> · <code>chdir</code> · <code>currentdir</code> · <code>touch</code></dt><dd>The LuaFileSystem subset luakit's <code>lib/</code> uses, over POSIX <code>stat/opendir</code>. <code>dir</code> returns an iterator including <code>.</code> and <code>..</code>. In the renderer, <code>lfs</code> is a sandbox-consistent empty implementation.</dd>
+          </dl>
+        </section>
+
+        <section id="lk-ipc">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2><code>ipc_channel</code> · <code>require_web_module</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>Browser ↔ renderer messaging (luakit's <code>clib/ipc.c</code> + <code>web_module.c</code>). Transport is Mojo. Signals emitted before a renderer exists are queued and replayed when it comes up, preserving luakit's "web modules are ready when the page is created" assumption.</p>
+          <dl class="api">
+            <dt><code>require_web_module(name) -> ipc_channel</code></dt><dd>Load <code>name.lua</code> into every renderer (now and future). Resolved from <code>files/luakit/config/</code>, then <code>files/luakit/lib/</code>. Returns the channel of the same name.</dd>
+            <dt><code>ipc_channel(name) -> ch</code></dt><dd>Get or create a named channel.</dd>
+            <dt><code>ch:emit_signal([view, ]name, ...)</code></dt><dd>Send to every renderer, or only the one hosting <code>view</code> (a <code>webview</code> or its id). Arguments are JSON-marshalled.</dd>
+            <dt><code>ch:add_signal(name, fn(ch, ...))</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Receive from renderers. luakit convention: web modules pass <code>page.id</code> as the first argument when the sender matters.</dd>
+          </dl>
+        </section>
+
+        <section id="lk-scheme">
+          <p class="kicker">Modules · luakit</p>
+          <div class="modhead"><h2>Custom schemes · <code>request</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>After <code>luakit.register_scheme("foo")</code>, every navigation <em>and subresource</em> for <code>foo://</code> is routed to Lua as a <code>"scheme-request::foo"(view, uri, request)</code> signal on the originating webview (falling back to the selected tab's webview when the origin is a worker). <code>luakit://</code> is registered by <code>lib/chrome.lua</code> and serves all of luakit's chrome pages.</p>
+          <dl class="api">
+            <dt><code>request:finish(data[, mime])</code></dt><dd>Send the response. May be called later (async), within 30 s.</dd>
+            <dt><code>request.finished -> boolean</code></dt><dd>Read-only.</dd>
+            <dt><code>"scheme-request::&lt;name&gt;"(view, uri, request)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>On <code>webview</code>. Return without finishing to let another handler answer; a scheme with no handler attached returns 404 immediately.
+<pre>luakit.register_scheme("lua")
+webview.add_signal("init", function(view)
+    view:add_signal("scheme-request::lua", function(v, uri, request)
+        if uri:match("^lua://tabs") then
+            request:finish(__luakit.json_encode(lemurx.tabs.list()), "application/json")
+        end
+    end)
+end)</pre></dd>
+          </dl>
+        </section>
+
+        <!-- ================================================ LUAKIT CLASSES -->
+
+        <section id="c-object">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2>Object protocol &amp; signals</h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span><span class="badge badge--renderer">renderer</span></div>
+          <p>Every luakit object (<code>widget</code>, <code>download</code>, <code>timer</code>, <code>page</code>, <code>dom_element</code>, …) follows the same protocol:</p>
+          <ul>
+            <li><code>type(obj)</code> returns the class name (<code>"widget"</code>, <code>"page"</code>, …). <code>pairs</code> works on the object's public properties.</li>
+            <li>Properties are read/written as fields; a successful write emits <code>"property::&lt;name&gt;"</code>.</li>
+            <li><code>obj:add_signal(name, fn)</code> · <code>obj:emit_signal(name, ...)</code> · <code>obj:remove_signal(name, fn)</code> · <code>obj:remove_signals(name)</code>.</li>
+            <li>Handlers run in registration order as <code>fn(obj, ...)</code>. The <b>first handler returning a non-nil value stops propagation</b> and that value is what <code>emit_signal</code> returns (luakit's <code>LUA_MULTRET</code> semantics) — this is how <code>navigation-request</code> returning <code>false</code> vetoes.</li>
+            <li>Classes have module-level signals too: <code>widget.add_signal("create", fn(w))</code>, <code>luakit.add_signal(...)</code>.</li>
+            <li>After <code>destroy</code> only <code>obj.is_alive</code> may be read; anything else raises.</li>
+          </ul>
+        </section>
+
+        <section id="c-widget">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p><code>widget{ type = "...", &lt;props&gt; }</code> constructs a widget. Every non-webview type is backed by a real Android View kept by the Java host <code>LemurXWidgetHost</code>; property reads/writes and method calls cross synchronously, events come back asynchronously — except <code>key-press</code>, whose "consumed?" verdict the UI thread waits for.</p>
+          <p>Types: <code>window hbox vbox hpaned vpaned notebook overlay stack eventbox scrolled label entry image spinner drawing_area webview</code>.</p>
+          <dl class="api">
+            <dt><code>w.type</code> · <code>w.parent</code> · <code>w.is_alive</code></dt><dd>Read-only.</dd>
+            <dt><code>w.visible</code> · <code>w.focused</code> · <code>w.can_focus</code> · <code>w.tooltip</code> · <code>w.opacity</code></dt><dd>Read/write.</dd>
+            <dt><code>w.width</code> · <code>w.height</code> · <code>w.min_size</code> · <code>w.margin</code> · <code>w.margin_left/right/top/bottom</code> · <code>w.align</code></dt><dd>Geometry in dp. <code>align = { h = "left"|"center"|"right"|"fill", v = ... }</code>.</dd>
+            <dt><code>w.bg</code> · <code>w.fg</code> · <code>w.font</code> · <code>w.css</code></dt><dd>GTK/CSS colors (<code>"#rrggbb"</code>, names), Pango font strings (<code>"monospace bold 12"</code>, size in sp), a CSS subset.</dd>
+            <dt><code>w:show()</code> · <code>w:hide()</code> · <code>w:focus()</code> · <code>w:destroy()</code></dt><dd>Common methods.</dd>
+            <dt><code>w:send_key(key, mods)</code> · <code>w:query_tooltip()</code> · <code>w:css_reset()</code> · <code>w:rect() -> {x, y, w, h}</code></dt><dd>Synthetic key event; tooltip text; reset CSS; on-screen rectangle.</dd>
+            <dt><code>widget.add_signal("create", fn(w))</code><span class="badges"><span class="badge badge--signal">class signal</span></span></dt><dd>Fires for every new widget — how <code>webview.lua</code>/<code>window.lua</code> initialise theirs.</dd>
+            <dt><code>"key-press"(w, mods, key)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Return <code>true</code> to consume. <code>mods</code> is a table of <code>"Control" "Shift" "Mod1"</code>…; <code>key</code> is the GDK keysym name (<code>"Escape"</code>, <code>"Return"</code>, <code>"a"</code>).</dd>
+            <dt><code>"button-press"</code> · <code>"button-release"</code> · <code>"button-double-click"(w, mods, button)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Pointer/touch events (button 1). Attaching a handler enables the host-side listener.</dd>
+            <dt><code>"mouse-enter"</code> · <code>"mouse-leave"</code> · <code>"scroll"</code> · <code>"focus"</code> · <code>"unfocus"</code> · <code>"resize"</code> · <code>"parent-set"</code> · <code>"destroy"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Other widget events.</dd>
+          </dl>
+        </section>
+
+        <section id="c-webview">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:webview</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>A luakit webview <em>is</em> a LemurX tab. <code>widget{type="webview"}</code> opens a tab; with <code>luakit_autowrap</code> on (default) every tab the user opens natively is wrapped too, so <code>webview.add_signal("init")</code> and <code>luakit.windows</code>-style code see them. <code>view.id</code> equals the tab id and the renderer <code>page.id</code>. Packing a webview into a <code>notebook</code> or <code>box</code> moves the tab's content into that widget's rectangle.</p>
+          <dl class="api">
+            <dt><code>view.uri</code></dt><dd>Read/write — assigning navigates.</dd>
+            <dt><code>view.title</code> · <code>view.progress</code> · <code>view.is_loading</code> · <code>view.is_playing_audio</code> · <code>view.private</code> · <code>view.id</code> · <code>view.web_process_id</code> · <code>view.hovered_uri</code> · <code>view.favicon</code> · <code>view.favicon_uri</code> · <code>view.certificate</code> · <code>view.source</code></dt><dd>Read-only state. <code>certificate</code> is PEM.</dd>
+            <dt><code>view.session_state</code></dt><dd>Read/write serialized navigation history (used by <code>session.lua</code>, <code>undoclose.lua</code>).</dd>
+            <dt><code>view.history -> {index, items={{uri, title}...}}</code></dt><dd>Back/forward list.</dd>
+            <dt><code>view.scroll -> {x, y, xmax, ymax, xpage_size, ypage_size}</code></dt><dd>Read/write scroll position.</dd>
+            <dt><code>view.zoom_level</code> · <code>view.user_agent</code> · <code>view.enable_javascript</code> · <code>view.editable</code> · <code>view.enable_scripts</code></dt><dd>Read/write settings. All WebKitSettings keys (<code>default_font_size</code>, …) are accepted and mapped where Chromium has an equivalent.</dd>
+            <dt><code>view.stylesheets</code></dt><dd>Set-like table: <code>view.stylesheets[ss] = true</code>. See <a href="#lk-stylesheet"><code>stylesheet</code></a>.</dd>
+            <dt><code>view.inspector</code> · <code>view:show_inspector()</code> · <code>close_inspector()</code></dt><dd>DevTools front-end for this tab.</dd>
+            <dt><code>view:go_back()</code> · <code>go_forward()</code> · <code>can_go_back()</code> · <code>can_go_forward()</code> · <code>reload()</code> · <code>reload_bypass_cache()</code> · <code>stop()</code> · <code>loading()</code></dt><dd>Navigation control.</dd>
+            <dt><code>view:eval_js(script[, {source=, callback=fn(ret, err)}])</code></dt><dd>Main-world evaluation; with <code>callback</code> it is asynchronous.</dd>
+            <dt><code>view:load_string(html, base_uri)</code></dt><dd>Show generated HTML without a network request or history entry.</dd>
+            <dt><code>view:search(text, case_sensitive, forward, wrap)</code> · <code>search_next()</code> · <code>search_previous()</code> · <code>clear_search()</code></dt><dd>Find in page.</dd>
+            <dt><code>view:ssl_trusted() -> boolean | nil</code> · <code>allow_certificate(host, cert)</code></dt><dd>TLS state.</dd>
+            <dt><code>view:save(path)</code> · <code>view:crash()</code> · <code>view:set_pdfjs(on)</code></dt><dd>Save page (MHTML); kill the renderer; PDF viewer preference.</dd>
+            <dt><code>"load-status"(view, status, uri, err)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd><code>status</code>: <code>"provisional" | "redirected" | "committed" | "first-visual" | "finished" | "failed"</code>.</dd>
+            <dt><code>"navigation-request"(view, uri, reason) -> false</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Return <code>false</code> to cancel. Implemented as a <code>NavigationThrottle</code>: nothing loads, no history entry. <code>reason</code> mirrors luakit (<code>"link-clicked"</code>, <code>"form-submitted"</code>, <code>"back-forward"</code>, <code>"reload"</code>, <code>"form-resubmitted"</code>, <code>"other"</code>).</dd>
+            <dt><code>"new-window-decision"(view, uri, reason) -> false</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Popups / <code>target=_blank</code>. Return <code>false</code> to block; otherwise the new tab is wrapped and its <code>parent_view</code> set.</dd>
+            <dt><code>"scheme-request::&lt;name&gt;"(view, uri, request)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>See <a href="#lk-scheme">Custom schemes</a>.</dd>
+            <dt><code>"favicon"</code> · <code>"crashed"</code> · <code>"web-extension-loaded"</code> · <code>"property::uri"</code> · <code>"property::title"</code> · <code>"property::progress"</code> · <code>"property::is_playing_audio"</code> …<span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>State changes.</dd>
+          </dl>
+        </section>
+
+        <section id="c-window">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:window</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>A full-screen overlay <code>FrameLayout</code> on the Activity's content view. Showing a window hides the native toolbar and bottom bar; destroying (or hiding) the last window brings them back. <code>luakit.windows</code> lists live windows.</p>
+          <dl class="api">
+            <dt><code>win.child</code></dt><dd>The single child widget.</dd>
+            <dt><code>win.title</code> · <code>win.decorated</code> · <code>win.urgency_hint</code> · <code>win.fullscreen</code> · <code>win.maximized</code> · <code>win.screen</code> · <code>win.root_win_xid</code></dt><dd>Accepted for compatibility; <code>fullscreen</code> maps to immersive mode.</dd>
+            <dt><code>win:set_default_size(w, h)</code></dt><dd>Requested size in dp; <code>0</code> means fill.</dd>
+            <dt><code>win:set_dark_mode(on)</code></dt><dd>Dark-mode hint for the overlay.</dd>
+            <dt><code>"destroy"</code> · <code>"can-close"</code> · <code>"delete-event"</code> · <code>"key-press"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Window signals. Hardware keys reach the window's <code>key-press</code> when no child consumed them.</dd>
+          </dl>
+        </section>
+
+        <section id="c-box">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:box</code> (<code>hbox</code> / <code>vbox</code>)</h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>A <code>LinearLayout</code>.</p>
+          <dl class="api">
+            <dt><code>box.homogeneous</code> · <code>box.spacing</code></dt><dd>Equal-size children; gap in dp.</dd>
+            <dt><code>box:pack(child[, {expand=, fill=, padding=, start=false}])</code></dt><dd>Append (or prepend with <code>start=false</code> semantics of <code>pack_end</code>). <code>expand</code> becomes layout weight.</dd>
+            <dt><code>box:reorder(child, index)</code></dt><dd>Move a child (1-based).</dd>
+            <dt><code>box:remove(child)</code> · <code>box:replace(old, new)</code></dt><dd>Remove / swap.</dd>
+            <dt><code>box.children -> {widget...}</code></dt><dd>Current children.</dd>
+            <dt><code>"add"(box, child)</code> · <code>"remove"(box, child)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Child changes.</dd>
+          </dl>
+        </section>
+
+        <section id="c-notebook">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:notebook</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>Pages are usually webviews. Switching a page selects the corresponding native tab, and selecting a tab natively switches the notebook. Indices are 1-based; <code>-1</code> means last.</p>
+          <dl class="api">
+            <dt><code>nb:append(child) -> index</code> · <code>nb:insert(index, child) -> index</code></dt><dd>Add pages.</dd>
+            <dt><code>nb:remove(child)</code></dt><dd>Remove a page (the widget survives).</dd>
+            <dt><code>nb:count() -> n</code> · <code>nb:current() -> index</code></dt><dd>Page count; selected page index.</dd>
+            <dt><code>nb:atindex(i) -> widget</code> · <code>nb[i]</code> · <code>nb:indexof(child) -> index | nil</code></dt><dd>Lookup both ways.</dd>
+            <dt><code>nb:switch(i)</code> · <code>nb:reorder(child, i)</code></dt><dd>Select / move a page.</dd>
+            <dt><code>nb:set_title(child, text)</code> · <code>get_title(child)</code></dt><dd>Tab labels (used when <code>show_tabs</code>).</dd>
+            <dt><code>nb.show_tabs</code> · <code>nb.show_border</code></dt><dd>Built-in tab strip on/off (luakit's <code>window.lua</code> draws its own and hides this).</dd>
+            <dt><code>"switch-page"(nb, view, index)</code> · <code>"page-added"(nb, view, index)</code> · <code>"page-removed"(nb, view)</code> · <code>"page-reordered"(nb, view, index)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Page lifecycle.</dd>
+          </dl>
+        </section>
+
+        <section id="c-label">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:label</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>label.text</code></dt><dd>Pango markup (<code>&lt;span foreground='#fff' weight='bold'&gt;</code>, <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;u&gt;</code>, <code>&lt;tt&gt;</code>) translated to Android <code>Spanned</code>.</dd>
+            <dt><code>label.fg</code> · <code>label.bg</code> · <code>label.font</code> · <code>label.padding</code> · <code>label.align</code> · <code>label.textwidth</code> · <code>label.selectable</code></dt><dd>Styling. <code>textwidth</code> in characters (0 = unconstrained); ellipsised when exceeded.</dd>
+          </dl>
+        </section>
+
+        <section id="c-entry">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:entry</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <p>An <code>EditText</code>. Focusing it raises the soft keyboard.</p>
+          <dl class="api">
+            <dt><code>entry.text</code> · <code>entry.position</code> · <code>entry.show_frame</code> · <code>entry.fg/bg/font</code></dt><dd>Contents, caret position, frame, styling.</dd>
+            <dt><code>entry:insert_text(text[, position])</code> · <code>entry:select_region(start[, end])</code></dt><dd>Edit helpers.</dd>
+            <dt><code>"changed"(entry)</code> · <code>"activate"(entry)</code> · <code>"key-press"(entry, mods, key)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Text changed; IME "done"/Enter; keys (return <code>true</code> to consume — luakit's <code>modes</code>/<code>binds</code> rely on this).</dd>
+          </dl>
+        </section>
+
+        <section id="c-eventbox">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:eventbox</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>eb.child</code> · <code>eb.bg</code></dt><dd>Single child; background.</dd>
+            <dt><code>"button-press"</code> · <code>"button-release"</code> · <code>"button-double-click"</code> · <code>"mouse-enter"</code> · <code>"mouse-leave"</code> · <code>"scroll"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Touch → GTK-style pointer events. luakit's tab strip is a row of eventboxes.</dd>
+          </dl>
+        </section>
+
+        <section id="c-overlay">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:overlay</code> · <code>widget:stack</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>overlay.child</code> · <code>overlay:pack(child)</code> · <code>overlay:remove(child)</code></dt><dd>A <code>FrameLayout</code>: one main child, overlays stacked on top.</dd>
+            <dt><code>stack:pack(child)</code> · <code>stack.visible_child</code> · <code>stack.homogeneous</code></dt><dd>Show exactly one child at a time.</dd>
+          </dl>
+        </section>
+
+        <section id="c-paned">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:paned</code> (<code>hpaned</code> / <code>vpaned</code>)</h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>paned:pack1(child[, resize, shrink])</code> · <code>pack2(child[, resize, shrink])</code></dt><dd>Two children split horizontally or vertically.</dd>
+            <dt><code>paned.top/bottom</code> · <code>paned.left/right</code> · <code>paned.position</code></dt><dd>Child accessors (by orientation); divider position in dp.</dd>
+          </dl>
+        </section>
+
+        <section id="c-scrolled">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:scrolled</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>scrolled.child</code> · <code>scrolled.scrollbars</code> · <code>scrolled.scroll -> {x, y, xmax, ymax}</code></dt><dd>A <code>ScrollView</code>/<code>HorizontalScrollView</code> chosen from the child's orientation; scroll position is read/write.</dd>
+          </dl>
+        </section>
+
+        <section id="c-image">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:image</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>image:filename(path)</code></dt><dd>Load from a file (luakit's tab icons ship in <code>resources/icons/</code>).</dd>
+            <dt><code>image:icon(name[, size])</code></dt><dd>Icon by name (APK drawable or Android system icon).</dd>
+            <dt><code>image:scale(w, h)</code></dt><dd>Scale to dp.</dd>
+            <dt><code>image:set_favicon_for_uri(uri) -> boolean</code></dt><dd>Show the favicon Chromium has for <code>uri</code> (<code>tab_favicons.lua</code>).</dd>
+          </dl>
+        </section>
+
+        <section id="c-spinner">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:spinner</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>spinner:start()</code> · <code>spinner:stop()</code> · <code>spinner.started</code></dt><dd>Indeterminate <code>ProgressBar</code>.</dd>
+          </dl>
+        </section>
+
+        <section id="c-drawing_area">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>widget:drawing_area</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>da:invalidate()</code> · <code>da.bg</code> · <code>da.min_size</code></dt><dd>A plain View you size and color; useful as a separator or a colored gauge.</dd>
+          </dl>
+        </section>
+
+        <section id="c-download">
+          <p class="kicker">Classes · luakit</p>
+          <div class="modhead"><h2><code>download</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--browser">browser</span></div>
+          <dl class="api">
+            <dt><code>download{ uri = "https://..." } -> d</code> · <code>d:start()</code> · <code>d:cancel()</code></dt><dd>Create and control a download (via LemurX's download manager).</dd>
+            <dt><code>d.uri</code> · <code>d.destination</code>(rw) · <code>d.allow_overwrite</code>(rw) · <code>d.status</code> · <code>d.progress</code> · <code>d.current_size</code> · <code>d.total_size</code> · <code>d.content_length</code> · <code>d.mime_type</code> · <code>d.suggested_filename</code> · <code>d.elapsed_time</code> · <code>d.error</code></dt><dd><code>status ∈ "created" | "started" | "cancelled" | "failed" | "finished"</code>.</dd>
+            <dt><code>"decide-destination"(d, suggested)</code> · <code>"created-destination"(d, path)</code> · <code>"error"(d, msg)</code> · <code>"finished"(d)</code> · <code>"property::*"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Download lifecycle; <code>luakit.add_signal("download-start", fn(d, view))</code> catches downloads the browser starts on its own.</dd>
+          </dl>
+        </section>
+
+        <!-- ================================================ RENDERER CLASSES -->
+
+        <section id="r-luakit">
+          <p class="kicker">Classes · renderer</p>
+          <div class="modhead"><h2><code>luakit</code> (web module side)</h2><span class="badge badge--luakit">luakit</span><span class="badge badge--renderer">renderer</span></div>
+          <p>Available inside web modules loaded with <a href="#lk-ipc"><code>require_web_module</code></a>. One Lua state per renderer process; a process may host several pages.</p>
+          <dl class="api">
+            <dt><code>luakit.web_process_id</code> · <code>luakit.version</code> · <code>luakit.install_path</code> · <code>luakit.resource_path</code></dt><dd>Process identity and paths.</dd>
+            <dt><code>luakit.add_signal("page-created", fn(page))</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>A main frame was created in this process. Attach <code>page</code> signals here.</dd>
+            <dt><code>luakit.register_function(uri_pattern, name, fn(page, resolve, reject, ...))</code></dt><dd>For documents whose URL matches the Lua pattern, define <code>window[name](...)</code> returning a Promise. Arguments arrive as Lua values (DOM nodes as <code>dom_element</code>); call <code>resolve(value)</code> or <code>reject(err)</code>, possibly later. Errors thrown by <code>fn</code> reject automatically.</dd>
+            <dt><code>luakit.idle_add(fn)</code> · <code>idle_remove(fn)</code> · <code>luakit.time()</code> · <code>uri_encode</code> · <code>uri_decode</code> · <code>wch_lower</code> · <code>wch_upper</code></dt><dd>Same as the browser side.</dd>
+          </dl>
+        </section>
+
+        <section id="r-page">
+          <p class="kicker">Classes · renderer</p>
+          <div class="modhead"><h2><code>page</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--renderer">renderer</span></div>
+          <p>One <code>page</code> per main frame in the process. <code>page.id</code> equals the browser-side <code>webview.id</code> / tab id, so a web module can name the tab when talking to the UI process.</p>
+          <dl class="api">
+            <dt><code>page.uri</code> · <code>page.id</code></dt><dd>Current URL; tab id.</dd>
+            <dt><code>page.document -> dom_document</code></dt><dd>The live document.</dd>
+            <dt><code>page:eval_js(script[, {source=}]) -> value | nil, err</code></dt><dd>Synchronous main-world evaluation. If the result is a JS function, a callable Lua function is returned.</dd>
+            <dt><code>page:wrap_js(body[, {argnames}]) -> fn</code></dt><dd>Compile a JS function body into a Lua-callable function.</dd>
+            <dt><code>"send-request"(page, uri, headers) -> string | false | nil</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Every subresource request of this page, synchronously, before it is sent. Return a string to redirect, <code>false</code> to block, nothing to allow. Mutations to the <code>headers</code> table are applied. Backed by a renderer <code>URLLoaderThrottle</code>.</dd>
+            <dt><code>"document-loaded"(page)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>DOMContentLoaded for the main frame.</dd>
+            <dt><code>"destroy"(page)</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Frame gone.</dd>
+          </dl>
+        </section>
+
+        <section id="r-dom_document">
+          <p class="kicker">Classes · renderer</p>
+          <div class="modhead"><h2><code>dom_document</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--renderer">renderer</span></div>
+          <dl class="api">
+            <dt><code>doc.body -> dom_element</code></dt><dd>The body element.</dd>
+            <dt><code>doc.window -> {scroll_x, scroll_y, inner_width, inner_height}</code></dt><dd>Viewport metrics.</dd>
+            <dt><code>doc:query(css) -> {dom_element...}</code></dt><dd><code>querySelectorAll</code> as a Lua array.</dd>
+            <dt><code>doc:create_element(tag[, attrs[, inner_text]]) -> dom_element</code></dt><dd>Create a detached element.</dd>
+            <dt><code>doc:element_from_point(x, y) -> dom_element | nil</code></dt><dd>Hit test.</dd>
+            <dt><code>"destroy"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Document unloaded.</dd>
+          </dl>
+        </section>
+
+        <section id="r-dom_element">
+          <p class="kicker">Classes · renderer</p>
+          <div class="modhead"><h2><code>dom_element</code></h2><span class="badge badge--luakit">luakit</span><span class="badge badge--renderer">renderer</span></div>
+          <p>A main-world V8 node handle. Identity is preserved: the same node yields the same Lua object within a page, so <code>a == b</code> and using elements as table keys both work. All operations are synchronous.</p>
+          <dl class="api">
+            <dt><code>el.tag_name</code> · <code>el.text_content</code> · <code>el.inner_html</code> · <code>el.child_count</code> · <code>el.src</code> · <code>el.href</code> · <code>el.value</code> · <code>el.checked</code> · <code>el.type</code></dt><dd>Common properties (read/write where the DOM allows).</dd>
+            <dt><code>el.parent</code> · <code>el.first_child</code> · <code>el.last_child</code> · <code>el.prev_sibling</code> · <code>el.next_sibling</code> · <code>el.document</code> · <code>el.owner_document</code></dt><dd>Tree navigation.</dd>
+            <dt><code>el.attr.&lt;name&gt;</code> · <code>el.style.&lt;name&gt;</code></dt><dd>Attribute and inline-style proxies: <code>el.attr.target = "_self"</code>, <code>el.style.display = "none"</code>.</dd>
+            <dt><code>el.rect -> {left, top, width, height}</code> · <code>el:client_rects()</code></dt><dd>Geometry.</dd>
+            <dt><code>el:query(css) -> {dom_element...}</code></dt><dd>Scoped <code>querySelectorAll</code>.</dd>
+            <dt><code>el:append(child)</code> · <code>el:remove()</code></dt><dd>Mutation.</dd>
+            <dt><code>el:click()</code> · <code>el:focus()</code> · <code>el:submit()</code></dt><dd>Actions.</dd>
+            <dt><code>el:add_event_listener(type, capture, fn(el, event))</code> · <code>remove_event_listener(type, capture, fn)</code></dt><dd>DOM events into Lua. <code>event</code> is a JS object proxy (read properties, call methods such as <code>event:preventDefault()</code>).</dd>
+            <dt><code>"destroy"</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Emitted for every element of a page when the page unloads.</dd>
+          </dl>
+        </section>
+
+        <section id="r-ipc">
+          <p class="kicker">Classes · renderer</p>
+          <div class="modhead"><h2><code>ipc_channel</code> (web module side)</h2><span class="badge badge--luakit">luakit</span><span class="badge badge--renderer">renderer</span></div>
+          <dl class="api">
+            <dt><code>ipc_channel(name) -> ui</code></dt><dd>The renderer end of the channel that <code>require_web_module(name)</code> returned in the browser.</dd>
+            <dt><code>ui:emit_signal(name, ...)</code></dt><dd>Send to the browser process. Pass <code>page.id</code> first if the receiver needs to know which tab.</dd>
+            <dt><code>ui:add_signal(name, fn(ch, page, ...))</code><span class="badges"><span class="badge badge--signal">signal</span></span></dt><dd>Receive from the browser. <code>page</code> is the targeted page, or <code>nil</code> for a broadcast — identical to luakit.</dd>
+          </dl>
+          <div class="note note--ok">
+            <b>That's the whole surface.</b> If something you need is missing, <code>lemurx.help()</code> on a device prints the catalog
+            of the build you are running, and every module above has a matching test harness in the tree.
+          </div>
+        </section>
+
+      </article>
+    </div>
+  </main>
+
+  <button class="totop" type="button" aria-label="Back to top">↑</button>
+
+  <footer class="footer">
+    <div class="wrap footer__inner">
+      <div class="footer__brand">
+        <img src="assets/logo-32.png" width="24" height="24" alt="">
+        <span>LemurX</span>
+      </div>
+      <nav class="footer__links" aria-label="Footer">
+        <a href="index.html#features" data-i18n="page.a3">Features</a>
+        <a href="index.html#code" data-i18n="page.a4">Code</a>
+        <a href="index.html#architecture" data-i18n="page.a5">Architecture</a>
+        <a href="index.html#extensions" data-i18n="page.a6">Extensions</a>
+        <a href="index.html#community" data-i18n="page.a7">Community</a>
+        <a href="index.html#story" data-i18n="page.a8">Story</a>
+        <a href="lua.html" data-i18n="page.a9">Docs</a>
+        <a href="index.html#download" data-i18n="page.a10">Download</a>
+      </nav>
+      <p class="footer__legal" data-i18n="page.p11">Built on Chromium. Lua is © PUC-Rio. luakit is © the luakit team (GPLv3, shipped as separate files). Chrome, Edge and the extension names shown are trademarks of their respective owners. Your device, your rules.</p>
+    </div>
+  </footer>
+
+  <script src="js/main.js" defer></script>
+  <script src="js/docs.js" defer></script>
+</body>
+</html>

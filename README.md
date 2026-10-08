@@ -10,6 +10,8 @@
 </p>
 
 <p align="center">
+  <a href="https://kevinlinpr.github.io/LemurX/">Website</a>
+  ·
   <a href="LICENSE">BSD-3-Clause</a>
   ·
   <a href="src/chrome/lemurx/lua/docs/LUA_GUIDE.md">Lua guide</a>
