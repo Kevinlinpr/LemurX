@@ -1,0 +1,19 @@
+# Copyright 2026 The LemurX Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/android/rules.gni")
+
+assert(is_android)
+
+# Resources for the LemurX automation base (lemurx.agent / lemurx.system):
+# the AccessibilityService descriptor referenced from AndroidManifest.xml and
+# its user-facing label/description. Wired in from chrome/android/BUILD.gn
+# (chrome_app_java_resources deps).
+android_resources("agent_resources") {
+  sources = [
+    "res/values-zh-rCN/lemurx_agent_strings.xml",
+    "res/values/lemurx_agent_strings.xml",
+    "res/xml/lemurx_accessibility_service.xml",
+  ]
+}

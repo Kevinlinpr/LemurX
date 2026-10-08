@@ -1,0 +1,37 @@
+diff --git a/chrome/android/java/AndroidManifest.xml b/chrome/android/java/AndroidManifest.xml
+index bb740340ea..210f28fca5 100644
+--- a/chrome/android/java/AndroidManifest.xml
++++ b/chrome/android/java/AndroidManifest.xml
+@@ -958,6 +958,32 @@ by a child template that "extends" this file.
+             android:name="org.chromium.chrome.browser.webapps.WebApkInstallBroadcastReceiver"
+             android:exported="false" />
+ 
++        <!-- LemurX: native Lua script manager (list / detail / source / editor). Plain
++             Android views, no Lua involved, so scripts can neither hide nor block it. -->
++        <activity
++            android:name="org.chromium.chrome.browser.lemurx.LemurXScriptsActivity"
++            android:label="Lua 脚本"
++            android:theme="@style/Theme.Chromium.Activity"
++            android:exported="false"
++            android:windowSoftInputMode="adjustResize"
++            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize|uiMode" />
++
++        <!-- LemurX automation base (lemurx.system.*): AccessibilityService that lets
++             privileged Lua scripts observe and operate other apps. Off until the user
++             enables it in Settings > Accessibility. -->
++        <service
++            android:name="org.chromium.chrome.browser.lemurx.LemurXAccessibilityService"
++            android:label="@string/lemurx_accessibility_label"
++            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
++            android:exported="true">
++            <intent-filter>
++                <action android:name="android.accessibilityservice.AccessibilityService" />
++            </intent-filter>
++            <meta-data
++                android:name="android.accessibilityservice"
++                android:resource="@xml/lemurx_accessibility_service" />
++        </service>
++
+         <!-- Service for decoding images in a sandboxed process. -->
+         <service
+             android:description="@string/decoder_description"

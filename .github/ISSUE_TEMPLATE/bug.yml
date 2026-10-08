@@ -1,0 +1,35 @@
+name: Bug report
+description: Something does not work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do **not** use this form for security issues. Email kevinlinpr@gmail.com
+        or use a private GitHub security advisory (see SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: LemurX commit / Chromium pin
+      description: `git rev-parse HEAD` and the contents of CHROMIUM_VERSION
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Minimal Lua snippet, URL, or steps.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: logcat / crash snippet if you have one. Strip secrets.

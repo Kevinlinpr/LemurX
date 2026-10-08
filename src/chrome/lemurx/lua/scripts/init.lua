@@ -206,7 +206,10 @@ lemurx.version = "1.12.1"
 if package and lemurx.isPrivileged() then
     local ok, root = pcall(lemurx.fs.root)
     if ok and type(root) == "string" and root ~= "" then
+        -- official/：apk 内置的官方脚本及其框架（lx.*），随版本覆盖，用户别改（改了下次更新会丢，
+        -- 想改就在「Lua 脚本」里"复制到本地"）
         package.path = root .. "/?.lua;" .. root .. "/?/init.lua;" .. root .. "/lib/?.lua;"
+            .. root .. "/official/?.lua;" .. root .. "/official/?/init.lua;"
             .. (package.path or "")
     end
 end

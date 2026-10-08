@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/android/rules.gni")
+import("//chrome/lemurx/lua/official/official_assets.gni")
 import("//chrome/lemurx/luakit/luakit_assets.gni")
 
 assert(is_android)
@@ -13,11 +14,13 @@ assert(is_android)
 android_assets("lemurx_assets") {
   renaming_sources = [
     "//chrome/lemurx/lua/scripts/init.lua",
+    "//chrome/lemurx/lua/scripts/agent.lua",
     "//chrome/lemurx/lua/scripts/tutorial.lua",
     "//chrome/lemurx/lua/scripts/example.lua",
   ]
   renaming_destinations = [
     "lua/init.lua",
+    "lua/agent.lua",
     "lua/tutorial.lua",
     "lua/example.lua",
   ]
@@ -45,4 +48,11 @@ android_assets("lemurx_assets") {
   # luakit-compatible runtime: kernel + library + default config.
   renaming_sources += luakit_asset_sources
   renaming_destinations += luakit_asset_destinations
+
+  # Official scripts: Lua re-implementations of popular Chrome extensions
+  # (adblock, dark reader, ...) plus the lx/ framework they share. Seeded to
+  # files/lua/official/ by LemurXBridge.seedOfficialScripts() and loaded after
+  # the luakit kernel, before the user's own scripts.
+  renaming_sources += official_asset_sources
+  renaming_destinations += official_asset_destinations
 }

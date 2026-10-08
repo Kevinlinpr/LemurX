@@ -1,0 +1,19 @@
+diff --git a/chrome/common/chrome_content_client.cc b/chrome/common/chrome_content_client.cc
+index a97283168c..65702650c7 100644
+--- a/chrome/common/chrome_content_client.cc
++++ b/chrome/common/chrome_content_client.cc
+@@ -203,6 +203,14 @@ void ChromeContentClient::AddAdditionalSchemes(Schemes* schemes) {
+   for (auto* standard_scheme : kChromeStandardURLSchemes)
+     schemes->standard_schemes.push_back(standard_scheme);
+ 
++  // LemurX: lemurx:// 是 Lua 脚本自己的页面（官方脚本设置页、lemurx://scripts 等）。
++  // 注册成标准 scheme 才有 host / origin：lemurx://adblock/ 与 lemurx://adblock/api/…
++  // 同源，页面里直接 fetch 不碰 CORS；secure 免得被当成不安全内容；
++  // cors_enabled 让 http(s) 页面在 Lua 侧返回 ACAO 时也能读到响应。
++  schemes->standard_schemes.push_back("lemurx");
++  schemes->secure_schemes.push_back("lemurx");
++  schemes->cors_enabled_schemes.push_back("lemurx");
++
+ #if BUILDFLAG(IS_ANDROID)
+   schemes->referrer_schemes.push_back(content::kAndroidAppScheme);
+   schemes->referrer_schemes.push_back(dom_distiller::kDomDistillerScheme);

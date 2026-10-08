@@ -1,0 +1,26 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/ChromeTabCreator.java b/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/ChromeTabCreator.java
+index 5a3684a8c1..6d9d259267 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/ChromeTabCreator.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tabmodel/ChromeTabCreator.java
+@@ -30,6 +30,7 @@ import org.chromium.chrome.browser.prefetch.settings.PreloadPagesSettingsBridge;
+ import org.chromium.chrome.browser.prefetch.settings.PreloadPagesState;
+ import org.chromium.chrome.browser.profiles.Profile;
+ import org.chromium.chrome.browser.profiles.ProfileProvider;
++import org.chromium.chrome.browser.lemurx.LemurXChromeHost;
+ import org.chromium.chrome.browser.tab.RedirectHandlerTabHelper;
+ import org.chromium.chrome.browser.tab.Tab;
+ import org.chromium.chrome.browser.tab.TabAssociatedApp;
+@@ -184,6 +185,13 @@ public class ChromeTabCreator implements TabCreator, NeedsTabModel, NeedsTabMode
+ 
+     @Override
+     public void launchNtp(@TabLaunchType int type) {
++        // LemurX: a Lua script can replace the new tab page with its own URL
++        // (lemurx.chrome.setNewTabUrl). Incognito keeps the stock NTP.
++        String override = mIncognito ? null : LemurXChromeHost.newTabUrlOverride();
++        if (override != null) {
++            launchUrl(override, type);
++            return;
++        }
+         TabCreatorUtil.launchNtp(this, getProfile(), type);
+     }
+ 

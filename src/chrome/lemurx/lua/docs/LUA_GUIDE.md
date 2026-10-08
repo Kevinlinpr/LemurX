@@ -11,9 +11,15 @@ LemurX把 Chromium 浏览器进程里的能力通过 Lua 5.4 开放出来：标�
 
 | 目录 | 权限 | 加载时机 |
 |---|---|---|
-| `/data/data/<包名>/files/lua/*.lua` | **本地特权**（全部能力） | 浏览器启动时，按文件名排序依次加载 |
-| `/data/data/<包名>/files/lua/ugc/*.lua` | **UGC 受限**（可分享、可上架） | 本地脚本之后加载 |
 | apk 内 `assets/lua/init.lua` | 运行时自带 | 最先加载，定义 `lemurx.*` 便捷函数 |
+| `/data/data/<包名>/files/lua/official/*.lua` | **官方脚本**（本地特权） | luakit 内核之后；从 apk `assets/lua/official/` 解包，升级时覆盖，用户只能开关 / 复制，不能改 |
+| `/data/data/<包名>/files/lua/*.lua` | **本地特权**（全部能力） | 官方脚本之后，按文件名排序依次加载 |
+| `/data/data/<包名>/files/lua/ugc/*.lua` | **UGC 受限**（可分享、可上架） | 本地脚本之后加载 |
+
+官方脚本是用 Lua 完整重写的 Chrome 热门扩展（去广告、用户脚本、暗色、翻译、隐私、标签收纳、
+新标签页、JSON 查看器、视频增强、AI 助手、专注、UA 切换、技术栈、截图、GitHub 文件树、剪藏），
+每个都有 `lemurx://<id>/` 设置页。清单与覆盖表见 `chrome/lemurx/lua/official/CATALOG.md`，
+写法见 [第 8 章](#8-官方脚本与-lx-框架)。
 
 首次启动会把 `tutorial.lua` 复制成 `files/lua/00_tutorial.lua`，它就是一份可运行的范例（20 个场景）。
 建议命名 `10_xxx.lua`、`20_xxx.lua`，数字决定加载顺序。
@@ -28,12 +34,16 @@ adb shell run-as <包名> cp /sdcard/my.lua files/lua/10_my.lua
 
 ### 1.1.1 开关与重载：三点菜单「Lua 脚本」
 
-三点菜单最底下永远有一项 **「Lua 脚本」**——原生 Android 对话框，不经过 Lua，
-脚本隐藏不了、拦截不了。里面是：
+三点菜单最底下永远有一项 **「Lua 脚本」**——原生 Android 界面（`LemurXScriptsActivity`），
+不经过 Lua，脚本隐藏不了、拦截不了。里面是：
 
 * **启用 Lua 脚本** 总开关。关掉 = 引擎不启动、任何脚本不加载、所有钩子走
   「无规则」分支，浏览器就是官方 Chromium；菜单里只剩这一项用来再打开。
-* 每个脚本一个勾选框（内置教程、本地脚本、`ugc/` 脚本），勾掉就不加载。
+* 三组列表：**官方脚本**、**本地脚本**、**UGC 脚本**，每个一个开关。点进去看详情
+  （文件头 `-- @name / @description / @version / @icon / @category / @page / @replaces`
+  注释解析出来的元数据）、**查看源码**；本地 / UGC 脚本可以直接**编辑源码**、删除；
+  官方脚本可以**复制到本地**改成自己的版本（复制件是本地特权脚本，官方原件照常升级）。
+* 有 `@page` 的脚本还能一键打开它的 `lemurx://` 设置页。
 * 点「应用」立即生效：先把脚本写进原生层的一切清干净（网络规则、导航否决、
   证书放行、CDP 会话、自定义 scheme、定时器、覆盖层、控件、皮肤、逐 tab 的
   UA / 请求头），停掉 Lua 引擎，再重建界面。总开关开着的话新界面会重新起一个
@@ -180,6 +190,7 @@ end)
 lemurx.chrome.on("omnibox", function(ev) end)  -- {focus=true|false, text}
 lemurx.chrome.on("back", function(ev) end)     -- {id, url, title}
 lemurx.chrome.on("menu", function(ev) end)     -- {id, title, lua}
+lemurx.chrome.on("app", function(ev) end)      -- {state="foreground"|"background"}：整个应用切前后台（时间追踪、暂停轮询用）
 
 -- 返回键接管：onBack 只登记回调，不改浏览器行为；
 -- 只有显式 interceptBack(true) 之后返回键才归 Lua（想放行就 lemurx.chrome.back()）。
@@ -217,10 +228,12 @@ lemurx.timer.cancel(id)
 ### 4.2 标签与网页 `lemurx.tabs`
 
 ```lua
-lemurx.tabs.list()                 -- [{id,url,title,incognito,loading,canGoBack,canGoForward,muted}]
+lemurx.tabs.list()                 -- [{id,url,title,incognito,loading,canGoBack,canGoForward,muted,
+                                   --   active,hidden,frozen,native,lastActive(ms),parentId}]
 lemurx.tabs.current()              -- 同上单个，或 nil
 lemurx.tabs.open(url[, {background=true, hidden=true, incognito=true}])  -- 返回 tabId
 lemurx.tabs.close(id) / select(id) / hide(id) / show(id) / freeze(id)
+lemurx.tabs.discard(id)            -- 丢弃渲染进程释放内存，标签留着，再切回来自动重载（Great Suspender）
 lemurx.tabs.navigate(id, url) / reload(id) / reloadBypassCache(id) / stop(id)
 lemurx.tabs.back(id) / forward(id) / go(id, index) / offset(id, n)
 lemurx.tabs.history(id)            -- {ok, current, entries=[{index,url,virtualUrl,title,transition,timestamp}], canGoBack, canGoForward}
@@ -248,7 +261,10 @@ local html = lemurx.tabs.html(id)
 lemurx.tabs.setDesktop(id, true)      -- 桌面版 UA + 视口
 lemurx.tabs.setZoom(id, 150) / getZoom(id)   -- 百分比
 lemurx.tabs.mute(id, true) / isMuted(id)
-lemurx.tabs.setUserAgent(id, ua)      -- 后续导航 + navigator.userAgent
+lemurx.tabs.setUserAgent(id, ua[, { platform = "Windows", mobile = false, reload = true }])
+    -- 原生 WebContents UA 覆盖：请求头 + navigator.userAgent + Client Hints（Sec-CH-UA-Platform / Mobile）；
+    -- 传 nil/"" 还原；不会被 Chrome 的"桌面版站点"逻辑覆盖掉
+lemurx.chrome.userAgent()             -- 浏览器默认 UA 字符串（拼自定义 UA 用）
 lemurx.tabs.setHeaders(id, { ["X-Foo"] = "bar" })
 lemurx.tabs.setJavaScript(false) / isJavaScript()   -- 全局开关
 lemurx.tabs.screenshot(id[, {base64=true}])  -- {ok, path, abs, width, height[, data]}，JPEG 存 lua/captures
@@ -329,6 +345,14 @@ lemurx.chrome.hideBottomToolbar(true)             -- 藏地址栏左右两侧按
 lemurx.chrome.hideButton("back"|"forward"|"home"|"tabs"|"tools"|"menu"|"search", true)
 lemurx.chrome.back() / forward()
 lemurx.chrome.info()                              -- {controls, darkMode, urlBarText, urlBarFocused}
+
+-- 网页内容强制暗色（Chromium 自带 Force Dark，C++ 直控，不是 CSS 滤镜）
+lemurx.chrome.setForceDark({ enabled = true, exclude = { "*.github.com", "example.com" } })
+lemurx.chrome.setForceDark(nil)                   -- 交还给 Chrome 设置
+lemurx.chrome.getForceDark()                      -- {active, enabled, exclude}
+
+-- 新标签页整页替换：之后每个新标签都打开这个地址（一般是脚本自己的 lemurx:// 页面）
+lemurx.chrome.setNewTabUrl("lemurx://newtab/page") / setNewTabUrl(nil) / getNewTabUrl()
 ```
 
 ### 4.8 底栏菜单 `lemurx.menu`
@@ -492,6 +516,7 @@ lemurx.ui.click(query) / longClick(query)
 lemurx.ui.setText(query, text) / getText(query)
 lemurx.ui.visible(query, false) / enabled(query, false)
 lemurx.ui.dialog({ title, message, ok, cancel, onOk = fn, onCancel = fn })   -- ev = {id, action}
+lemurx.ui.dialog({ title, items = { "1.0×", "1.5×", "2×" }, onSelect = function(ev) ev.index, ev.text end })  -- 单选列表，index 从 0 起
 lemurx.ui.prompt({ title, hint, value, onOk = function(ev) ev.text end })
 lemurx.ui.alert(title, message[, okText])
 ```
@@ -514,6 +539,23 @@ lemurx.intent.startActivity({ action = "android.intent.action.VIEW", url = "http
                              package = "com.tencent.mm", extras = { k = "v" } })
 lemurx.intent.sendBroadcast({ action = "lemurx.example", extras = {...} })
 -- UGC 仅允许 VIEW / SEND / SENDTO / WEB_SEARCH / MAIN 与 lemurx.* action
+```
+
+### 4.14b 分享 / 相册 / 通知
+
+```lua
+-- 系统分享面板：文件走 FileProvider（path 相对 lua 目录），或直接分享一段文字
+lemurx.share({ path = "captures/x.jpg", mime = "image/jpeg", title = "分享截图" })
+lemurx.share({ text = "# 笔记\n...", mime = "text/plain", title = "标题", subject = "邮件主题" })
+
+-- 存进系统相册 / 下载（MediaStore，Android 10+ 不要存储权限）
+-- 图片 → Pictures/<album>，视频 → Movies/<album>，其它 → Download/<album>
+lemurx.media.save({ path = "captures/x.jpg", name = "shot.jpg", mime = "image/jpeg", album = "LemurX" })
+    -- {ok, uri, name, path}
+
+-- 系统通知：点开跳 url；同 id 覆盖；ongoing=true 不可划掉
+lemurx.notify.show({ id = 1, title = "专注", text = "还剩 10 分钟", url = "lemurx://focus/", ongoing = false })
+lemurx.notify.cancel(1)
 ```
 
 ### 4.15 本地特权专区（UGC 不可用）
@@ -558,6 +600,87 @@ lemurx.overlay.inspect(tab[, mode]) / hide(tab)
 lemurx.css.getComputed(tab, nodeId)
 lemurx.sw.targets() / send(target, method, params)   -- Service Worker
 ```
+
+### 4.17 AI Agent 自动化底座 `lemurx.agent` / `lemurx.system`
+
+一个 GUI Agent 的循环是「观察 → 决策 → 执行」。决策是模型的事（脚本自己接 LLM，`lemurx.http.fetch` 就够），另外两步 LemurX 做成了三层能力，**默认都是关的，不调用就等于不存在**：
+
+| 层 | 范围 | 观察 | 定位 | 执行 | 权限 |
+|---|---|---|---|---|---|
+| 网页 | 当前标签的页面 | `tabs.screenshot` | `agent.mark`（set-of-marks）、CDP | `input.tap/type`、JS | 无 |
+| 浏览器外壳 | 工具栏 / 菜单 / 对话框 / Lua 控件 | `ui.screenshot` | `ui.dump/find`（带 `ref`） | `ui.click/setText/tap/swipe` | 无 |
+| 其他 App | 整机 | `system.screenshot` | `system.tree/find` | `system.click/tap/swipe/global` | 用户在系统设置里开一次无障碍 |
+
+三层坐标统一为 **屏幕像素**（`getLocationOnScreen` / `boundsInScreen`），网页元素由 `lemurx.tabs.viewport()` 给出的映射换算过来。
+
+**一次观察 + 一次执行**
+
+```lua
+local obs = lemurx.agent.observe()      -- {mode="browser"|"system", tab, viewport, screenshot, elements=[...]}
+print(lemurx.agent.describe(obs))       -- 给模型看的文本：
+-- PAGE 商品页 — https://…
+-- SCREENSHOT /data/…/captures/window_….jpg (540x1200, scale 0.50)
+-- [w1] link "首页" @(24,180 96x40)
+-- [w7] textbox "搜索" (editable) @(120,260 700x56)
+-- [n12] ImageButton "菜单" #menu_button (clickable) @(980,90 96x96)
+
+lemurx.agent.act({ type = "tap",  ref = "w7" })                 -- 按 ref 点
+lemurx.agent.act({ type = "type", ref = "w7", text = "耳机", enter = true })
+lemurx.agent.act({ type = "swipe", dir = "down" })              -- 看下面的内容
+lemurx.agent.act({ type = "tap",  x = 540, y = 1600 })          -- 也可以直接给屏幕坐标
+lemurx.agent.act("back")
+```
+
+`ref` 前缀：`w` 网页元素（`data-lemurx-mark`）、`n` 原生控件（`ui.dump` 的 `ref`）、`s` 其他 App 的节点（`system.tree` 的 `ref`）。`act` 会按来源选择最可靠的执行方式：网页元素 → 相对网页 View 的 `input.tap`（`via="js"` 改为 `el.click()`）；原生控件 → `performClick`，句柄失效退回坐标；系统节点 → `performAction(ACTION_CLICK)`，再退回手势。
+
+**动作表** `act{type=...}`：`tap|click{ref|x,y,long,dx,dy,via}`、`longPress`、`type|text{text,ref,clear,enter,append}`、`swipe|scroll{dir,ref,distance,duration|x1,y1,x2,y2}`、`key{key}`、`back`、`home`、`recents`、`notifications`、`navigate{url}`、`open{url}`、`eval{js}`、`launch{package|url}`、`wait{ms}`、`screenshot`、`done{result}`。
+
+**observe 选项**：`{tab, screenshot=true, scale=0.5, quality=60, base64=false, web=true, maxWeb=120, text=false, native=true, maxNative=200, system=nil|true|false}`。`system=nil` 表示自动：无障碍服务已连接且前台不是 LemurX 时改看整机 UI 树（`mode="system"`）。
+
+**循环**（在协程里跑，动作之间会等 `settle` 毫秒让界面稳定）：
+
+```lua
+lemurx.agent.run(function(obs, text, step)
+    local reply = lemurx.http.fetch("https://my-llm/plan", { method = "POST", body = text })
+    return decodeActionFrom(reply.body)      -- 返回 action 表；返回 nil 或 {type="done"} 结束
+end, { maxSteps = 20, settle = 600,
+       onStep = function(step, obs, action, result) lemurx.log(step, action.type, result.ok) end,
+       onDone = function(out) lemurx.log("done", out.steps, out.result) end })   -- 在协程外调用时结果走 onDone
+```
+
+其他：`agent.mark(tab, {max, text})` 单独打标；`agent.find(obs, "文本" | {role="button"})`；`agent.look()` 观察并记住，之后 `act` 不传 obs；`agent.wait(ms)`。
+
+**新增的底层接口**
+
+```lua
+lemurx.ui.tap(x, y[, "dp"]) / longPress(x, y) / swipe(x1, y1, x2, y2[, ms])   -- 屏幕坐标，落到最上层窗口
+lemurx.ui.screenshot({scale=, quality=, base64=})                            -- 整个浏览器窗口 JPEG
+lemurx.ui.dump / find  -- 每个节点多了 ref；lemurx.ui.click({ref=12}) 精确指回
+lemurx.tabs.viewport([tab])  -- {x,y,w,h, contentOffsetY, pageScale, density, viewportWidth/Height, scrollX/Y}
+```
+
+**跨 App：`lemurx.system.*`（本地特权）**
+
+底层是一个 `AccessibilityService`，等价于 adb 的 `uiautomator dump` + `input tap` + `screencap`，但不需要 shell 权限：
+
+```lua
+lemurx.system.status()            -- {connected, enabledInSettings, canScreenshot, component}
+lemurx.system.openSettings()      -- 带用户去「设置 › 无障碍」开启「LemurX 自动化」；LemurX 不会自己开
+lemurx.system.ensure()            -- 没开就跳设置页，返回是否就绪
+lemurx.system.foreground()        -- {package, class, title, self}
+lemurx.system.windows()
+lemurx.system.tree({flat=true, interactiveOnly=true, all=false, maxNodes=1500})   -- 节点 {ref,class,id,text,desc,clickable,editable,...,x,y,w,h}
+lemurx.system.find("文本") / find({id="send", clickable=true, package="com.tencent.mm"})
+lemurx.system.click(ref | {text="发送"}) / longClick / focus / scroll(ref, "down")
+lemurx.system.setText(ref | {editable=true}, "文本")   -- ACTION_SET_TEXT，退路剪贴板粘贴
+lemurx.system.tap(x, y) / longPress(x, y) / swipe(x1, y1, x2, y2[, ms])   -- dispatchGesture，屏幕像素
+lemurx.system.global("back"|"home"|"recents"|"notifications"|"quickSettings"|"lock"|"power")
+lemurx.system.screenshot({scale=0.5})   -- API 30+，整屏
+lemurx.system.launch("com.tencent.mm") / launch("https://…") / launch({action=, data=, extras=})
+lemurx.system.on("window"|"content"|"click"|"focus"|"text"|"notification"|"connected"|"disconnected", fn)
+```
+
+用户始终赢：服务默认关闭；开着时任何时候都能在系统设置里关掉；Lua 总开关关掉后 `lemurx.system` 不再接受调用、不再派发事件；UGC 脚本完全拿不到它。
 
 ---
 
@@ -676,7 +799,10 @@ lemurx.log("现价", price)
 
 ## 6. 坑与限制
 
-- **子资源拦截**：`net.addRule` 目前对页面内 img/script/xhr 不生效（只对导航和浏览器发起的请求），请用注入 CSS/JS 兜底。
+- **子资源拦截**：`net.addRule` 只对导航和浏览器发起的请求生效。页面内 img/script/xhr 的同步拦截在**渲染进程**里：
+  把标签包成 luakit `webview` 后，渲染进程 Lua 的 `page` 会收到 `send-request(uri, headers, info)`，
+  返回新 uri / `false` 阻断 / 改 headers，第三个返回值 `{credentials="omit"}` 可去掉 cookie。
+  官方框架 `lx.web.on_request` 已经封装好了（见第 8 章）。
 - **`tabs.hide` 当前标签**会让屏幕空白，先 `select` 别的标签再 hide。
 - **`theme.set({dark=...})`** 会走LemurX自己的暗色切换，带应用重启标记；频繁切换体验差。
 - **`toolbar.*` 挂载点**宽度固定 150dp，塞太多按钮会挤；一般放 1 个。
@@ -700,3 +826,99 @@ lemurx.log("现价", price)
 6. 所有对外请求走 `lemurx.http.fetch`，域名写在文件头注释里
 7. 提供 `reset`：脚本卸载时应能 `theme.reset()` + `ui.unmount("*")` + `net.clearRules()` 还原
 8. 版本号写在首行注释，例如 `-- myskin v1.0.0`，方便用户更新覆盖
+
+---
+
+## 8. 官方脚本与 `lx` 框架
+
+`files/lua/official/` 里的脚本就是"用 Lua 重写的 Chrome 热门扩展"。它们全部建在一个很薄的
+框架 `lx` 上（`official/lx/`），本地脚本也可以 `require("lx")` 直接用同一套东西。
+覆盖表、能力清单见 `chrome/lemurx/lua/official/CATALOG.md`。
+
+### 8.1 一个官方脚本长什么样
+
+```lua
+-- @name 我的脚本            ← 文件头注释 = 管理界面里显示的元数据
+-- @description 一句话
+-- @version 1.0.0
+-- @icon 🧩
+-- @category 效率
+-- @page lemurx://myscript/
+-- @replaces 某个 Chrome 扩展
+local lx = require("lx")
+local S = lx.register({
+    id = "myscript", name = "我的脚本", version = "1.0.0", icon = "🧩",
+    settings = { enabled = true, sites_off = {} },                  -- 默认值，自动持久化
+    schema = {                                                        -- 设置页表单，自动渲染
+        { key = "enabled", type = "bool", label = "启用", section = "总开关" },
+        { key = "sites_off", type = "list", label = "例外站点" },     -- bool/number/string/url/text/list/select/action
+        { key = "clear", type = "action", label = "清空", api = "clear", style = "danger", confirm = "确定？" },
+    },
+    menu = { { id = "open", title = "我的脚本" } },                   -- 三点菜单项，默认打开 lemurx://myscript/
+    api = {                                                           -- lemurx://myscript/api/<name>?a=<json>  或 POST JSON
+        stats = function(args, ctx) return { n = 1 } end,             -- 返回 table → JSON；返回 nil, "err" → 400
+        slow  = function(args, ctx) lx.after(100, function() ctx.reply({ ok = true }) end) return "async" end,
+    },
+})
+S.page = function(ctx) return lx.html.page({ title = "我的脚本", body = "…" .. lx.html.settings(S) }) end
+S.routes["/img"] = function(ctx) return bytes, "image/png", 200 end  -- 自定义路由；ctx.query / ctx.method / ctx.body
+```
+
+浏览器进程侧还有：
+
+```lua
+lx.on_navigation(function(view, uri, ev) return false | "new-url" | nil end, priority)  -- 主/子框架导航否决、改写
+lx.on_load(function(view, status, uri) end)      -- load-status
+lx.on_webview(function(view) end)                -- 所有已包装 + 之后新建的标签
+lx.tabs.current() / list() / open(url) / inject(id, js, opts) / eval(id, js)
+lx.fetch(url, opts, cb) / lx.fetch_sync(url, opts)    lx.after(ms, fn) / lx.every(ms, fn) / lx.cancel(id)
+lx.data(id):read(name) / write(name, data) / read_json / write_json / exists / remove / path(name)  -- files/lua/official_data/<id>/
+lx.toast(msg) / lx.notify(title, text, {url=...}) / lx.log(fmt, ...)
+lx.html.page{ title, icon, body, js, back_url } / lx.html.settings(S) / lx.html.escape(s)
+```
+
+设置页 JS 里可用 `lx.api(name, args) → Promise`、`lx.toast`、`lx.q/qa`；`<button data-api="x" data-args='{}' data-confirm="…">`
+自动调 API 并 toast 返回的 `message`，返回 `reload = true` 会刷新页面。参数超过 1.5 KB 自动改 POST。
+
+### 8.2 渲染进程半边 `xxx/web.lua`
+
+浏览器侧 `local ch = lx.web.require("myscript/web")` 会把 `official/myscript/web.lua` 装进**每个**渲染进程
+（现有的和以后新建的），并返回 `ipc_channel("lx.myscript")`。渲染进程里：
+
+```lua
+local W = require("lx.web")
+local ch = W.channel("lx.myscript")
+W.on_request(function(page, url, headers, info)          -- 每个子资源，同步
+    -- info = { type = "script"|"image"|"xmlhttprequest"|"sub_frame"|"font"|"media"|"websocket"|"ping"|"other",
+    --          destination, method, initiator, main_frame, mode, credentials }
+    if bad(url) then return false end                     -- 阻断
+    headers["Referer"] = nil                              -- 改头
+    info.opts = { credentials = "omit" }                  -- 不带 Cookie
+    return "https://cleaned.example/…"                    -- 改写
+end, 10)
+W.on_window_cleared(function(page, uri) W.css(page, "body{background:#111}", "dark") end)  -- 新文档最早时机，CSS 绕 CSP
+W.on_document_loaded(function(page) W.eval(page, "…") end)                                 -- 主世界执行 JS
+W.on_page_destroyed(function(page) end)
+W.expose("__my_bridge", function(page, arg) return "value" end)             -- 页面 JS：await window.__my_bridge(arg)
+W.expose_async("__my_async", function(page, resolve, reject, arg) … end)    -- 等 IPC 往返后再 resolve
+W.state(page, "ns")                                                          -- 跟 page 生命周期绑定的表
+W.page_host(page) / W.js_string(s)
+ch:emit_signal("hello", W.pid)                          -- → 浏览器进程 ch:add_signal("hello", function(_, pid) …)
+ch:add_signal("config", function(_, _page, json) end)   -- ← 浏览器进程 lx.web.send_pid("lx.myscript", pid, "config", json)
+```
+
+约定：浏览器进程持有一切敏感东西（API 密钥、cookie、规则编译），渲染进程只拿编译好的数据；
+每个渲染进程就位会发 `hello(pid)`，浏览器侧用 `lx.web.on_process(fn(pid))` / `send_pid` 下发配置，
+配置变了用 `lx.web.broadcast(channel, "config", …)`。
+
+### 8.3 页面内 JS 放哪
+
+大段页面 JS 写成 `xxx/runtime.lua`，内容是 `return [==[ …js… ]==]`，渲染进程 `W.eval(page, require("myscript.runtime"))`
+注入（注意 `(require(...))` 加括号，Lua 5.4 的 `require` 返回两个值）。页面 JS 通过 `W.expose` 出来的
+`window.__xxx` 与 Lua 通话，永远不要把密钥、cookie 之类塞进页面。
+
+### 8.4 测试
+
+官方脚本的逻辑都能在桌面 Lua 5.4 里跑：把 `lemurx.*`、`luakit`、`ipc_channel`、`__lk` 用仿真表替掉，
+浏览器进程半边和渲染进程半边分别加载即可；页面 JS 用 Node `vm.Script` 检查语法，需要 DOM 的用一个
+极简 DOM 替身。C++ / Java 部分用增量编译验证（见 CATALOG.md 末尾）。

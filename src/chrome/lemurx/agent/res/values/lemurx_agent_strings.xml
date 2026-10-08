@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 The LemurX Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file. -->
+<resources>
+    <string name="lemurx_accessibility_label">LemurX Automation</string>
+    <string name="lemurx_accessibility_summary">Lets your LemurX Lua scripts see and operate other apps</string>
+    <string name="lemurx_accessibility_description">Used only by Lua scripts you install in LemurX (lemurx.system.*). When on, scripts can read the screen of other apps, tap and swipe, press Back/Home, and take screenshots. Nothing runs unless a script you enabled asks for it. Turn it off here at any time.</string>
+</resources>

@@ -7,7 +7,8 @@
 --   "event"(cb_id, event_handle)          -- DOM 事件
 --   "call"(cb_id, ...) -> ret             -- JS 调了 Lua 包装函数
 --   "fn"(rid, name, resolver, ...)        -- luakit.register_function 暴露的函数被调
---   "request"(rid, uri, headers) -> verdict, headers   -- 子资源请求（send-request）
+--   "request"(rid, uri, headers, info) -> verdict, headers   -- 子资源请求（send-request）
+--        info = {type="script"|"image"|..., destination, method, initiator, main_frame, mode}
 --   "require"(name)                       -- require_web_module
 
 local N = __luakit_web
@@ -76,8 +77,8 @@ D.fn = function(rid, name, resolver, ...)
     __lk.call_registered(rid, name, resolver, ...)
 end
 
-D.request = function(rid, uri, headers)
-    return __lk.page_send_request(rid, uri, headers or {})
+D.request = function(rid, uri, headers, info)
+    return __lk.page_send_request(rid, uri, headers or {}, info)
 end
 
 D.require = function(name)

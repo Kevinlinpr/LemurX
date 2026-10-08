@@ -169,14 +169,39 @@ public final class LemurXScripts {
         final File file;
         final boolean builtin;
         final boolean ugc;
+        /** apk 内置的官方脚本（files/lua/official/*.lua）：只读，随版本覆盖。 */
+        final boolean official;
         boolean enabled;
 
-        ScriptInfo(String name, File file, boolean builtin, boolean ugc) {
+        // 文件头 "-- @name 去广告" 这类元数据；没有就用文件名
+        @Nullable String title;
+        @Nullable String description;
+        @Nullable String version;
+        @Nullable String icon;
+        @Nullable String category;
+        /** 脚本自己的设置页（官方脚本一般是 lemurx://<id>/）。 */
+        @Nullable String page;
+        /** 对应的 Chrome 扩展名（"替代：uBlock Origin"）。 */
+        @Nullable String replaces;
+
+        ScriptInfo(String name, File file, boolean builtin, boolean ugc, boolean official) {
             this.name = name;
             this.file = file;
             this.builtin = builtin;
             this.ugc = ugc;
+            this.official = official;
             this.enabled = isScriptEnabled(name);
+        }
+
+        String displayTitle() {
+            return TextUtils.isEmpty(title) ? file.getName() : title;
+        }
+
+        String kindLabel() {
+            if (official) return "官方";
+            if (builtin) return "内置教程";
+            if (ugc) return "受限沙箱";
+            return "本地";
         }
     }
 
@@ -184,25 +209,196 @@ public final class LemurXScripts {
         return new File(ContextUtils.getApplicationContext().getFilesDir(), "lua");
     }
 
-    /** 按加载顺序列出 files/lua/*.lua 与 files/lua/ugc/*.lua。 */
+    static File officialDir() {
+        return new File(scriptsDir(), LemurXBridge.OFFICIAL_DIR);
+    }
+
+    /** 按加载顺序列出 official/*.lua、files/lua/*.lua 与 files/lua/ugc/*.lua。 */
     static List<ScriptInfo> listScripts() {
         List<ScriptInfo> out = new ArrayList<>();
         File dir = scriptsDir();
+        File[] official = officialDir().listFiles((d, n) -> n.endsWith(".lua"));
+        if (official != null) {
+            Arrays.sort(official);
+            for (File f : official) {
+                ScriptInfo s =
+                        new ScriptInfo(
+                                LemurXBridge.OFFICIAL_DIR + "/" + f.getName(),
+                                f,
+                                false,
+                                false,
+                                true);
+                readHeader(s);
+                out.add(s);
+            }
+        }
         File[] files = dir.listFiles((d, n) -> n.endsWith(".lua"));
         if (files != null) {
             Arrays.sort(files);
             for (File f : files) {
-                out.add(new ScriptInfo(f.getName(), f, TUTORIAL_FILE.equals(f.getName()), false));
+                ScriptInfo s =
+                        new ScriptInfo(
+                                f.getName(), f, TUTORIAL_FILE.equals(f.getName()), false, false);
+                readHeader(s);
+                out.add(s);
             }
         }
         File[] ugc = new File(dir, "ugc").listFiles((d, n) -> n.endsWith(".lua"));
         if (ugc != null) {
             Arrays.sort(ugc);
             for (File f : ugc) {
-                out.add(new ScriptInfo("ugc/" + f.getName(), f, false, true));
+                ScriptInfo s = new ScriptInfo("ugc/" + f.getName(), f, false, true, false);
+                readHeader(s);
+                out.add(s);
             }
         }
         return out;
+    }
+
+    /**
+     * 一个脚本对应的全部 Lua 源码：入口文件，加上同目录下同名子目录里的模块
+     * （{@code official/adblock.lua} + {@code official/adblock/**.lua}）。
+     */
+    static List<File> sourceFiles(ScriptInfo s) {
+        List<File> out = new ArrayList<>();
+        out.add(s.file);
+        String stem = s.file.getName();
+        if (stem.endsWith(".lua")) {
+            stem = stem.substring(0, stem.length() - 4);
+        }
+        File parent = s.file.getParentFile();
+        if (parent != null) {
+            collectLua(new File(parent, stem), out);
+        }
+        return out;
+    }
+
+    private static void collectLua(File dir, List<File> out) {
+        File[] kids = dir.listFiles();
+        if (kids == null) {
+            return;
+        }
+        Arrays.sort(kids);
+        for (File f : kids) {
+            if (f.isDirectory()) {
+                collectLua(f, out);
+            } else if (f.getName().endsWith(".lua")) {
+                out.add(f);
+            }
+        }
+    }
+
+    /** 相对脚本入口所在目录的显示名，例如 {@code adblock/web.lua}。 */
+    static String sourceLabel(ScriptInfo s, File file) {
+        File parent = s.file.getParentFile();
+        String abs = file.getAbsolutePath();
+        if (parent != null) {
+            String root = parent.getAbsolutePath();
+            if (abs.startsWith(root + "/")) {
+                return abs.substring(root.length() + 1);
+            }
+        }
+        return file.getName();
+    }
+
+    /**
+     * 读文件开头的元数据注释（前 60 行内的 {@code -- @key value}）：
+     * name / description / version / icon / category / page / replaces。
+     */
+    static void readHeader(ScriptInfo s) {
+        try (java.io.BufferedReader r =
+                new java.io.BufferedReader(
+                        new java.io.InputStreamReader(
+                                new java.io.FileInputStream(s.file),
+                                java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            int n = 0;
+            while ((line = r.readLine()) != null && n++ < 60) {
+                String t = line.trim();
+                if (t.isEmpty()) continue;
+                if (!t.startsWith("--")) break; // 注释头结束，代码开始
+                int at = t.indexOf("@");
+                if (at < 0) continue;
+                String rest = t.substring(at + 1).trim();
+                int sp = rest.indexOf(' ');
+                String key = sp < 0 ? rest : rest.substring(0, sp);
+                String value = sp < 0 ? "" : rest.substring(sp + 1).trim();
+                switch (key) {
+                    case "name": s.title = value; break;
+                    case "description": s.description = value; break;
+                    case "version": s.version = value; break;
+                    case "icon": s.icon = value; break;
+                    case "category": s.category = value; break;
+                    case "page": s.page = value; break;
+                    case "replaces": s.replaces = value; break;
+                    default: break;
+                }
+            }
+        } catch (Exception e) {
+            // 读不到就没有元数据
+        }
+    }
+
+    /** 读脚本源码（管理界面查看/编辑用）；失败返回 null。 */
+    static @Nullable String readSource(File f) {
+        try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
+            byte[] buf = new byte[8192];
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                bos.write(buf, 0, n);
+            }
+            return new String(bos.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    static boolean writeSource(File f, String source) {
+        try {
+            File parent = f.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+            try (java.io.FileOutputStream os = new java.io.FileOutputStream(f)) {
+                os.write(source.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            return true;
+        } catch (Exception e) {
+            Log.i(TAG, "write script: %s", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 把官方脚本复制成本地脚本（files/lua/&lt;文件名&gt;），并停用官方那份——两份同时跑会重复
+     * 注册。返回新文件名（开关 key），失败 null。
+     */
+    static @Nullable String forkOfficial(ScriptInfo s) {
+        if (!s.official) {
+            return null;
+        }
+        String src = readSource(s.file);
+        if (src == null) {
+            return null;
+        }
+        String base = s.file.getName().replace(".lua", "");
+        File out = new File(scriptsDir(), base + ".lua");
+        int i = 2;
+        while (out.exists()) {
+            out = new File(scriptsDir(), base + "_" + (i++) + ".lua");
+        }
+        String header =
+                "-- 复制自官方脚本 "
+                        + s.name
+                        + "（"
+                        + (s.version == null ? "" : "v" + s.version)
+                        + "）。官方那份已停用；这份是你的，随便改。\n";
+        if (!writeSource(out, header + src)) {
+            return null;
+        }
+        setScriptEnabledPref(s.name, false);
+        return out.getName();
     }
 
     // ---------------------------------------------------------------- 运行时切换
@@ -240,12 +436,30 @@ public final class LemurXScripts {
 
     // ---------------------------------------------------------------- 管理界面
 
-    /** 三点菜单「Lua 脚本」点进来的原生对话框。纯 Android 控件，不经过 Lua。 */
+    /**
+     * 三点菜单「Lua 脚本」入口：打开原生管理界面 {@link LemurXScriptsActivity}（列表 / 详情 /
+     * 源码 / 编辑 / 设置页入口）。纯 Android 控件，不经过 Lua。Activity 起不来时退回老对话框。
+     */
     static void showManager(@Nullable Activity activity) {
         if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
             return;
         }
         ThreadUtils.assertOnUiThread();
+        try {
+            activity.startActivity(
+                    new android.content.Intent(activity, LemurXScriptsActivity.class));
+            return;
+        } catch (Exception e) {
+            Log.i(TAG, "scripts activity: %s", e.getMessage());
+        }
+        showManagerDialog(activity);
+    }
+
+    /** 老的对话框版管理界面（兜底）。 */
+    static void showManagerDialog(@Nullable Activity activity) {
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+            return;
+        }
         try {
             final boolean enabledNow = isEnabled();
             final List<ScriptInfo> scripts = listScripts();

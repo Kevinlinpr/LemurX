@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The LemurX Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+<resources>
+    <color name="lemurx_ntp_outline">#FFFFFF</color>
+    <color name="lemurx_ntp_icon">#FFFFFF</color>
+    <color name="lemurx_ntp_hairline">#3A3A3C</color>
+    <color name="lemurx_ntp_panel">#1F1F22</color>
+    <color name="lemurx_ntp_text_primary">#FFFFFF</color>
+    <color name="lemurx_ntp_text_secondary">#9A9AA0</color>
+    <color name="lemurx_ntp_search_hint">#4CEBEBF5</color>
+</resources>

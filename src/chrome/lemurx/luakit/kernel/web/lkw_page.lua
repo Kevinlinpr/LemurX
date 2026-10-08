@@ -3,8 +3,11 @@
 --   属性：uri id document
 --   方法：eval_js(script, {source=}) → 值 | nil, err（结果是 JS 函数时返回可调用的 Lua 函数）
 --         wrap_js(body, {argnames}) → Lua 函数
---   信号："send-request"(uri, headers) → 返回字符串重定向 / false 拦截；headers 表可改
+--   信号："send-request"(uri, headers, info) → 返回字符串重定向 / false 拦截；headers 表可改
+--             info = {type, destination, method, initiator, main_frame}（LemurX 扩展）
+--         "window-object-cleared"(uri)  新文档 window 就绪、页面脚本未跑（LemurX 扩展）
 --         "document-loaded"  "destroy"
+--   LemurX 扩展方法：insert_css(css[, key]) → key   remove_css(key)   （用户样式表，绕 CSP）
 --
 -- 一个 page 对应一个渲染进程里的主框架（routing_id）。page.id == UI 侧 webview.id。
 
@@ -101,15 +104,31 @@ function __lk.page_window_cleared(rid, uri)
     -- 新文档：旧 DOM 对象全部作废（"destroy"），page 对象本身不变
     __lk.dom_destroy_page(rid)
     local p = __lk.page_for(rid)
-    if p and __lk.on_window_cleared then __lk.on_window_cleared(p, rid, uri) end
+    if not p then return end
+    if __lk.on_window_cleared then __lk.on_window_cleared(p, rid, uri) end
+    -- LemurX 扩展：新文档的 window 刚建好、页面脚本还没跑。这是注 CSS / 挂 JS 桥的最早时机。
+    object.emit_signal(p, "window-object-cleared", uri)
 end
 
 -- 子资源请求：返回 (verdict, headers)
-function __lk.page_send_request(rid, uri, headers)
+-- info（LemurX 扩展，luakit 原版没有）= {type, destination, method, initiator, main_frame, mode}
+function __lk.page_send_request(rid, uri, headers, info)
     local p = pages[rid]
     if not (p and object.is_alive(p)) then return nil, headers end
-    local ret = object.emit_signal(p, "send-request", uri, headers)
-    return ret, headers
+    local ret = object.emit_signal(p, "send-request", uri, headers, info)
+    -- info.opts 由处理器按需填写：{ credentials = "omit" } 等，交给 C++ 改 ResourceRequest
+    return ret, headers, info and info.opts or nil
+end
+
+-- 注入用户样式表（Blink InsertStyleSheet，绕过页面 CSP，页面脚本不可见）
+-- page:insert_css(css [, key]) -> key ; page:remove_css(key)
+page.__methods.insert_css = function(o, css, key)
+    if type(css) ~= "string" then error("page:insert_css expects a css string", 2) end
+    return N.page_insert_css(object.priv(o).rid, css, key)
+end
+page.__methods.remove_css = function(o, key)
+    if type(key) ~= "string" then error("page:remove_css expects a key", 2) end
+    return N.page_remove_css(object.priv(o).rid, key)
 end
 
 function __lk.pages() return pages end

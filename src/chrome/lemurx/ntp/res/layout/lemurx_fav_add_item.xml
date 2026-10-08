@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The LemurX Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+
+The "+" tile (Lemur lemur_add_favorite_web.xml). Shown while editing, or for
+5 s after tapping empty space on the page.
+-->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="@dimen/lemurx_fav_icon_margin"
+    android:layout_marginBottom="@dimen/lemurx_fav_icon_margin">
+
+    <ImageView
+        android:id="@+id/lemurx_fav_icon"
+        android:layout_width="@dimen/lemurx_fav_icon_size"
+        android:layout_height="@dimen/lemurx_fav_icon_size"
+        android:layout_alignParentStart="true"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
+        android:contentDescription="@string/lemurx_fav_add"
+        android:src="@drawable/lemurx_fav_add" />
+</RelativeLayout>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 The LemurX Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file. -->
+<resources>
+    <string name="lemurx_accessibility_label">LemurX 自动化</string>
+    <string name="lemurx_accessibility_summary">允许 LemurX 的 Lua 脚本观察并操作其他应用</string>
+    <string name="lemurx_accessibility_description">仅供你在 LemurX 中安装的 Lua 脚本使用（lemurx.system.*）。开启后脚本可以读取其他应用的界面、点按和滑动、按返回/主页、截屏。只有你启用的脚本主动调用时才会发生任何操作。可随时在此关闭。</string>
+</resources>

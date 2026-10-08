@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Delete badge shown on tiles in edit mode (lemur_remove_favorite). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="20"
+    android:viewportHeight="20">
+    <path
+        android:pathData="M10,10m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0"
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd" />
+    <path
+        android:pathData="M7.613,6.21L7.707,6.293L10,8.585L12.293,6.293L12.387,6.21C12.779,5.905 13.347,5.932 13.707,6.293C14.098,6.683 14.098,7.317 13.707,7.707L13.707,7.707L11.415,10L13.707,12.293C14.098,12.683 14.098,13.317 13.707,13.707C13.347,14.068 12.779,14.095 12.387,13.79L12.293,13.707L10,11.415L7.707,13.707L7.613,13.79C7.221,14.095 6.653,14.068 6.293,13.707C5.902,13.317 5.902,12.683 6.293,12.293L6.293,12.293L8.585,10L6.293,7.707C5.902,7.317 5.902,6.683 6.293,6.293C6.653,5.932 7.221,5.905 7.613,6.21Z"
+        android:fillColor="#000000" />
+</vector>

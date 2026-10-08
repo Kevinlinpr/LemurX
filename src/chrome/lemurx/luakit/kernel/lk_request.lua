@@ -13,7 +13,8 @@ request = object.class("request", {
         uri = { get = function(obj) return object.priv(obj).uri end },
     },
     methods = {
-        finish = function(obj, data, mime)
+        -- finish(data [, mime [, status]])：status 是 LemurX 扩展（默认 200；404/302 之类）
+        finish = function(obj, data, mime, status)
             local p = object.priv(obj)
             if p.finished then
                 error("request:finish(): request already finished", 2)
@@ -27,7 +28,7 @@ request = object.class("request", {
             p.data = data
             p.mime = mime or "text/html"
             if p.on_finish then
-                p.on_finish(data, p.mime)
+                p.on_finish(data, p.mime, status)
             end
         end,
     },

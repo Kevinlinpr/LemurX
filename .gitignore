@@ -7,3 +7,14 @@
 *.log
 dist/
 __pycache__/
+
+# Local / private artifacts — do not publish.
+*.xlsx
+*.apk
+*.aab
+*.keystore
+*.jks
+*.pem
+.env
+.env.*
+local_args.gn

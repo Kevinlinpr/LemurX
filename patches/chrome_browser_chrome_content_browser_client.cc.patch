@@ -1,19 +1,20 @@
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 033f22b414..1453e60a04 100644
+index 033f22b414..1e0e45c80b 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -546,6 +546,10 @@
+@@ -546,6 +546,11 @@
  #include "chrome/browser/safe_browsing/android/safe_browsing_referring_app_bridge_android.h"
  #include "chrome/browser/ui/android/tab_model/tab_model.h"
  #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 +#include "chrome/browser/lemurx/lemurx_net_rules.h"
 +#include "chrome/browser/lemurx/lemurx_url_loader_throttle.h"
++#include "chrome/browser/ui/android/lemurx/lemurx_force_dark.h"
 +#include "chrome/browser/ui/android/lemurx/lemurx_luakit_scheme.h"
 +#include "chrome/browser/ui/android/lemurx/lemurx_luakit_webview.h"
  #include "chrome/browser/webid/android_native_idp_fetcher.h"
  #include "chrome/common/chrome_descriptors_android.h"
  #include "components/browser_ui/accessibility/android/font_size_prefs_android.h"
-@@ -2288,6 +2292,13 @@ bool ChromeContentBrowserClient::ShouldAllowMojoJsBindingsForFrame(
+@@ -2288,6 +2293,13 @@ bool ChromeContentBrowserClient::ShouldAllowMojoJsBindingsForFrame(
  }
  
  bool ChromeContentBrowserClient::IsHandledURL(const GURL& url) {
@@ -27,7 +28,7 @@ index 033f22b414..1453e60a04 100644
    return ProfileIOData::IsHandledURL(url);
  }
  
-@@ -3867,6 +3878,17 @@ void ChromeContentBrowserClient::AllowCertificateError(
+@@ -3867,6 +3879,17 @@ void ChromeContentBrowserClient::AllowCertificateError(
      return;
    }
  
@@ -45,7 +46,30 @@ index 033f22b414..1453e60a04 100644
    // If the tab is being no-state prefetched, cancel the prefetcher and the
    // request.
    prerender::NoStatePrefetchContents* no_state_prefetch_contents =
-@@ -5512,6 +5534,10 @@ void ChromeContentBrowserClient::RemovePresentationObserver(
+@@ -4699,6 +4722,11 @@ void ChromeContentBrowserClient::OverrideWebPreferences(
+       web_prefs->force_dark_mode_enabled =
+           theme_client->IsForceDarkWebContentEnabled();
+     }
++    // LemurX: lemurx.chrome.setForceDark() overrides the night-mode based
++    // decision (per-site exceptions handled inside).
++    if (std::optional<bool> fd = LemurXForceDarkOverride(web_contents)) {
++      web_prefs->force_dark_mode_enabled = *fd;
++    }
+ #endif  // BUILDFLAG(IS_ANDROID)
+ 
+     // web_app_scope value is platform specific.
+@@ -4951,6 +4979,10 @@ bool ChromeContentBrowserClient::OverrideWebPreferencesAfterNavigation(
+           night_mode::WebContentsThemeClient::FromWebContents(web_contents)) {
+     bool force_dark_mode_new_state =
+         theme_client->IsForceDarkWebContentEnabled();
++    // LemurX: script-managed force dark (see lemurx_force_dark.h).
++    if (std::optional<bool> fd = LemurXForceDarkOverride(web_contents)) {
++      force_dark_mode_new_state = *fd;
++    }
+     prefs_changed |=
+         (web_prefs->force_dark_mode_enabled != force_dark_mode_new_state);
+     web_prefs->force_dark_mode_enabled = force_dark_mode_new_state;
+@@ -5512,6 +5544,10 @@ void ChromeContentBrowserClient::RemovePresentationObserver(
  void ChromeContentBrowserClient::CreateThrottlesForNavigation(
      content::NavigationThrottleRegistry& registry) {
    CreateAndAddChromeThrottlesForNavigation(registry);
@@ -56,7 +80,7 @@ index 033f22b414..1453e60a04 100644
  }
  
  void ChromeContentBrowserClient::CreateThrottlesForCommitWithoutUrlLoader(
-@@ -6025,6 +6051,13 @@ ChromeContentBrowserClient::CreateURLLoaderThrottles(
+@@ -6025,6 +6061,13 @@ ChromeContentBrowserClient::CreateURLLoaderThrottles(
      }
    }
  
@@ -70,7 +94,7 @@ index 033f22b414..1453e60a04 100644
    if (auto contextual_tasks_throttle =
            contextual_tasks::ContextualTasksURLLoaderThrottle::MaybeCreate(
                profile, wc_getter)) {
-@@ -6060,6 +6093,12 @@ ChromeContentBrowserClient::CreateURLLoaderThrottlesForKeepAlive(
+@@ -6060,6 +6103,12 @@ ChromeContentBrowserClient::CreateURLLoaderThrottlesForKeepAlive(
      result.push_back(std::move(google_throttle));
    }
  
@@ -83,7 +107,7 @@ index 033f22b414..1453e60a04 100644
    if (auto contextual_tasks_throttle =
            contextual_tasks::ContextualTasksURLLoaderThrottle::MaybeCreate(
                profile, /*wc_getter=*/{})) {
-@@ -6073,6 +6112,14 @@ mojo::PendingRemote<network::mojom::URLLoaderFactory>
+@@ -6073,6 +6122,14 @@ mojo::PendingRemote<network::mojom::URLLoaderFactory>
  ChromeContentBrowserClient::CreateNonNetworkNavigationURLLoaderFactory(
      const std::string& scheme,
      content::FrameTreeNodeId frame_tree_node_id) {
@@ -98,7 +122,7 @@ index 033f22b414..1453e60a04 100644
  #if BUILDFLAG(ENABLE_EXTENSIONS_CORE) || BUILDFLAG(IS_CHROMEOS) || \
      !BUILDFLAG(IS_ANDROID)
    content::WebContents* web_contents =
-@@ -6488,6 +6535,12 @@ void ChromeContentBrowserClient::
+@@ -6488,6 +6545,12 @@ void ChromeContentBrowserClient::
          int render_frame_id,
          const std::optional<url::Origin>& request_initiator_origin,
          NonNetworkURLLoaderFactoryMap* factories) {

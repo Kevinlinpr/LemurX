@@ -28,11 +28,14 @@
 #include "chrome/browser/lemurx/lemurx_net_rules.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_cdp.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_engine.h"
+#include "chrome/browser/ui/android/lemurx/lemurx_force_dark.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_luakit_native.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_luakit_scheme.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_luakit_web_host.h"
 #include "chrome/browser/ui/android/lemurx/lemurx_luakit_webview.h"
+#include "components/embedder_support/user_agent_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/lua/src/lauxlib.h"
 #include "third_party/lua/src/lua.h"
 #include "url/gurl.h"
@@ -308,6 +311,15 @@ int LuaTabsFreeze(lua_State* L) {
   jint tab_id = static_cast<jint>(luaL_checkinteger(L, 1));
   JNIEnv* env = base::android::AttachCurrentThread();
   lua_pushboolean(L, Java_LemurXBridge_freezeTab(env, tab_id));
+  return 1;
+}
+
+// tabs.discard(id)：把非当前标签的 WebContents 序列化后销毁（真正释放内存，
+// 再切回来时从状态恢复）。标签休眠类脚本（The Great Suspender）用。
+int LuaTabsDiscard(lua_State* L) {
+  jint tab_id = static_cast<jint>(luaL_checkinteger(L, 1));
+  JNIEnv* env = base::android::AttachCurrentThread();
+  lua_pushboolean(L, Java_LemurXBridge_discardTab(env, tab_id));
   return 1;
 }
 
@@ -1088,6 +1100,14 @@ int LuaUiDialog(lua_State* L) {
   } else {
     lua_pop(L, 1);
   }
+  // items = {"A", "B"} + onSelect(ev) -> ev.index（0 起）/ ev.text：单选列表对话框
+  int select_ref = LUA_NOREF;
+  lua_getfield(L, 1, "onSelect");
+  if (lua_isfunction(L, -1)) {
+    select_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+  } else {
+    lua_pop(L, 1);
+  }
   std::string options = LuaToJson(L, 1);
   JNIEnv* env = base::android::AttachCurrentThread();
   std::string json = JavaString(
@@ -1116,6 +1136,13 @@ int LuaUiDialog(lua_State* L) {
         MakeCb(L, cancel_ref);
   } else if (cancel_ref != LUA_NOREF) {
     luaL_unref(L, LUA_REGISTRYINDEX, cancel_ref);
+  }
+  if (!id.empty() && select_ref != LUA_NOREF) {
+    std::string key = std::string("dialog:") + id + ":select";
+    UnrefUiClick(L, key);
+    g_ui_click_refs[key] = MakeCb(L, select_ref);
+  } else if (select_ref != LUA_NOREF) {
+    luaL_unref(L, LUA_REGISTRYINDEX, select_ref);
   }
   return PushJson(L, json);
 }
@@ -1158,6 +1185,46 @@ int LuaIntentStart(lua_State* L) {
       L, Java_LemurXBridge_startActivity(
              env, base::android::ConvertUTF8ToJavaString(env, options),
              LemurXEngine::Get()->privileged()));
+  return 1;
+}
+
+// lemurx.share({path|text, mime, title, subject})：系统分享面板（文件走 FileProvider）
+int LuaShare(lua_State* L) {
+  luaL_checktype(L, 1, LUA_TTABLE);
+  std::string options = LuaToJson(L, 1);
+  JNIEnv* env = base::android::AttachCurrentThread();
+  lua_pushboolean(
+      L, Java_LemurXBridge_share(
+             env, base::android::ConvertUTF8ToJavaString(env, options),
+             LemurXEngine::Get()->privileged()));
+  return 1;
+}
+
+// lemurx.media.save({path, name, mime, album}) -> {ok, uri, name, path}：存进系统相册 / 下载
+int LuaMediaSave(lua_State* L) {
+  luaL_checktype(L, 1, LUA_TTABLE);
+  std::string options = LuaToJson(L, 1);
+  JNIEnv* env = base::android::AttachCurrentThread();
+  return PushJson(
+      L, JavaString(env, Java_LemurXBridge_mediaSave(
+                            env, base::android::ConvertUTF8ToJavaString(env, options),
+                            LemurXEngine::Get()->privileged())));
+}
+
+// lemurx.notify.show({id, title, text, url, ongoing}) / notify.cancel(id)
+int LuaNotifyShow(lua_State* L) {
+  luaL_checktype(L, 1, LUA_TTABLE);
+  std::string options = LuaToJson(L, 1);
+  JNIEnv* env = base::android::AttachCurrentThread();
+  lua_pushboolean(L, Java_LemurXBridge_notifyShow(
+                         env, base::android::ConvertUTF8ToJavaString(env, options)));
+  return 1;
+}
+
+int LuaNotifyCancel(lua_State* L) {
+  jint id = static_cast<jint>(luaL_checkinteger(L, 1));
+  JNIEnv* env = base::android::AttachCurrentThread();
+  lua_pushboolean(L, Java_LemurXBridge_notifyCancel(env, id));
   return 1;
 }
 
@@ -1481,10 +1548,92 @@ int LuaChromeIsDarkMode(lua_State* L) {
   return 1;
 }
 
+// lemurx.chrome.setForceDark(enabled | nil[, { exceptions = { "host", ... } }])
+//   true  -> Blink 强制暗色（Chrome 的「网页自动深色」引擎）对所有站点开启，
+//            exceptions 里的站点保持原样
+//   false -> 全部关闭，exceptions 里的站点开启
+//   nil   -> 交还 Chrome 自己的逻辑（跟随应用夜间模式 + 站点设置）
+// 立刻对所有已打开标签重算 WebPreferences，无需刷新。
+int LuaChromeSetForceDark(lua_State* L) {
+  LemurXForceDarkState state;
+  if (!lua_isnoneornil(L, 1)) {
+    state.enabled = lua_toboolean(L, 1) != 0;
+  }
+  if (lua_istable(L, 2)) {
+    lua_getfield(L, 2, "exceptions");
+    if (lua_istable(L, -1)) {
+      const lua_Integer n = luaL_len(L, -1);
+      for (lua_Integer i = 1; i <= n; ++i) {
+        lua_rawgeti(L, -1, i);
+        if (const char* s = lua_tostring(L, -1)) {
+          state.exceptions.emplace_back(s);
+        }
+        lua_pop(L, 1);
+      }
+    }
+    lua_pop(L, 1);
+  }
+  LemurXSetForceDark(std::move(state));
+  JNIEnv* env = base::android::AttachCurrentThread();
+  lua_pushboolean(L, Java_LemurXBridge_chromeNotifyWebPreferences(env));
+  return 1;
+}
+
+int LuaChromeGetForceDark(lua_State* L) {
+  LemurXForceDarkState state = LemurXGetForceDark();
+  lua_newtable(L);
+  lua_pushboolean(L, state.enabled.has_value());
+  lua_setfield(L, -2, "managed");
+  if (state.enabled.has_value()) {
+    lua_pushboolean(L, *state.enabled);
+    lua_setfield(L, -2, "enabled");
+  }
+  lua_newtable(L);
+  for (size_t i = 0; i < state.exceptions.size(); ++i) {
+    lua_pushstring(L, state.exceptions[i].c_str());
+    lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
+  }
+  lua_setfield(L, -2, "exceptions");
+  return 1;
+}
+
 int LuaChromeSetFullscreen(lua_State* L) {
   JNIEnv* env = base::android::AttachCurrentThread();
   lua_pushboolean(
       L, Java_LemurXBridge_chromeSetFullscreen(env, lua_toboolean(L, 1)));
+  return 1;
+}
+
+// chrome.setNewTabUrl(url|nil)：新标签页改开这个 URL（"+" 按钮 / 菜单"新标签页"）。
+// nil 恢复原生新标签页。新标签页类脚本（Momentum 一类）用。
+int LuaChromeSetNewTabUrl(lua_State* L) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  std::string url;
+  if (lua_type(L, 1) == LUA_TSTRING) {
+    url = lua_tostring(L, 1);
+  }
+  lua_pushboolean(L, Java_LemurXBridge_chromeSetNewTabUrl(
+                         env, base::android::ConvertUTF8ToJavaString(env, url)));
+  return 1;
+}
+
+// chrome.userAgent()：浏览器自己的默认 UA 字符串（UA 切换脚本用它取 Chrome 版本号，
+// 伪装成别的平台时版本号还是本机的，不会被"版本对不上"识破）。
+int LuaChromeUserAgent(lua_State* L) {
+  std::string ua = embedder_support::GetUserAgent();
+  lua_pushlstring(L, ua.data(), ua.size());
+  return 1;
+}
+
+int LuaChromeGetNewTabUrl(lua_State* L) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  std::string url = base::android::ConvertJavaStringToUTF8(
+      env, Java_LemurXBridge_chromeGetNewTabUrl(env));
+  if (url.empty()) {
+    lua_pushnil(L);
+  } else {
+    lua_pushstring(L, url.c_str());
+  }
   return 1;
 }
 
@@ -1831,13 +1980,19 @@ int LuaTabsHtml(lua_State* L) {
   return PushJson(L, JavaString(env, Java_LemurXBridge_tabHtml(env, tab_id)));
 }
 
+// tabs.setUserAgent(id, ua[, {platform=, mobile=, reload=}])
 int LuaTabsSetUserAgent(lua_State* L) {
   jint tab_id = static_cast<jint>(luaL_checkinteger(L, 1));
   const char* ua = luaL_optstring(L, 2, "");
+  std::string opts = "{}";
+  if (lua_istable(L, 3)) {
+    opts = LuaToJson(L, 3);
+  }
   JNIEnv* env = base::android::AttachCurrentThread();
   lua_pushboolean(
       L, Java_LemurXBridge_tabSetUserAgent(
-             env, tab_id, base::android::ConvertUTF8ToJavaString(env, ua)));
+             env, tab_id, base::android::ConvertUTF8ToJavaString(env, ua),
+             base::android::ConvertUTF8ToJavaString(env, opts)));
   return 1;
 }
 
@@ -1921,6 +2076,9 @@ int LuaInputKey(lua_State* L) {
              env, base::android::ConvertUTF8ToJavaString(env, name), tab_id));
   return 1;
 }
+
+// Agent 底座绑定（ui.tap/swipe/screenshot、tabs.viewport、system.*），见该文件头部说明。
+#include "chrome/browser/ui/android/lemurx/lemurx_api_agent.inc"
 
 int LuaPermSet(lua_State* L) {
   RequirePrivilege(L, "lemurx.perm.set");
@@ -2294,6 +2452,7 @@ void RegisterLemurXApi(lua_State* L) {
   SetCFunction(L, "hide", LuaTabsHide);
   SetCFunction(L, "show", LuaTabsShow);
   SetCFunction(L, "freeze", LuaTabsFreeze);
+  SetCFunction(L, "discard", LuaTabsDiscard);
   SetCFunction(L, "on", LuaTabsOn);
   SetCFunction(L, "setDesktop", LuaTabsSetDesktop);
   SetCFunction(L, "setZoom", LuaTabsSetZoom);
@@ -2301,6 +2460,7 @@ void RegisterLemurXApi(lua_State* L) {
   SetCFunction(L, "setJavaScript", LuaTabsSetJavaScript);
   SetCFunction(L, "isJavaScript", LuaTabsIsJavaScript);
   SetCFunction(L, "screenshot", LuaTabsScreenshot);
+  SetCFunction(L, "viewport", LuaTabsViewport);
   SetCFunction(L, "mute", LuaTabsMute);
   SetCFunction(L, "isMuted", LuaTabsIsMuted);
   SetCFunction(L, "stop", LuaTabsStop);
@@ -2363,7 +2523,15 @@ void RegisterLemurXApi(lua_State* L) {
   SetCFunction(L, "on", LuaUiOn);
   SetCFunction(L, "off", LuaUiOff);
   SetCFunction(L, "shell", LuaUiShell);
+  // Agent 底座：屏幕坐标输入 + 整窗截图（与 dump/find 节点的 x/y 同一坐标系）
+  SetCFunction(L, "tap", LuaUiTap);
+  SetCFunction(L, "longPress", LuaUiLongPress);
+  SetCFunction(L, "swipe", LuaUiSwipe);
+  SetCFunction(L, "screenshot", LuaUiScreenshot);
   lua_setfield(L, -2, "ui");
+
+  // 跨 App 自动化（无障碍服务），只对主脚本开放。
+  RegisterLemurXSystemTable(L);
 
   lua_newtable(L);
   SetCFunction(L, "set", LuaThemeSet);
@@ -2380,6 +2548,16 @@ void RegisterLemurXApi(lua_State* L) {
   SetCFunction(L, "startActivity", LuaIntentStart);
   SetCFunction(L, "sendBroadcast", LuaIntentBroadcast);
   lua_setfield(L, -2, "intent");
+
+  // 分享 / 相册 / 通知：截图、下载、提醒类脚本需要的三件系统能力
+  SetCFunction(L, "share", LuaShare);
+  lua_newtable(L);
+  SetCFunction(L, "save", LuaMediaSave);
+  lua_setfield(L, -2, "media");
+  lua_newtable(L);
+  SetCFunction(L, "show", LuaNotifyShow);
+  SetCFunction(L, "cancel", LuaNotifyCancel);
+  lua_setfield(L, -2, "notify");
 
   lua_newtable(L);
   SetCFunction(L, "after", LuaTimerAfter);
@@ -2411,8 +2589,13 @@ void RegisterLemurXApi(lua_State* L) {
   SetCFunction(L, "setStatusBarColor", LuaChromeSetStatusBarColor);
   SetCFunction(L, "setDarkMode", LuaChromeSetDarkMode);
   SetCFunction(L, "isDarkMode", LuaChromeIsDarkMode);
+  SetCFunction(L, "setForceDark", LuaChromeSetForceDark);
+  SetCFunction(L, "getForceDark", LuaChromeGetForceDark);
   SetCFunction(L, "fullscreen", LuaChromeSetFullscreen);
   SetCFunction(L, "setPullRefresh", LuaChromeSetPullRefresh);
+  SetCFunction(L, "userAgent", LuaChromeUserAgent);
+  SetCFunction(L, "setNewTabUrl", LuaChromeSetNewTabUrl);
+  SetCFunction(L, "getNewTabUrl", LuaChromeGetNewTabUrl);
   SetCFunction(L, "setMenuButtonVisible", LuaChromeSetMenuButtonVisible);
   SetCFunction(L, "hideBottomToolbar", LuaChromeHideBottomToolbar);
   SetCFunction(L, "hideButton", LuaChromeHideButton);
@@ -2652,6 +2835,60 @@ static void JNI_LemurXBridge_DispatchHttpResult(
       request_id,
       jjson.is_null() ? "{\"ok\":false,\"error\":\"no result\"}"
                       : base::android::ConvertJavaStringToUTF8(env, jjson));
+}
+
+// tabs.setUserAgent 的真正实现：把自定义 UA 写进 WebContents 的
+// RendererPreferences（请求头 + navigator.userAgent + 客户端提示一起改），而不是
+// 只在 tabs.navigate 时塞一个 User-Agent 头再用 JS 补 navigator。
+//   ua 空        -> 清掉覆盖（回到 Chrome 自己的移动/桌面 UA 逻辑）
+//   platform 空  -> 不发 UA 客户端提示（模拟 Safari / Firefox 这类没有 Sec-CH-UA 的浏览器）
+//   platform 非空 -> 发提示，平台/移动位按参数改，品牌沿用本机 Chromium 的
+static void JNI_LemurXBridge_SetUserAgentOverride(
+    JNIEnv* env,
+    const jni_zero::JavaRef<jobject>& jweb_contents,
+    const jni_zero::JavaRef<jstring>& jua,
+    const jni_zero::JavaRef<jstring>& jplatform,
+    jboolean mobile) {
+  content::WebContents* wc =
+      content::WebContents::FromJavaWebContents(jweb_contents);
+  if (!wc) {
+    return;
+  }
+  const std::string ua =
+      jua.is_null() ? std::string()
+                    : base::android::ConvertJavaStringToUTF8(env, jua);
+  if (ua.empty()) {
+    wc->SetUserAgentOverride(blink::UserAgentOverride(), false);
+    return;
+  }
+  blink::UserAgentOverride ov = blink::UserAgentOverride::UserAgentOnly(ua);
+  const std::string platform =
+      jplatform.is_null()
+          ? std::string()
+          : base::android::ConvertJavaStringToUTF8(env, jplatform);
+  if (!platform.empty()) {
+    blink::UserAgentMetadata md = embedder_support::GetUserAgentMetadata();
+    md.platform = platform;
+    md.mobile = mobile;
+    md.model.clear();
+    if (platform == "Windows") {
+      md.platform_version = "15.0.0";
+      md.architecture = "x86";
+      md.bitness = "64";
+    } else if (platform == "macOS") {
+      md.platform_version = "14.6.1";
+      md.architecture = "arm";
+      md.bitness = "64";
+    } else if (platform == "Linux" || platform == "Chrome OS") {
+      md.platform_version = platform == "Linux" ? "6.8.0" : "16093.0.0";
+      md.architecture = "x86";
+      md.bitness = "64";
+    }
+    md.form_factors.clear();
+    md.form_factors.push_back(mobile ? "Mobile" : "Desktop");
+    ov.ua_metadata_override = md;
+  }
+  wc->SetUserAgentOverride(ov, true);
 }
 
 // jni_zero (Chromium 154): 生成 Java->native 入口，必须在 JNI_LemurXBridge_* 定义之后调用。

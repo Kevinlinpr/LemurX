@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/base64.h"
 #include "base/byte_size.h"
 #include "base/functional/bind.h"
 #include "base/memory/self_deleting.h"
@@ -40,8 +41,10 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
+#include "services/network/public/cpp/data_element.h"
 #include "services/network/public/cpp/http_request_headers_update_params.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "services/network/public/cpp/self_deleting_url_loader_factory.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
@@ -112,6 +115,7 @@ int NextRequestId() {
 }
 
 constexpr base::TimeDelta kLuaReplyTimeout = base::Seconds(30);
+constexpr size_t kMaxPostBody = 32 * 1024 * 1024;
 
 class SchemeLoader : public network::mojom::URLLoader {
  public:
@@ -142,6 +146,20 @@ class SchemeLoader : public network::mojom::URLLoader {
     d.Set("main_frame", request.is_outermost_main_frame);
     if (request.request_initiator) {
       d.Set("initiator", request.request_initiator->Serialize());
+    }
+    // POST 正文（fetch(url, {method:"POST", body}) 这种内存字节；文件 / 管道正文不收）。
+    // 页面往 lemurx:// 路由传大块数据（截图标注结果、导入的会话）靠它，URL 装不下。
+    if (request.request_body) {
+      std::string body;
+      for (const network::DataElement& el : *request.request_body->elements()) {
+        if (el.type() == network::DataElement::Tag::kBytes) {
+          body.append(el.As<network::DataElementBytes>().AsStringView());
+        }
+      }
+      if (!body.empty() && body.size() <= kMaxPostBody) {
+        d.Set("body_b64", base::Base64Encode(body));
+        d.Set("body_size", static_cast<int>(body.size()));
+      }
     }
     std::string json;
     base::JSONWriter::Write(d, &json);

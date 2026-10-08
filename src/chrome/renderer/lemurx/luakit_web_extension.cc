@@ -22,8 +22,12 @@
 #include "content/public/renderer/render_thread.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
+#include "services/network/public/cpp/request_destination.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/mojom/fetch_api.mojom.h"
 #include "third_party/blink/public/common/loader/url_loader_throttle.h"
+#include "third_party/blink/public/platform/web_string.h"
+#include "third_party/blink/public/web/web_css_origin.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/platform/scheduler/web_agent_group_scheduler.h"
 #include "third_party/blink/public/web/web_document.h"
@@ -32,6 +36,7 @@
 #include "third_party/lua/src/lua.h"
 #include "third_party/lua/src/lualib.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 #include "v8/include/v8-array-buffer.h"
 #include "v8/include/v8-container.h"
 #include "v8/include/v8-context.h"
@@ -492,6 +497,67 @@ int PPageUri(lua_State* L) {
   GURL url = wf ? GURL(wf->GetDocument().Url()) : GURL();
   std::string s = url.is_valid() ? url.spec() : "about:blank";
   lua_pushlstring(L, s.data(), s.size());
+  return 1;
+}
+
+// page_insert_css(rid, css [, key [, "user"|"author"]]) -> key | nil, err
+//
+// 用 Blink 的 InsertStyleSheet 注入，而不是往 DOM 里塞 <style>：
+//   * 不受页面 CSP style-src 限制（Chrome 扩展 insertCSS 的 cssOrigin=user 就是这条路）
+//   * 文档一建立就能注入，不用等 <head>，元素隐藏规则没有闪烁
+//   * 页面脚本看不见、删不掉
+// 同一个 key 再次插入会替换之前的内容；换文档后自动失效，需要在 window-object-cleared 重注。
+int PPageInsertCss(lua_State* L) {
+  int rid = static_cast<int>(luaL_checkinteger(L, 1));
+  size_t len = 0;
+  const char* css = luaL_checklstring(L, 2, &len);
+  std::string key = luaL_optstring(L, 3, "");
+  std::string origin = luaL_optstring(L, 4, "user");
+  auto* p = Ext(L)->PageByRouting(rid);
+  blink::WebLocalFrame* wf = p ? LuakitWebExtension::LiveWebFrame(p) : nullptr;
+  if (!wf) {
+    return PushNilErr(L, "page destroyed");
+  }
+  blink::WebDocument doc = wf->GetDocument();
+  if (doc.IsNull()) {
+    return PushNilErr(L, "no document");
+  }
+  const blink::WebCssOrigin css_origin = origin == "author"
+                                             ? blink::WebCssOrigin::kAuthor
+                                             : blink::WebCssOrigin::kUser;
+  blink::WebStyleSheetKey out_key;
+  if (key.empty()) {
+    out_key = doc.InsertStyleSheet(
+        blink::WebString::FromUtf8(std::string(css, len)), nullptr, css_origin);
+  } else {
+    blink::WebStyleSheetKey k = blink::WebString::FromUtf8(key);
+    out_key = doc.InsertStyleSheet(
+        blink::WebString::FromUtf8(std::string(css, len)), &k, css_origin);
+  }
+  const std::string ks = out_key.Utf8();
+  lua_pushlstring(L, ks.data(), ks.size());
+  return 1;
+}
+
+// page_remove_css(rid, key [, "user"|"author"]) -> true | nil, err
+int PPageRemoveCss(lua_State* L) {
+  int rid = static_cast<int>(luaL_checkinteger(L, 1));
+  std::string key = luaL_checkstring(L, 2);
+  std::string origin = luaL_optstring(L, 3, "user");
+  auto* p = Ext(L)->PageByRouting(rid);
+  blink::WebLocalFrame* wf = p ? LuakitWebExtension::LiveWebFrame(p) : nullptr;
+  if (!wf) {
+    return PushNilErr(L, "page destroyed");
+  }
+  blink::WebDocument doc = wf->GetDocument();
+  if (doc.IsNull()) {
+    return PushNilErr(L, "no document");
+  }
+  doc.RemoveInsertedStyleSheet(
+      blink::WebString::FromUtf8(key),
+      origin == "author" ? blink::WebCssOrigin::kAuthor
+                         : blink::WebCssOrigin::kUser);
+  lua_pushboolean(L, true);
   return 1;
 }
 
@@ -984,6 +1050,8 @@ void LuakitWebExtension::RegisterPrimitives() {
   SetFn(L, "page_alive", PPageAlive);
   SetFn(L, "page_uri", PPageUri);
   SetFn(L, "page_global", PPageGlobal);
+  SetFn(L, "page_insert_css", PPageInsertCss);
+  SetFn(L, "page_remove_css", PPageRemoveCss);
   SetFn(L, "page_eval", PPageEval);
   SetFn(L, "js_get", PJsGet);
   SetFn(L, "js_set", PJsSet);
@@ -1028,6 +1096,55 @@ void LuakitWebExtension::Dispatch(const char* kind, int nargs) {
 // ---- send-request 节流器 ----
 
 namespace {
+
+// Chromium 请求目的 → Adblock Plus 过滤器类型名（$script / $image / …）
+const char* AbpTypeForRequest(const network::ResourceRequest& r) {
+  using D = network::mojom::RequestDestination;
+  if (r.destination == D::kEmpty && r.keepalive) {
+    return "ping";  // navigator.sendBeacon / fetch keepalive
+  }
+  switch (r.destination) {
+    case D::kScript:
+    case D::kWorker:
+    case D::kSharedWorker:
+    case D::kServiceWorker:
+    case D::kAudioWorklet:
+    case D::kPaintWorklet:
+    case D::kXslt:
+    case D::kWebBundle:
+    case D::kSpeculationRules:
+      return "script";
+    case D::kImage:
+      return "image";
+    case D::kStyle:
+      return "stylesheet";
+    case D::kFont:
+      return "font";
+    case D::kAudio:
+    case D::kVideo:
+    case D::kTrack:
+      return "media";
+    case D::kEmbed:
+    case D::kObject:
+      return "object";
+    case D::kIframe:
+    case D::kFrame:
+    case D::kFencedframe:
+      return "subdocument";
+    case D::kDocument:
+      return "document";
+    case D::kReport:
+      return "ping";
+    case D::kEmpty:
+    case D::kJson:
+      // fetch() / XHR / sendBeacon / EventSource 都是 kEmpty；分不出 ping 和 xhr，按 xhr。
+      return "xmlhttprequest";
+    case D::kManifest:
+    case D::kWebIdentity:
+    default:
+      return "other";
+  }
+}
 
 class LuakitRequestThrottle : public blink::URLLoaderThrottle {
  public:
@@ -1120,8 +1237,33 @@ bool LuakitWebExtension::OnSendRequest(int routing_id,
   for (const auto& kv : request->headers.GetHeaderVector()) {
     original_keys.push_back(kv.key);
   }
-  // __luakit_web_dispatch("request", rid, uri, headers) -> verdict, headers
-  Dispatch("request", 3);
+  // info 表：请求类型等元数据（luakit 原版没有；去广告一类脚本按 $script/$image 判定
+  // 少不了）。type 用 Adblock Plus 的类型名，destination 是 Chromium 原始枚举名。
+  lua_newtable(L);
+  {
+    const char* dest = network::RequestDestinationToString(request->destination);
+    lua_pushstring(L, dest);
+    lua_setfield(L, -2, "destination");
+    lua_pushstring(L, AbpTypeForRequest(*request));
+    lua_setfield(L, -2, "type");
+    lua_pushstring(L, request->method.c_str());
+    lua_setfield(L, -2, "method");
+    if (request->request_initiator) {
+      const std::string init = request->request_initiator->Serialize();
+      lua_pushlstring(L, init.data(), init.size());
+      lua_setfield(L, -2, "initiator");
+    }
+    lua_pushboolean(L, request->is_outermost_main_frame);
+    lua_setfield(L, -2, "main_frame");
+    lua_pushinteger(L, static_cast<lua_Integer>(request->mode));
+    lua_setfield(L, -2, "mode");
+    lua_pushinteger(L, static_cast<lua_Integer>(request->credentials_mode));
+    lua_setfield(L, -2, "credentials");
+    lua_pushinteger(L, request->resource_type);
+    lua_setfield(L, -2, "resource_type");
+  }
+  // __luakit_web_dispatch("request", rid, uri, headers, info) -> verdict, headers, opts
+  Dispatch("request", 4);
   int nret = lua_gettop(L) - top;
   bool allow = true;
   if (nret >= 1) {
@@ -1166,6 +1308,23 @@ bool LuakitWebExtension::OnSendRequest(int routing_id,
       }
       lua_pop(L, 1);
     }
+  }
+  // 第三个返回值：请求选项表（原版 luakit 没有；隐私类脚本要能剥掉第三方 Cookie）
+  //   opts.credentials = "omit" | "same-origin" | "include"
+  if (allow && nret >= 3 && lua_istable(L, top + 3)) {
+    lua_getfield(L, top + 3, "credentials");
+    if (lua_type(L, -1) == LUA_TSTRING) {
+      const std::string cred = lua_tostring(L, -1);
+      if (cred == "omit") {
+        request->credentials_mode = network::mojom::CredentialsMode::kOmit;
+      } else if (cred == "same-origin") {
+        request->credentials_mode =
+            network::mojom::CredentialsMode::kSameOrigin;
+      } else if (cred == "include") {
+        request->credentials_mode = network::mojom::CredentialsMode::kInclude;
+      }
+    }
+    lua_pop(L, 1);
   }
   lua_settop(L, top);
   return allow;

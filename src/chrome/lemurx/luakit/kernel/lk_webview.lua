@@ -422,6 +422,7 @@ function impl.newindex(view, key, v)
 end
 
 -- ===== 构造 =====
+__lk.webview_created_hooks = __lk.webview_created_hooks or {}
 local function wrap(tab_id, private)
     local view = __lk.new_widget("webview", impl, {})
     local p = object.priv(view)
@@ -437,6 +438,12 @@ local function wrap(tab_id, private)
         msg.warn("webview: cannot attach observer to tab %d", tab_id)
     end
     info(view)
+    -- LemurX 扩展：内核级"新 webview"钩子（luakit 里对应 lib/webview.lua 的 "init" 信号，
+    -- 但不加载 luakit lib 的官方脚本也需要在每个标签上挂 navigation-request 等处理器）
+    for _, hook in ipairs(__lk.webview_created_hooks) do
+        local ok, err = pcall(hook, view)
+        if not ok then msg.warn("webview created hook error: %s", tostring(err)) end
+    end
     return view
 end
 
@@ -517,7 +524,9 @@ __lk.dispatchers.webview = function(tab_id, json, nav_id)
     elseif kind == "navigation-request" then
         -- 原生侧的导航正 DEFER 等这个答复；脚本抛错也必须回话，否则每次导航
         -- 都要等 4 秒超时才放行
-        local ok, ret = pcall(object.emit_signal, view, "navigation-request", ev.uri, ev.reason)
+        -- 第三个参数是 LemurX 扩展：{main_frame, redirect, renderer_initiated, user_gesture, tab}
+        -- luakit 原版处理器只看前两个，多传一个不影响
+        local ok, ret = pcall(object.emit_signal, view, "navigation-request", ev.uri, ev.reason, ev)
         if not ok then
             msg.warn("navigation-request handler error: %s", tostring(ret))
             ret = nil

@@ -17,9 +17,9 @@ local N = __luakit
 -- 未完成的请求：id -> request 对象（Lua 侧兜底，原生 cancel 时清）
 local pending = {}
 
-local function reply(id, data, mime)
+local function reply(id, data, mime, status)
     pending[id] = nil
-    N.scheme_reply(id, data, mime)
+    N.scheme_reply(id, data, mime, status)
 end
 
 local function fail(id, err)
@@ -46,26 +46,37 @@ local function view_for(tab)
     return nil
 end
 
+-- LemurX 扩展：全局 scheme 处理器 —— 不挂在某个 webview 上，任何标签（含 worker、
+-- 尚未包装的标签）命中该 scheme 都走它。__lk.scheme_handlers[scheme] = fn(uri, request, ev)
+-- 有 webview 级处理器时 webview 级优先（保持 luakit 语义）。
+__lk.scheme_handlers = __lk.scheme_handlers or {}
+
 local function on_request(ev)
     local id = ev.id
     local view = view_for(ev.tab)
-    if not view then
-        msg.warn("scheme-request %s: no webview to deliver to", tostring(ev.uri))
-        return fail(id)
-    end
     local sig = "scheme-request::" .. tostring(ev.scheme)
-    if not object.has_signal(view, sig) then
-        msg.verbose("scheme-request %s: no handler for %s", tostring(ev.uri), sig)
+    local global_handler = __lk.scheme_handlers[tostring(ev.scheme)]
+    local use_view = view and object.has_signal(view, sig)
+    if not use_view and not global_handler then
+        if not view then
+            msg.warn("scheme-request %s: no webview to deliver to", tostring(ev.uri))
+        else
+            msg.verbose("scheme-request %s: no handler for %s", tostring(ev.uri), sig)
+        end
         return fail(id)
     end
 
-    local request = __lk.new_request(ev.uri, function(data, mime)
-        reply(id, data, mime)
+    local request = __lk.new_request(ev.uri, function(data, mime, status)
+        reply(id, data, mime, status)
     end)
     pending[id] = request
 
     local ok, err = xpcall(function()
-        object.emit_signal(view, sig, ev.uri, request)
+        if use_view then
+            object.emit_signal(view, sig, ev.uri, request)
+        else
+            global_handler(ev.uri, request, ev)
+        end
     end, debug.traceback)
     if not ok then
         msg.warn("scheme-request::%s handler error: %s", tostring(ev.scheme), tostring(err))

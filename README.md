@@ -37,6 +37,44 @@ scripts you install from others (`files/lua/ugc/`) run in their own `lua_State`
 with a reduced standard library and no privileged APIs. The boundary is enforced
 at runtime, per state, not by source inspection.
 
+## Official scripts: the popular Chrome extensions, rewritten in Lua
+
+Exposing APIs is not the point; what people actually want is the extensions
+they already use. `src/chrome/lemurx/lua/official/` ships complete Lua
+re-implementations of the most-installed Chrome extensions, bundled in the apk
+and listed under **Lua scripts** in the menu, each with its own
+`lemurx://<id>/` settings page:
+
+| Script | Replaces |
+|---|---|
+| `adblock` | uBlock Origin · AdBlock · Adblock Plus · AdGuard — ABP-compatible engine, EasyList & friends, synchronous subresource blocking in the renderer, cosmetic filters |
+| `userscripts` | Tampermonkey — `==UserScript==` metadata, `@match`/`@require`/`@resource`, the `GM_*` API, one-tap install from Greasy Fork |
+| `darkmode` | Dark Reader — Chromium's native Force Dark driven from Lua, plus filter / static CSS engines |
+| `translate` | Google Translate · Immersive Translate — bilingual page translation, selection popup, Google / Microsoft / DeepL / OpenAI-compatible engines |
+| `privacy` | Privacy Badger · ClearURLs · DuckDuckGo Privacy Essentials — tracker learning, URL cleaning, GPC/DNT, HTTPS upgrade, site grade |
+| `tabs` | OneTab · Session Buddy · The Great Suspender |
+| `newtab` | Momentum · Todoist · Earth View — the stock NTP replaced by a Lua page |
+| `jsonviewer` | JSON Viewer |
+| `video` | Picture-in-Picture · Global Speed · Volume Master |
+| `ai` | Sider · Monica · HARPA · Grammarly · QuillBot · Wordtune · LanguageTool — any OpenAI-compatible endpoint, keys stay in the browser process |
+| `focus` | StayFocusd · Toggl Track |
+| `useragent` | User-Agent Switcher |
+| `wappalyzer` | Wappalyzer |
+| `screenshot` | FireShot — full-page capture over CDP, canvas annotation editor |
+| `octotree` | Octotree |
+| `clipper` | Google Keep · Save to Google Drive · Evernote Web Clipper — readability extraction to Markdown, share to any app |
+
+The full 50-extension coverage table, and the list of low-level capabilities
+that were added to Chromium/Java/C++ because a script needed them, is in
+`src/chrome/lemurx/lua/official/CATALOG.md`. The scripts share a small
+framework, `lx` (`official/lx/`), documented in chapter 8 of the Lua guide;
+local scripts can `require("lx")` too.
+
+Users see all of this in a native activity (**Lua scripts** in the menu):
+official, local and UGC scripts grouped, per-script switches, metadata parsed
+from the file header, source view, in-place editing for local/UGC scripts, and
+"copy to local" to fork an official script.
+
 ## The user always wins
 
 Depth of customisation is only worth anything if it never costs the user
@@ -48,9 +86,9 @@ control of the browser. Three guarantees back that:
   script can create. With no script running, each hook is an early `return`
   and the browser behaves like the official build it was compiled from.
 * **A native master switch.** The three-dot menu always ends with **Lua
-  scripts**: a plain Android dialog (no Lua involved, scripts cannot hide or
-  intercept it) with an on/off switch for the runtime and a checkbox per
-  script — the bundled tutorial, your local scripts, and `ugc/` scripts alike.
+  scripts**: a plain Android activity (no Lua involved, scripts cannot hide or
+  intercept it) with an on/off switch for the runtime and a switch per
+  script — the official scripts, your local scripts, and `ugc/` scripts alike.
   Applying a change tears down everything scripts did — net rules, attached
   webviews, certificate whitelist, CDP sessions, schemes, timers, overlays,
   widgets, skin, per-tab UA/headers — stops the Lua engine
@@ -75,9 +113,11 @@ src/               overlay — files that do not exist upstream, mirrored at the
   chrome/common/lemurx_web.mojom       browser <-> renderer Lua IPC
   chrome/android/java/.../lemurx/      Java hosts (shell, UI, widgets, moat)
   chrome/lemurx/lua/                   init.lua, tutorial, examples, docs
+  chrome/lemurx/lua/official/          official scripts (Lua rewrites of Chrome extensions) + lx framework, CATALOG.md
   chrome/lemurx/luakit/                luakit-compatible runtime: kernel/, lib/, lousy/, config/
   chrome/lemurx/brand/                 Android branding: launcher icons, app_name, logo drawables
   chrome/lemurx/discover/              strings for the NTP Discover news stream
+  chrome/lemurx/ntp/                   NTP overlay: LemurX wordmark, Lemur search box, favorites UI
   chrome/app/theme/lemurx/             BRANDING + product logos (branding_path_component)
   components/resources/*/lemurx/       chrome://version logo
   components/vector_icons/lemurx/      product.icon (QR code centre, etc.)
@@ -136,15 +176,72 @@ content stream: `FeedSurfaceCoordinator.createFeedStream()` returns
   as `NativeViewContent`, so the NTP scroll, header and thumbnail capture all
   behave as upstream.
 - Base URL: `--lemurx-discover-url=…` > `lemurx_settings` key
-  `discover.base_url` > built-in default (currently the debug service
-  `http://192.168.1.111:18888/`; the production host is `RELEASE_BASE_URL` in
-  the same file). `discover.enabled=false` in `lemurx_settings` restores the
-  upstream `FeedStream`.
+  `discover.base_url` > `https://api.lemurbrowser.com/`.
+  `discover.enabled=false` in `lemurx_settings` restores the upstream
+  `FeedStream`.
 - Independent of Lua: the stream does not go through the Lua runtime, so it is
   unaffected by the master switch; scripts that want to own the home page do so
   with `lemurx.skin` / `lemurx.ui` as before.
 
+### New tab page: logo, search box, favorites
+
+The NTP keeps upstream's structure (`NewTabPageLayout`, `LogoCoordinator`,
+`SearchBoxCoordinator`, the Discover header/feed below); only what is drawn in
+each slot is Lemur's.
+
+- Logo: `//chrome/lemurx/ntp:ntp_resources` (`resource_overlay = true`) replaces
+  `ic_google_logo` with the LemurX wordmark (`tools/brand/gen_ntp_logo.py`,
+  tinted to the text colour, 42dp tall). `LogoMediator` /
+  `NtpCustomizationUtils` are patched to always show the logo and never fetch a
+  doodle, whatever the default search engine.
+- Search box: same overlay swaps `home_surface_search_box_background` for
+  Lemur's `Search_default` pill (48dp, 2dp outline in the text colour, no
+  fill) and overrides the `fake_search_box_*` dimens / hint text appearance.
+- Favorites: `NewTabPageCoordinator` mounts `LemurXFavoritesCoordinator`
+  (`src/chrome/android/java/.../lemurx/favorites/`) where the Most Visited
+  tiles used to be. It is Lemur's home-page bookmark grid: 5 per row; tap opens,
+  tap a folder expands it in a panel; long-press enters edit mode (selection
+  ring, delete badges, rename field) where dragging reorders, dropping one tile
+  on another makes a folder and dragging past the folder panel un-nests; tapping
+  empty space shows the "+" tile, which opens a bottom sheet listing bookmarks,
+  history and a URL field.
+  Storage is a small SQLite table (`lemurx_favorites.db`), seeded with the
+  Bookmarks and History shortcuts. Favicons come from `LargeIconBridge` with a
+  Lemur-style letter fallback.
+
+### Automation base for AI agents
+
+A GUI agent loops observe → decide → act. Deciding is the model's job (a
+script talks to whatever LLM it likes over `lemurx.http`); LemurX provides the
+other two steps as three layers, all exposed to Lua and all inert until a
+script calls them (`src/chrome/lemurx/lua/scripts/agent.lua`,
+`LemurXSystemHost.java`, `LemurXAccessibilityService.java`):
+
+| Layer | Observe | Locate | Act | Needs |
+|---|---|---|---|---|
+| Web page | `tabs.screenshot` | `agent.mark` (set-of-marks via JS), CDP | `input.tap/type`, JS | nothing |
+| Browser shell | `ui.screenshot` (whole window) | `ui.dump/find` (stable `ref` per view) | `ui.click/setText/tap/swipe` | nothing |
+| Other apps | `system.screenshot` | `system.tree/find` | `system.click/tap/swipe/global` | user enables the accessibility service once |
+
+- `lemurx.agent.observe()` merges the layers into one observation with every
+  element in **screen pixels** (web CSS coordinates are mapped through
+  `lemurx.tabs.viewport()`); `agent.describe(obs)` renders it as compact text
+  with a `ref` per element (`w7` web, `n12` native, `s5` system);
+  `agent.act{type="tap", ref="w7"}` executes by ref and picks the most reliable
+  path for that layer. `agent.run(policy, opts)` is the loop.
+- `lemurx.system.*` is an `AccessibilityService` — the sanctioned, no-root
+  equivalent of `adb shell uiautomator dump` / `input tap` / `screencap`
+  (`dispatchGesture`, `performGlobalAction`, `takeScreenshot`). It is declared
+  in the manifest (`patches/…AndroidManifest.xml.patch`, resources in
+  `src/chrome/lemurx/agent/`), off until the user turns it on in
+  Settings › Accessibility, privileged-only in Lua, and it stops answering when
+  the Lua master switch is off.
+
+See `LUA_GUIDE.md` §4.17 for the full API.
+
 ## Build
+
+`chromium/fetch.sh` clones [depot_tools](https://commondatastorage.googleapis.com/chrome-infra-docs/flat/depot_tools/docs/html/depot_tools.html) into `depot_tools/` at the repo root if it is not already on `PATH` via `$DEPOT_TOOLS`.
 
 ```sh
 ./chromium/fetch.sh                      # shallow checkout of the pinned release (Android)
@@ -154,20 +251,41 @@ gn gen out/lemurx --args="$(cat ../../tools/args.gn)"
 autoninja -C out/lemurx chrome_public_apk
 ```
 
-### Distributed build (self-hosted REAPI)
+Default GN args are a **local** arm64 release with the royalty-free Chromium
+codec set. The app is still branded LemurX (`branding_path_component`).
+`ffmpeg_branding` in Chromium names the *codec bundle*, not the product:
 
-`tools/args.gn` enables `use_remoteexec` / `use_siso`; `chromium/.gclient`
-points Siso at the in-house Buildbarn cluster (`reapi_address`,
-`reapi_backend_config_path = tools/rbe/backend.star`). `gclient runhooks`
-(or `configure_siso.py` directly) installs the backend config. The cluster is
-plaintext gRPC and does not implement `google.longrunning.Operations`, so run:
+| GN | Meaning |
+|---|---|
+| `ffmpeg_branding = "Chromium"` (default) | VP8/VP9/AV1, Opus, Vorbis — fine to redistribute |
+| `ffmpeg_branding = "Chrome"` + `proprietary_codecs = true` | also H.264/AAC — patent licenses required to ship an APK |
+| `enable_widevine = true` | Google Widevine CDM — separate agreement |
+
+To add proprietary codecs on a private distribution build (you are responsible
+for licenses):
+
+```sh
+gn gen out/lemurx --args="$(cat ../../tools/args.gn) ffmpeg_branding=\"Chrome\" proprietary_codecs=true enable_widevine=true"
+```
+
+### Distributed build (optional REAPI)
+
+Remote execution is off by default. If you run your own REAPI cluster
+(Buildbarn, etc.):
+
+1. Set `use_remoteexec = true` in GN args.
+2. Uncomment `reapi_address`, `reapi_instance`, and `reapi_backend_config_path`
+   in `chromium/.gclient`. The backend path must be **absolute** and should
+   point at `tools/rbe/backend.star` in this repo.
+3. `gclient runhooks` (or `configure_siso.py`) installs the backend config.
+
+If the cluster is plaintext gRPC and does not implement
+`google.longrunning.Operations`:
 
 ```sh
 export RBE_service_no_security=true
 autoninja -C out/lemurx -reapi_insecure -reapi_keep_exec_stream -remote_jobs 256 chrome_public_apk
 ```
-
-Without a reachable cluster, `autoninja --offline` builds locally.
 
 ## Upgrading Chromium
 
@@ -175,9 +293,19 @@ Without a reachable cluster, `autoninja --offline` builds locally.
 2. `tools/apply.py --revert && ./chromium/fetch.sh && tools/apply.py`
 3. Fix whatever in `patches/` no longer applies (they are deliberately tiny), rebuild.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Please read [SECURITY.md](SECURITY.md)
+before reporting a vulnerability, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+for community expectations.
+
 ## License
 
 Everything in this repository is BSD-3-Clause (`LICENSE`), including the
 luakit-compatible Lua runtime, which is an independent re-implementation of
 luakit's public API and contains no luakit code. Third-party notices (Chromium,
 Lua, markdown.lua) are in `NOTICE`.
+
+This overlay does not grant a license to Google Chrome trademarks, to
+third-party extension names used as comparators in docs, or to patent rights
+covering H.264/AAC if you enable `ffmpeg_branding = "Chrome"`.

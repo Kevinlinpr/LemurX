@@ -862,6 +862,33 @@ public class LemurXChromeHost {
                 () -> GlobalNightModeStateProviderHolder.getInstance().isInNightMode());
     }
 
+    /**
+     * 让所有标签重算 WebPreferences。lemurx.chrome.setForceDark 改了 Blink 强制暗色的决策后调用，
+     * 页面不用刷新就切换。
+     */
+    static boolean notifyAllWebPreferences() {
+        return runUiBool(
+                () -> {
+                    ChromeTabbedActivity activity = activity();
+                    TabModelSelector selector = selectorOf(activity);
+                    if (selector == null) {
+                        return false;
+                    }
+                    int n = 0;
+                    for (org.chromium.chrome.browser.tabmodel.TabModel model : selector.getModels()) {
+                        for (int i = 0; i < model.getCount(); i++) {
+                            Tab tab = model.getTabAt(i);
+                            WebContents wc = tab == null ? null : tab.getWebContents();
+                            if (wc != null && !wc.isDestroyed()) {
+                                wc.notifyRendererPreferenceUpdate();
+                                n++;
+                            }
+                        }
+                    }
+                    return n > 0;
+                });
+    }
+
     static boolean setFullscreen(boolean fullscreen) {
         return runUiBool(
                 () -> {
@@ -895,6 +922,31 @@ public class LemurXChromeHost {
                     }
                     return true;
                 });
+    }
+
+    // ---- 新标签页覆盖 ----
+    // Lua 设了之后，ChromeTabCreator.launchNtp 会打开这个 URL 而不是原生 NTP（见 patches/
+    // ..._tabmodel_ChromeTabCreator.java.patch）。进程内存态；脚本每次启动重新设。
+    private static volatile @Nullable String sNewTabUrl;
+
+    static void setNewTabUrl(@Nullable String url) {
+        sNewTabUrl = (url == null || url.isEmpty()) ? null : url;
+    }
+
+    /** 供 ChromeTabCreator 调用：null 表示用原生新标签页。 */
+    public static @Nullable String newTabUrlOverride() {
+        return sNewTabUrl;
+    }
+
+    // ---- 自定义 UA（tabs.setUserAgent）----
+    // TabImpl 在换 WebContents / 按站点设置切桌面 UA 前先问这里；true 表示 Lua 已接管这个标签的 UA。
+    // 见 patches/..._tab_TabImpl.java.patch。
+    public static boolean hasCustomUserAgent(@Nullable Tab tab) {
+        return LemurXMoatHost.hasCustomUserAgent(tab);
+    }
+
+    public static boolean reapplyCustomUserAgent(@Nullable Tab tab) {
+        return LemurXMoatHost.reapplyUserAgent(tab);
     }
 
     static boolean setPullRefresh(boolean enabled) {

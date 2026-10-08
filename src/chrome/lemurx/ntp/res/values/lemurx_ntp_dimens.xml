@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The LemurX Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+
+Two groups:
+ 1. Overlays of upstream dimens/styles that shape the fake search box and the
+    logo, taken from Lemur's Figma "Search_default" (lemur_dimens.xml):
+    48dp input, 12dp padding, 24dp engine icon, 8dp icon->text gap, 15sp hint,
+    24dp radius, no shadow; logo 42dp tall.
+ 2. LemurX-only dimens for the favorites grid (lemur_favorite_*).
+-->
+<resources>
+    <!-- 1. search box overlays (see chrome/browser/ui/android/toolbar and omnibox dimens.xml) -->
+    <dimen name="ntp_search_box_height">48dp</dimen>
+    <dimen name="ntp_search_box_height_tall">48dp</dimen>
+    <dimen name="fake_search_box_start_padding">12dp</dimen>
+    <dimen name="fake_search_box_end_padding">12dp</dimen>
+    <dimen name="fake_search_box_icon_size">24dp</dimen>
+    <dimen name="fake_search_box_icon_margin_end">8dp</dimen>
+    <dimen name="fake_search_box_elevation">0dp</dimen>
+    <dimen name="lemurx_ntp_search_box_radius">24dp</dimen>
+    <dimen name="lemurx_ntp_search_hint_size">15sp</dimen>
+
+    <style name="TextAppearance.FakeSearchBoxTextMedium" parent="TextAppearance.MediumStyle">
+        <item name="android:textSize">@dimen/lemurx_ntp_search_hint_size</item>
+        <item name="android:textColorHint">@color/lemurx_ntp_search_hint</item>
+    </style>
+
+    <!-- logo overlays (chrome/browser/ui/android/logo dimens.xml): 42dp wordmark + 4dp top padding -->
+    <dimen name="ntp_logo_height">46dp</dimen>
+
+    <!-- 2. favorites grid -->
+    <dimen name="lemurx_fav_icon_size">40dp</dimen>
+    <dimen name="lemurx_fav_icon_bg_size">48dp</dimen>
+    <dimen name="lemurx_fav_icon_margin">6dp</dimen>
+    <dimen name="lemurx_fav_caption_size">11sp</dimen>
+    <dimen name="lemurx_fav_group_panel_height">192dp</dimen>
+    <dimen name="lemurx_fav_group_grid_height">158dp</dimen>
+
+    <style name="LemurXFavPickerTab">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:gravity">center</item>
+        <item name="android:background">@drawable/lemurx_fav_picker_tab_bg</item>
+        <item name="android:textColor">@color/lemurx_ntp_text_primary</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+</resources>

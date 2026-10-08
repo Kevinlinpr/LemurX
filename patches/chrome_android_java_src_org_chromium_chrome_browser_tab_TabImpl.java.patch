@@ -1,0 +1,47 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/tab/TabImpl.java b/chrome/android/java/src/org/chromium/chrome/browser/tab/TabImpl.java
+index 53be725c22..661aa3da47 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tab/TabImpl.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tab/TabImpl.java
+@@ -64,6 +64,7 @@ import org.chromium.chrome.browser.app.tabwindow.TabWindowManagerSingleton;
+ import org.chromium.chrome.browser.compositor.CompositorViewHolder;
+ import org.chromium.chrome.browser.compositor.CompositorViewHolderSupplier;
+ import org.chromium.chrome.browser.content.ContentUtils;
++import org.chromium.chrome.browser.lemurx.LemurXChromeHost;
+ import org.chromium.chrome.browser.content.WebContentsFactory;
+ import org.chromium.chrome.browser.desktop_site.DesktopSiteUtils;
+ import org.chromium.chrome.browser.flags.ChromeFeatureList;
+@@ -2418,6 +2419,9 @@ class TabImpl implements Tab, TabInternal {
+             ContentUtils.setUserAgentOverride(
+                     mWebContents,
+                     calculateUserAgentOverrideOption(null) == UserAgentOverrideOption.TRUE);
++            // LemurX: a Lua script may have pinned a custom UA on this tab; put it back on
++            // the fresh WebContents (tabs.setUserAgent).
++            LemurXChromeHost.reapplyCustomUserAgent(this);
+ 
+             updateInteractableState();
+ 
+@@ -3108,6 +3112,13 @@ class TabImpl implements Tab, TabInternal {
+     public @UserAgentOverrideOption int calculateUserAgentOverrideOption(@Nullable GURL url) {
+         WebContents webContents = getWebContents();
+         boolean currentRequestDesktopSite = TabUtils.isUsingDesktopUserAgent(webContents);
++        // LemurX: a custom UA set by Lua always overrides; never flip back to the stock UA
++        // because of the per-site "desktop site" setting.
++        if (LemurXChromeHost.hasCustomUserAgent(this)) {
++            return currentRequestDesktopSite
++                    ? UserAgentOverrideOption.INHERIT
++                    : UserAgentOverrideOption.TRUE;
++        }
+         // INHERIT means use the same UA that was used last time.
+         @UserAgentOverrideOption int userAgentOverrideOption = UserAgentOverrideOption.INHERIT;
+ 
+@@ -3138,6 +3149,10 @@ class TabImpl implements Tab, TabInternal {
+     }
+ 
+     private void switchUserAgentIfNeeded() {
++        // LemurX: Lua owns this tab's UA; re-assert it instead of switching to the desktop UA.
++        if (LemurXChromeHost.reapplyCustomUserAgent(this)) {
++            return;
++        }
+         if (calculateUserAgentOverrideOption(null) == UserAgentOverrideOption.INHERIT
+                 || getWebContents() == null
+                 || isClosing()

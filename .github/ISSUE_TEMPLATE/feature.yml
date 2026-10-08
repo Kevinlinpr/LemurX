@@ -1,0 +1,30 @@
+name: Feature request
+description: An API, script, or build/docs change
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can a user or script not do today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Prefer a Lua-facing API sketch over a Chromium rewrite.
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Where it likely belongs
+      options:
+        - src/ overlay (new files)
+        - patches/ (upstream hook)
+        - official Lua script
+        - docs only
+        - unsure
+    validations:
+      required: true

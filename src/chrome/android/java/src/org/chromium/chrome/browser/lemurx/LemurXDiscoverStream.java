@@ -97,10 +97,7 @@ import java.util.zip.GZIPInputStream;
 public class LemurXDiscoverStream implements Stream {
     private static final String TAG = "LemurXDiscover";
 
-    /** 调试环境（用户的局域网新闻服务）。 */
-    static final String DEBUG_BASE_URL = "http://192.168.1.111:18888/";
-
-    /** Lemur 正式环境。 */
+    /** Lemur 正式环境。本地调试用 {@code --lemurx-discover-url=…} 或 {@link #KEY_BASE_URL}。 */
     static final String RELEASE_BASE_URL = "https://api.lemurbrowser.com/";
 
     /** lemurx_settings 里的键：总开关（默认开）与数据源地址（默认见 {@link #baseUrl()}）。 */
@@ -227,8 +224,8 @@ public class LemurXDiscoverStream implements Stream {
     /**
      * 数据源根地址，末尾带 "/"。优先级：命令行开关 > lemurx_settings > 内置默认值。
      *
-     * <p>目前默认指向调试服务 {@link #DEBUG_BASE_URL}；切正式环境时把默认值换成
-     * {@link #RELEASE_BASE_URL} 或者在设置里写 {@link #KEY_BASE_URL}。
+     * <p>默认 {@link #RELEASE_BASE_URL}。调试时用 {@code --lemurx-discover-url=…}
+     * 或者在设置里写 {@link #KEY_BASE_URL}。
      */
     public static String baseUrl() {
         String url = null;
@@ -243,7 +240,7 @@ public class LemurXDiscoverStream implements Stream {
             } catch (Throwable ignored) {
             }
         }
-        if (TextUtils.isEmpty(url)) url = DEBUG_BASE_URL;
+        if (TextUtils.isEmpty(url)) url = RELEASE_BASE_URL;
         return url.endsWith("/") ? url : url + "/";
     }
 
@@ -628,7 +625,10 @@ public class LemurXDiscoverStream implements Stream {
 
         LinearLayout card = new LinearLayout(ctx);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(0, 0, 0, dp(16)); // lemur_space_4
+        // Lemur pads the bottom of each card and lets the list add the top inset; the feed's
+        // RecyclerView has none, so the first title used to sit on the section header's border.
+        // Pad the top instead: same 16dp rhythm between cards, clear of the header.
+        card.setPadding(0, dp(16), 0, 0); // lemur_space_4
         card.setLayoutParams(
                 new ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));

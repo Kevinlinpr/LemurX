@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Highlight on the tile a dragged tile is about to merge into (lemur_bg_favorite_join). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#B3B3B3" />
+</shape>

@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The LemurX Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+
+Favorites grid below the search box (port of Lemur's
+lemur_new_tab_page_favorite_webs.xml): 5-column shortcut grid, the expanded
+folder panel, and the inline rename area shown in edit mode. Inflated by
+LemurXFavoritesCoordinator in place of the Most Visited tiles.
+-->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/lemurx_favorites"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:clipChildren="false"
+    android:clipToPadding="false">
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/lemurx_fav_grid"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clipToPadding="false"
+        android:clipChildren="false"
+        android:nestedScrollingEnabled="false"
+        android:overScrollMode="never" />
+
+    <!-- Expanded folder: scales out of the folder tile (Lemur ll_more_favorite). -->
+    <RelativeLayout
+        android:id="@+id/lemurx_fav_group_panel"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/lemurx_fav_group_panel_height"
+        android:layout_marginTop="17dp"
+        android:background="@drawable/lemurx_fav_group_panel_bg"
+        android:clipChildren="false"
+        android:elevation="6dp"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/lemurx_fav_group_grid"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/lemurx_fav_group_grid_height"
+            android:layout_centerInParent="true"
+            android:layout_marginStart="21dp"
+            android:layout_marginEnd="21dp"
+            android:clipChildren="false"
+            android:overScrollMode="never" />
+
+        <ImageView
+            android:id="@+id/lemurx_fav_group_cover"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:importantForAccessibility="no"
+            android:visibility="invisible" />
+    </RelativeLayout>
+
+    <!-- Inline rename area, visible in edit mode (Lemur rl_edit). -->
+    <RelativeLayout
+        android:id="@+id/lemurx_fav_edit_area"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/lemurx_fav_grid"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <TextView
+            android:id="@+id/lemurx_fav_edit_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/lemurx_fav_edit_title"
+            android:textColor="@color/lemurx_ntp_text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/lemurx_fav_edit_name"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_below="@id/lemurx_fav_edit_title"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/lemurx_fav_edit_field_bg"
+            android:gravity="center_vertical"
+            android:hint="@string/lemurx_fav_edit_hint"
+            android:imeOptions="actionDone"
+            android:inputType="text"
+            android:maxLength="14"
+            android:maxLines="1"
+            android:paddingStart="16dp"
+            android:paddingEnd="48dp"
+            android:singleLine="true"
+            android:textColor="@color/lemurx_ntp_text_primary"
+            android:textColorHint="@color/lemurx_ntp_text_secondary"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            tools:ignore="Autofill,LabelFor" />
+
+        <ImageView
+            android:id="@+id/lemurx_fav_edit_clear"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_alignTop="@id/lemurx_fav_edit_name"
+            android:layout_alignEnd="@id/lemurx_fav_edit_name"
+            android:contentDescription="@string/lemurx_fav_delete"
+            android:padding="14dp"
+            android:src="@drawable/lemurx_fav_remove" />
+
+        <TextView
+            android:id="@+id/lemurx_fav_edit_confirm"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_below="@id/lemurx_fav_edit_name"
+            android:layout_marginTop="24dp"
+            android:layout_marginBottom="10dp"
+            android:alpha="0.5"
+            android:background="@drawable/lemurx_fav_edit_field_bg"
+            android:enabled="false"
+            android:gravity="center"
+            android:text="@string/lemurx_fav_edit_confirm"
+            android:textColor="@color/lemurx_ntp_text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+    </RelativeLayout>
+</RelativeLayout>

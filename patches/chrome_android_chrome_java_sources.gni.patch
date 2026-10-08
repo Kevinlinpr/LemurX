@@ -1,19 +1,30 @@
 diff --git a/chrome/android/chrome_java_sources.gni b/chrome/android/chrome_java_sources.gni
-index 1a541dcb25..92201e0be8 100644
+index 1a541dcb25..c383deac07 100644
 --- a/chrome/android/chrome_java_sources.gni
 +++ b/chrome/android/chrome_java_sources.gni
-@@ -22,6 +22,14 @@ chrome_java_sources = [
+@@ -22,6 +22,25 @@ chrome_java_sources = [
    "java/src/org/chromium/chrome/browser/ChromeStrictMode.java",
    "java/src/org/chromium/chrome/browser/ChromeStringConstants.java",
    "java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java",
++  "java/src/org/chromium/chrome/browser/lemurx/LemurXAccessibilityService.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXBridge.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXChromeHost.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXDiscoverStream.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXMoatHost.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXScripts.java",
++  "java/src/org/chromium/chrome/browser/lemurx/LemurXScriptsActivity.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXSkinHost.java",
++  "java/src/org/chromium/chrome/browser/lemurx/LemurXSystemHost.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXUiHost.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXWidgetHost.java",
++  "java/src/org/chromium/chrome/browser/lemurx/favorites/LemurXFavorite.java",
++  "java/src/org/chromium/chrome/browser/lemurx/favorites/LemurXFavoriteIcons.java",
++  "java/src/org/chromium/chrome/browser/lemurx/favorites/LemurXFavoritePicker.java",
++  "java/src/org/chromium/chrome/browser/lemurx/favorites/LemurXFavoritesAdapter.java",
++  "java/src/org/chromium/chrome/browser/lemurx/favorites/LemurXFavoritesCoordinator.java",
++  "java/src/org/chromium/chrome/browser/lemurx/favorites/LemurXFavoritesDragCallback.java",
++  "java/src/org/chromium/chrome/browser/lemurx/favorites/LemurXFavoritesStore.java",
++  "java/src/org/chromium/chrome/browser/lemurx/favorites/LemurXMultiCircleView.java",
    "java/src/org/chromium/chrome/browser/ChromeTabbedActivity2.java",
    "java/src/org/chromium/chrome/browser/ChromeWindow.java",
    "java/src/org/chromium/chrome/browser/DefaultBrowserInfoUmaRecorder.java",

@@ -17,6 +17,7 @@ import android.net.Uri;
 import android.text.TextUtils;
 
 import org.chromium.base.ActivityState;
+import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
@@ -71,6 +72,8 @@ public class LemurXBridge {
     private static final String PREF_NAME = "lemurx_storage";
     private static final String USER_SCRIPT_DIR = "lua";
     private static final String INIT_ASSET = "lua/init.lua";
+    /** Agent 底座（lemurx.agent / lemurx.system 的 Lua 层），紧跟 init.lua。 */
+    private static final String AGENT_ASSET = "lua/agent.lua";
     private static final String TUTORIAL_ASSET = "lua/tutorial.lua";
     private static final String TUTORIAL_FILE = "00_tutorial.lua";
     // luakit 兼容运行时：apk assets/luakit/** 首次（或版本变化）解包到 filesDir/luakit/，
@@ -79,6 +82,11 @@ public class LemurXBridge {
     private static final String LUAKIT_INSTALL_DIR = "luakit";
     private static final String LUAKIT_KERNEL_ASSET = "luakit/kernel/init.lua";
     private static final String LUAKIT_STAMP_FILE = ".installed_version";
+    // 官方脚本：apk assets/lua/official/** 解包到 filesDir/lua/official/，随版本覆盖（属于 LemurX，
+    // 用户想改就在「Lua 脚本」里复制成本地脚本）。lx/ 是它们共用的框架库，*.lua 才是脚本。
+    // 加载顺序在 luakit 内核之后、用户本地脚本之前：本地脚本可以 require("lx") 复用框架。
+    private static final String OFFICIAL_ASSET_DIR = "lua/official";
+    static final String OFFICIAL_DIR = "official";
     // Lua 注入用的隔离世界。RenderFrameHostImpl::ExecuteJavaScriptInIsolatedWorld 是
     // CHECK_GT(world_id, ISOLATED_WORLD_ID_GLOBAL) && CHECK_LE(world_id, ISOLATED_WORLD_ID_MAX)，
     // 其中 ISOLATED_WORLD_ID_MAX = ISOLATED_WORLD_ID_CONTENT_END + 10 = 11；越界直接 SIGTRAP
@@ -127,10 +135,13 @@ public class LemurXBridge {
         try {
             LemurXBridgeJni.get().start();
             evalAsset(INIT_ASSET);
+            evalAsset(AGENT_ASSET);
             // luakit 兼容内核紧跟 init.lua：先把 lib/ 解包到 install_dir，再跑内核，
             // 内核负责注入 luakit/widget/soup/... 全局并（按开关）执行 config/rc.lua。
             seedLuakit();
             evalAsset(LUAKIT_KERNEL_ASSET);
+            seedOfficialScripts();
+            evalOfficialScripts();
             evalUserScripts();
         } catch (Throwable e) {
             logi("start", e.toString());
@@ -166,6 +177,32 @@ public class LemurXBridge {
                 logi("boot listener", e.toString());
             }
         }
+        // 前后台切换 → Lua 事件 chrome.on("app", {state="foreground"|"background"})。
+        // 时间统计类脚本（专注 / 时间追踪）靠它判断"用户是不是真的在看网页"。
+        if (sAppStateListener == null) {
+            sAppStateListener =
+                    newState -> {
+                        boolean fg = newState == ApplicationState.HAS_RUNNING_ACTIVITIES;
+                        boolean bg =
+                                newState == ApplicationState.HAS_PAUSED_ACTIVITIES
+                                        || newState == ApplicationState.HAS_STOPPED_ACTIVITIES
+                                        || newState == ApplicationState.HAS_DESTROYED_ACTIVITIES;
+                        if (!fg && !bg) {
+                            return;
+                        }
+                        if (fg == sAppForeground) {
+                            return;
+                        }
+                        sAppForeground = fg;
+                        dispatchTabEventNative(
+                                "app", "{\"state\":\"" + (fg ? "foreground" : "background") + "\"}");
+                    };
+            try {
+                ApplicationStatus.registerApplicationStateListener(sAppStateListener);
+            } catch (Throwable e) {
+                logi("app state listener", e.toString());
+            }
+        }
         ThreadUtils.postOnUiThreadDelayed(
                 () -> {
                     if (!sStarted || "0".equals(prefs().getString("lua_tutorial_hint", "1"))) {
@@ -184,6 +221,8 @@ public class LemurXBridge {
     private static boolean sPendingRecreate;
     private static @Nullable Activity sPendingRecreateActivity;
     private static ApplicationStatus.@Nullable ActivityStateListener sBootStateListener;
+    private static ApplicationStatus.@Nullable ApplicationStateListener sAppStateListener;
+    private static boolean sAppForeground = true;
 
     /**
      * 用户关掉 Lua / 重载脚本（UI 线程）。顺序：
@@ -216,6 +255,7 @@ public class LemurXBridge {
         runGuarded("ui host reset", LemurXUiHost::resetAll);
         runGuarded("widget host reset", LemurXWidgetHost::resetAll);
         runGuarded("moat host reset", LemurXMoatHost::resetAll);
+        runGuarded("system host reset", LemurXSystemHost::resetAll);
         try {
             LemurXBridgeJni.get().shutdown();
         } catch (Throwable e) {
@@ -519,6 +559,82 @@ public class LemurXBridge {
                 eval(readStream(in), "ugc/" + file.getName(), false);
             } catch (Exception e) {
                 logi("ugc load failed", file.getName(), e.getMessage());
+            }
+        }
+    }
+
+    /** files/lua/official：官方脚本目录（LemurXScripts 列表、渲染进程 ResolveModule 也用它）。 */
+    static File officialDir() {
+        return new File(
+                new File(ContextUtils.getApplicationContext().getFilesDir(), USER_SCRIPT_DIR),
+                OFFICIAL_DIR);
+    }
+
+    /**
+     * 把 assets/lua/official/** 解包到 files/lua/official/。整目录随版本覆盖：apk 里没有的旧文件
+     * 会被删掉（改名/下架的官方脚本不能留在设备上继续跑）。
+     */
+    private static void seedOfficialScripts() {
+        File root = officialDir();
+        File stampFile = new File(root, LUAKIT_STAMP_FILE);
+        String stamp = luakitStamp();
+        boolean fresh = true;
+        if (stampFile.exists()) {
+            try (FileInputStream in = new FileInputStream(stampFile)) {
+                fresh = !stamp.equals(readStream(in).trim());
+            } catch (Exception e) {
+                fresh = true;
+            }
+        }
+        if (!fresh) {
+            return;
+        }
+        try {
+            deleteTree(root);
+            copyAssetTree(OFFICIAL_ASSET_DIR, root);
+            if (!root.exists()) {
+                root.mkdirs();
+            }
+            try (FileOutputStream os = new FileOutputStream(stampFile)) {
+                os.write(stamp.getBytes(StandardCharsets.UTF_8));
+            }
+            logi("official scripts seeded", root.getAbsolutePath(), stamp);
+        } catch (Exception e) {
+            logi("official seed failed", e.getMessage());
+        }
+    }
+
+    private static void deleteTree(File f) {
+        if (f == null || !f.exists()) {
+            return;
+        }
+        File[] children = f.listFiles();
+        if (children != null) {
+            for (File c : children) {
+                deleteTree(c);
+            }
+        }
+        f.delete();
+    }
+
+    /** 加载 files/lua/official/*.lua（本地特权；开关键 "official/<文件名>"）。 */
+    private static void evalOfficialScripts() {
+        File dir = officialDir();
+        File[] files = dir.listFiles((d, name) -> name.endsWith(".lua"));
+        if (files == null || files.length == 0) {
+            return;
+        }
+        Arrays.sort(files);
+        for (File file : files) {
+            String key = OFFICIAL_DIR + "/" + file.getName();
+            if (!LemurXScripts.isScriptEnabled(key)) {
+                logi("skip disabled", key);
+                continue;
+            }
+            try (FileInputStream in = new FileInputStream(file)) {
+                eval(readStream(in), key, true);
+            } catch (Exception e) {
+                logi("official load failed", file.getName(), e.getMessage());
             }
         }
     }
@@ -1060,6 +1176,35 @@ public class LemurXBridge {
                 false);
     }
 
+    /**
+     * 丢弃标签：序列化 WebContents 状态后销毁（释放内存），再次选中时恢复。
+     * 当前标签、正在加载、隐身标签不丢弃。
+     */
+    @CalledByNative
+    public static boolean discardTab(int tabId) {
+        return runUi(
+                () -> {
+                    ChromeTabbedActivity activity = getActivity();
+                    Tab tab = findTab(activity, tabId);
+                    if (tab == null || tab.isFrozen() || tab.isLoading() || tab.isNativePage()) {
+                        return false;
+                    }
+                    TabModelSelector selector = selectorOf(activity);
+                    Tab current = selector == null ? null : selector.getCurrentTab();
+                    if (current != null && current.getId() == tabId) {
+                        return false;
+                    }
+                    try {
+                        tab.discard();
+                        return true;
+                    } catch (Exception e) {
+                        logi("discardTab", e.toString());
+                        return false;
+                    }
+                },
+                false);
+    }
+
     @CalledByNative
     public static void setClipboard(String text) {
         ThreadUtils.runOnUiThread(
@@ -1563,10 +1708,19 @@ public class LemurXBridge {
                 .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
     }
 
-    private static ChromeTabbedActivity getActivity() {
+    static ChromeTabbedActivity getActivity() {
         Activity activity = ApplicationStatus.getLastTrackedFocusedActivity();
         if (activity instanceof ChromeTabbedActivity) {
             return (ChromeTabbedActivity) activity;
+        }
+        // 焦点在别的 Activity（脚本管理界面、设置页）上：找任一活着的浏览器窗口
+        try {
+            for (Activity a : ApplicationStatus.getRunningActivities()) {
+                if (a instanceof ChromeTabbedActivity && !a.isFinishing() && !a.isDestroyed()) {
+                    return (ChromeTabbedActivity) a;
+                }
+            }
+        } catch (Exception ignored) {
         }
         return null;
     }
@@ -1610,6 +1764,13 @@ public class LemurXBridge {
             o.put("loading", tab.isLoading());
             o.put("canGoBack", tab.canGoBack());
             o.put("canGoForward", tab.canGoForward());
+            // 标签管理类脚本（OneTab / 标签休眠）需要的状态
+            o.put("lastActive", tab.getTimestampMillis());
+            o.put("frozen", tab.isFrozen());
+            o.put("hidden", tab.isHidden());
+            o.put("active", tab.isActivated());
+            o.put("parentId", tab.getParentId());
+            o.put("native", tab.isNativePage());
             WebContents webContents = tab.getWebContents();
             if (webContents != null) {
                 o.put("muted", webContents.isAudioMuted());
@@ -1724,6 +1885,11 @@ public class LemurXBridge {
         if (privileged && !TextUtils.isEmpty(component)) {
             intent.setComponent(android.content.ComponentName.unflattenFromString(component));
         }
+        // 官方脚本打开原生「Lua 脚本」界面（列表 / 某个脚本的源码），不经过网页。
+        if (privileged && "lemurx.scripts".equals(action)) {
+            intent.setClass(
+                    ContextUtils.getApplicationContext(), LemurXScriptsActivity.class);
+        }
         if (privileged && options.has("flags")) {
             intent.addFlags(options.optInt("flags"));
         }
@@ -1818,9 +1984,27 @@ public class LemurXBridge {
         return LemurXChromeHost.isDarkMode();
     }
 
+    /** lemurx.chrome.setForceDark 改了决策后：让所有标签重算 WebPreferences（强制暗色立刻生效）。 */
+    @CalledByNative
+    public static boolean chromeNotifyWebPreferences() {
+        return LemurXChromeHost.notifyAllWebPreferences();
+    }
+
     @CalledByNative
     public static boolean chromeSetFullscreen(boolean fullscreen) {
         return LemurXChromeHost.setFullscreen(fullscreen);
+    }
+
+    @CalledByNative
+    public static boolean chromeSetNewTabUrl(String url) {
+        LemurXChromeHost.setNewTabUrl(url);
+        return true;
+    }
+
+    @CalledByNative
+    public static String chromeGetNewTabUrl() {
+        String url = LemurXChromeHost.newTabUrlOverride();
+        return url == null ? "" : url;
     }
 
     @CalledByNative
@@ -2013,13 +2197,57 @@ public class LemurXBridge {
     }
 
     @CalledByNative
-    public static boolean tabSetUserAgent(int tabId, String ua) {
-        return LemurXMoatHost.setUserAgent(tabId, ua);
+    public static boolean share(String optionsJson, boolean privileged) {
+        return LemurXMoatHost.share(optionsJson, privileged);
+    }
+
+    @CalledByNative
+    public static String mediaSave(String optionsJson, boolean privileged) {
+        return LemurXMoatHost.mediaSave(optionsJson, privileged);
+    }
+
+    @CalledByNative
+    public static boolean notifyShow(String optionsJson) {
+        return LemurXMoatHost.notify(optionsJson);
+    }
+
+    @CalledByNative
+    public static boolean notifyCancel(int id) {
+        return LemurXMoatHost.notifyCancel(id);
+    }
+
+    @CalledByNative
+    public static boolean tabSetUserAgent(int tabId, String ua, String optsJson) {
+        return LemurXMoatHost.setUserAgent(tabId, ua, optsJson);
+    }
+
+    /** 供 LemurXMoatHost：把 UA 覆盖写进原生 WebContents。UI 线程。 */
+    static void nativeSetUserAgentOverride(
+            WebContents webContents, @Nullable String ua, @Nullable String platform, boolean mobile) {
+        if (!sStarted || webContents == null) {
+            return;
+        }
+        LemurXBridgeJni.get()
+                .setUserAgentOverride(
+                        webContents, ua == null ? "" : ua, platform == null ? "" : platform, mobile);
     }
 
     @CalledByNative
     public static boolean tabSetHeaders(int tabId, String headersJson) {
         return LemurXMoatHost.setHeaders(tabId, headersJson);
+    }
+
+    /**
+     * lemurx.system.* —— 跨 App 自动化（无障碍服务）。一个入口按 method 分派，
+     * 特权检查在 C++ 侧（只对主脚本开放）。
+     */
+    @CalledByNative
+    public static String systemCall(String method, String optionsJson) {
+        try {
+            return LemurXSystemHost.call(method, optionsJson);
+        } catch (Throwable t) {
+            return "{\"ok\":false,\"error\":" + JSONObject.quote(String.valueOf(t)) + "}";
+        }
     }
 
     @CalledByNative
@@ -2135,5 +2363,12 @@ public class LemurXBridge {
         void dispatchLuakitWidget(int id, String json);
 
         void dispatchLuakitWidgetSync(int id, String json, int token);
+
+        /**
+         * 自定义 UA 写进 WebContents（请求头 + navigator + 客户端提示）。ua 为空清除；
+         * platform 为空不发 Sec-CH-UA*；否则按 platform/mobile 生成提示。
+         */
+        void setUserAgentOverride(
+                WebContents webContents, String ua, String platform, boolean mobile);
     }
 }

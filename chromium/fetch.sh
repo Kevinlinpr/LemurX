@@ -1,7 +1,12 @@
 #!/bin/bash
 # LemurX: shallow checkout of a pinned official Chromium release (no history).
 set -euo pipefail
-export PATH="$HOME/code/lemurx/depot_tools:$PATH"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DEPOT_TOOLS="${DEPOT_TOOLS:-$ROOT/depot_tools}"
+if [ ! -x "$DEPOT_TOOLS/gclient" ]; then
+  git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$DEPOT_TOOLS"
+fi
+export PATH="$DEPOT_TOOLS:$PATH"
 export DEPOT_TOOLS_UPDATE=0
 cd "$(dirname "$0")"
 VER=$(sed -n 's/.*src.git@\([0-9.]*\)".*/\1/p' .gclient)

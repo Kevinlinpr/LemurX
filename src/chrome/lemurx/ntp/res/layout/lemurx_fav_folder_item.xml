@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The LemurX Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+
+Folder ("More") tile (Lemur lemur_more_favorite_web.xml): up to three
+overlapping round favicons inside an outlined circle.
+-->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="@dimen/lemurx_fav_icon_margin"
+    android:layout_marginBottom="@dimen/lemurx_fav_icon_margin"
+    android:clipChildren="false"
+    android:clipToPadding="false">
+
+    <org.chromium.chrome.browser.lemurx.favorites.LemurXMultiCircleView
+        android:id="@+id/lemurx_fav_icon"
+        android:layout_width="@dimen/lemurx_fav_icon_size"
+        android:layout_height="@dimen/lemurx_fav_icon_size"
+        android:layout_alignParentStart="true"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
+        android:background="@drawable/lemurx_fav_folder_bg"
+        android:foreground="@drawable/lemurx_fav_icon_press"
+        android:padding="3dp" />
+
+    <View
+        android:id="@+id/lemurx_fav_select_ring"
+        android:layout_width="@dimen/lemurx_fav_icon_bg_size"
+        android:layout_height="@dimen/lemurx_fav_icon_bg_size"
+        android:layout_alignStart="@id/lemurx_fav_icon"
+        android:layout_alignTop="@id/lemurx_fav_icon"
+        android:layout_marginStart="-4dp"
+        android:layout_marginTop="-4dp"
+        android:background="@drawable/lemurx_fav_select"
+        android:visibility="invisible" />
+
+    <View
+        android:id="@+id/lemurx_fav_join_ring"
+        android:layout_width="@dimen/lemurx_fav_icon_bg_size"
+        android:layout_height="@dimen/lemurx_fav_icon_bg_size"
+        android:layout_alignStart="@id/lemurx_fav_icon"
+        android:layout_alignTop="@id/lemurx_fav_icon"
+        android:layout_marginStart="-4dp"
+        android:layout_marginTop="-4dp"
+        android:background="@drawable/lemurx_fav_join"
+        android:visibility="invisible" />
+
+    <TextView
+        android:id="@+id/lemurx_fav_name"
+        android:layout_width="@dimen/lemurx_fav_icon_size"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/lemurx_fav_icon"
+        android:layout_alignStart="@id/lemurx_fav_icon"
+        android:layout_marginTop="8dp"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:text="@string/lemurx_fav_more"
+        android:textColor="@color/lemurx_ntp_text_primary"
+        android:textSize="@dimen/lemurx_fav_caption_size" />
+
+    <ImageView
+        android:id="@+id/lemurx_fav_delete"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignEnd="@id/lemurx_fav_icon"
+        android:layout_marginEnd="-4dp"
+        android:contentDescription="@string/lemurx_fav_delete"
+        android:paddingStart="10dp"
+        android:paddingEnd="0dp"
+        android:paddingBottom="10dp"
+        android:src="@drawable/lemurx_fav_remove"
+        android:visibility="invisible"
+        tools:visibility="visible" />
+</RelativeLayout>

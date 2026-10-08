@@ -46,6 +46,13 @@ __lk.ipc_transport = {
     end,
 }
 
+-- LemurX 扩展：定向发给某个渲染进程（args 是普通数组）
+__lk.ipc_send_pid = function(channel, pid, signame, args)
+    local packed = { n = #args, unpack(args) }
+    N.web_emit_pid(channel, pid, signame, pack_args(packed))
+end
+__lk.web_process_hooks = __lk.web_process_hooks or {}
+
 __lk.on_require_web_module = function(name)
     N.web_require(name)
 end
@@ -111,6 +118,12 @@ D.webext = function(pid, json)
     if not ev then return end
     if ev.ev == "created" then
         msg.verbose("web extension ready in process %s", tostring(pid))
+        -- LemurX 扩展：渲染进程 Lua 状态就位（web 模块已 require）。官方脚本在这里把
+        -- 规则表等大块数据推给这个进程（__lk.ipc_send_pid），不用广播。
+        for _, hook in ipairs(__lk.web_process_hooks) do
+            local ok, err = pcall(hook, pid)
+            if not ok then msg.warn("web process hook error: %s", tostring(err)) end
+        end
     elseif ev.ev == "page" then
         local view = __lk.webview_for_tab and __lk.webview_for_tab(ev.tab, false)
         if view and object.is_alive(view) then

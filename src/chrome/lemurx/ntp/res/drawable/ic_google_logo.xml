@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The LemurX Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+
+Overlays chrome/browser/ui/android/logo/java/res/drawable/ic_google_logo.xml:
+LogoView draws this when there is no doodle, so the new tab page shows the
+LemurX wordmark (148x42dp, like Lemur's lemur_ic_ntp_logo). Black on
+transparent; NtpCustomizationUtils tints it white in dark mode.
+-->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/lemurx_ntp_wordmark"
+    android:gravity="center"
+    android:filter="true" />

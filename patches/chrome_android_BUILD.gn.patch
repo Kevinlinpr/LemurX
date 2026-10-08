@@ -1,8 +1,8 @@
 diff --git a/chrome/android/BUILD.gn b/chrome/android/BUILD.gn
-index 2133a964d0..abc1fc8d60 100644
+index 2133a964d0..a64708d7cd 100644
 --- a/chrome/android/BUILD.gn
 +++ b/chrome/android/BUILD.gn
-@@ -175,6 +175,15 @@ if (_is_default_toolchain) {
+@@ -175,6 +175,24 @@ if (_is_default_toolchain) {
      deps = [
        ":chrome_base_module_resources",
        ":ui_locale_string_resources",
@@ -15,10 +15,19 @@ index 2133a964d0..abc1fc8d60 100644
 +      # LemurX Discover: strings for the native news stream that replaces the
 +      # xsurface-backed feed on the NTP (LemurXDiscoverStream.java).
 +      "//chrome/lemurx/discover:discover_resources",
++
++      # LemurX automation base: AccessibilityService descriptor + strings
++      # referenced from AndroidManifest.xml (lemurx.system.*).
++      "//chrome/lemurx/agent:agent_resources",
++
++      # LemurX new tab page: Lemur-style wordmark + search box (overlays of
++      # ic_google_logo / home_surface_search_box_background / fake_search_box
++      # dimens) and the favorites grid that replaces Most Visited tiles.
++      "//chrome/lemurx/ntp:ntp_resources",
        "//chrome/android/webapk/libs/common:splash_resources",
        "//chrome/app:java_strings_grd",
        "//chrome/browser/actor/android:java_resources",
-@@ -1840,6 +1849,7 @@ if (_is_default_toolchain) {
+@@ -1840,6 +1858,7 @@ if (_is_default_toolchain) {
    java_group("chrome_public_non_pak_assets") {
      deps = [
        "//chrome/android/webapk/libs/runtime_library:runtime_library_assets",
@@ -26,7 +35,7 @@ index 2133a964d0..abc1fc8d60 100644
        "//components/privacy_sandbox/privacy_sandbox_attestations/preload:privacy_sandbox_attestations_assets",
      ]
    }
-@@ -2990,6 +3000,7 @@ if (_is_default_toolchain) {
+@@ -2990,6 +3009,7 @@ if (_is_default_toolchain) {
  
    generate_jni("chrome_jni_headers") {
      sources = [

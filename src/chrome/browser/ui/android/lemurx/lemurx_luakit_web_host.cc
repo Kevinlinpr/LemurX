@@ -47,6 +47,7 @@ struct Shared {
   std::vector<std::string> modules;  // require_web_module 过的模块，按顺序
   std::string install_dir;
   std::string config_dir;
+  std::string lua_dir;  // filesDir/lua：官方脚本在 lua/official/
   std::string env_json;
 };
 
@@ -66,11 +67,15 @@ void EnsureEnv() {
   if (v && v->is_dict()) {
     const std::string* inst = v->GetDict().FindString("install_dir");
     const std::string* conf = v->GetDict().FindString("config_dir");
+    const std::string* lua = v->GetDict().FindString("lua_dir");
     if (inst) {
       sh.install_dir = *inst;
     }
     if (conf) {
       sh.config_dir = *conf;
+    }
+    if (lua) {
+      sh.lua_dir = *lua;
     }
   }
 }
@@ -212,12 +217,13 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
   void ResolveModule(const std::string& name,
                      ResolveModuleCallback callback) override {
     EnsureEnv();
-    std::string install, config;
+    std::string install, config, lua_dir;
     {
       Shared& sh = GetShared();
       base::AutoLock lock(sh.lock);
       install = sh.install_dir;
       config = sh.config_dir;
+      lua_dir = sh.lua_dir;
     }
     std::string rel = name;
     base::ReplaceChars(rel, ".", "/", &rel);
@@ -233,6 +239,13 @@ class WebHost : public lemurx::mojom::LuakitWebHost {
         install + "/lib/" + rel + ".lua",
         install + "/lib/" + rel + "/init.lua",
     };
+    if (!lua_dir.empty()) {
+      // 官方脚本的渲染进程半边（lx.web、adblock_web…）与用户自己的 web 模块
+      candidates.push_back(lua_dir + "/official/" + rel + ".lua");
+      candidates.push_back(lua_dir + "/official/" + rel + "/init.lua");
+      candidates.push_back(lua_dir + "/" + rel + ".lua");
+      candidates.push_back(lua_dir + "/lib/" + rel + ".lua");
+    }
     // 文件 IO 放线程池；[Sync] 调用允许异步回包，渲染进程那边照旧阻塞等
     base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
@@ -356,6 +369,17 @@ void EmitOnUi(std::string channel,
   it->second->ext()->EmitSignal(channel, tab_id, signame, json);
 }
 
+void EmitPidOnUi(std::string channel,
+                 int pid,
+                 std::string signame,
+                 std::string json) {
+  auto it = Hosts().find(pid);
+  if (it == Hosts().end() || !it->second->ext()) {
+    return;
+  }
+  it->second->ext()->EmitSignal(channel, -1, signame, json);
+}
+
 void EvalOnUi(int tab_id, std::string script, std::string source, int cb_id) {
   int pid = 0;
   FrameRef rid;
@@ -430,6 +454,17 @@ int WebEmit(lua_State* L) {
   std::string signame = luaL_checkstring(L, 3);
   std::string json = luaL_optstring(L, 4, "[]");
   PostUi(base::BindOnce(&EmitOnUi, channel, tab, signame, json));
+  return 0;
+}
+
+// __luakit.web_emit_pid(channel, pid, signame, args_json)
+// 只发给某个渲染进程（LemurX 扩展）：渲染进程刚起来时把规则表推给它，不必广播
+int WebEmitPid(lua_State* L) {
+  std::string channel = luaL_checkstring(L, 1);
+  int pid = static_cast<int>(luaL_checkinteger(L, 2));
+  std::string signame = luaL_checkstring(L, 3);
+  std::string json = luaL_optstring(L, 4, "[]");
+  PostUi(base::BindOnce(&EmitPidOnUi, channel, pid, signame, json));
   return 0;
 }
 
@@ -527,6 +562,7 @@ void RegisterLemurXLuakitWebHost(lua_State* L) {
   }
   SetFn(L, "web_require", WebRequire);
   SetFn(L, "web_emit", WebEmit);
+  SetFn(L, "web_emit_pid", WebEmitPid);
   SetFn(L, "web_eval", WebEval);
   SetFn(L, "web_scroll", WebScroll);
   SetFn(L, "web_processes", WebProcesses);

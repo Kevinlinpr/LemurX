@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rename field / confirm button background (lemur_bg_f7_r16). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/lemurx_ntp_panel" />
+    <corners android:radius="16dp" />
+</shape>

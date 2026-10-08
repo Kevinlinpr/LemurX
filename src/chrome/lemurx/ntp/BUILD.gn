@@ -1,0 +1,56 @@
+# Copyright 2026 The LemurX Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/android/rules.gni")
+
+assert(is_android)
+
+# New tab page look ported from Lemur (lemur_project, branch Lemur_127):
+#
+#  * the "LemurX" wordmark above the search box (overlays ic_google_logo, the
+#    drawable Chromium's LogoView draws when no doodle is shown),
+#  * the search box pill (overlays home_surface_search_box_background and the
+#    fake_search_box_* / ntp_search_box_height dimens: 48dp, 2dp outline, 24dp
+#    radius, 12dp padding, 24dp engine icon, 15sp hint, no elevation),
+#  * the favorites grid that replaces Most Visited tiles (layouts, drawables,
+#    strings; Java in chrome/android/java/src/org/chromium/chrome/browser/lemurx/favorites/).
+#
+# resource_overlay makes aapt2 prefer these over upstream resources with the
+# same name, so the upstream layout files stay untouched. Wired in from
+# chrome/android/BUILD.gn (chrome_app_java_resources deps).
+android_resources("ntp_resources") {
+  resource_overlay = true
+  deps = [ "//chrome/android:chrome_public_apk_base_module_resources" ]
+  sources = [
+    "res/drawable-hdpi/lemurx_ntp_wordmark.png",
+    "res/drawable-mdpi/lemurx_ntp_wordmark.png",
+    "res/drawable-xhdpi/lemurx_ntp_wordmark.png",
+    "res/drawable-xxhdpi/lemurx_ntp_wordmark.png",
+    "res/drawable-xxxhdpi/lemurx_ntp_wordmark.png",
+    "res/drawable/home_surface_search_box_background.xml",
+    "res/drawable/ic_google_logo.xml",
+    "res/drawable/lemurx_fav_add.xml",
+    "res/drawable/lemurx_fav_edit_field_bg.xml",
+    "res/drawable/lemurx_fav_folder_bg.xml",
+    "res/drawable/lemurx_fav_group_panel_bg.xml",
+    "res/drawable/lemurx_fav_icon_press.xml",
+    "res/drawable/lemurx_fav_join.xml",
+    "res/drawable/lemurx_fav_remove.xml",
+    "res/drawable/lemurx_fav_select.xml",
+    "res/drawable/lemurx_fav_local_bookmarks.xml",
+    "res/drawable/lemurx_fav_local_history.xml",
+    "res/drawable/lemurx_fav_picker_tab_bg.xml",
+    "res/layout/lemurx_fav_add_item.xml",
+    "res/layout/lemurx_fav_folder_item.xml",
+    "res/layout/lemurx_fav_item.xml",
+    "res/layout/lemurx_fav_picker.xml",
+    "res/layout/lemurx_fav_picker_row.xml",
+    "res/layout/lemurx_ntp_favorites.xml",
+    "res/values-night/lemurx_ntp_colors.xml",
+    "res/values-zh-rCN/lemurx_ntp_strings.xml",
+    "res/values/lemurx_ntp_colors.xml",
+    "res/values/lemurx_ntp_dimens.xml",
+    "res/values/lemurx_ntp_strings.xml",
+  ]
+}

@@ -1,0 +1,68 @@
+diff --git a/chrome/browser/ui/android/logo/java/src/org/chromium/chrome/browser/logo/LogoMediator.java b/chrome/browser/ui/android/logo/java/src/org/chromium/chrome/browser/logo/LogoMediator.java
+index 630e96c8ea..f3ec8eb375 100644
+--- a/chrome/browser/ui/android/logo/java/src/org/chromium/chrome/browser/logo/LogoMediator.java
++++ b/chrome/browser/ui/android/logo/java/src/org/chromium/chrome/browser/logo/LogoMediator.java
+@@ -52,6 +52,12 @@ import java.nio.ByteBuffer;
+ /** Mediator used to fetch and load logo image for Start surface and NTP. */
+ @NullMarked
+ public class LogoMediator implements TemplateUrlServiceObserver {
++    /**
++     * LemurX: the new tab page shows the static LemurX wordmark (resource overlay of
++     * ic_google_logo) instead of the search provider's logo/doodle.
++     */
++    private static final boolean LEMURX_STATIC_LOGO = true;
++
+     // UMA enum constants. CTA means the "click-to-action" icon.
+     private static final String LOGO_SHOWN_UMA_NAME = "NewTabPage.LogoShown";
+     private static final String LOGO_SHOWN_FROM_CACHE_UMA_NAME = "NewTabPage.LogoShown.FromCache";
+@@ -247,8 +253,8 @@ public class LogoMediator implements TemplateUrlServiceObserver {
+ 
+     /** Returns whether the default Google Logo is shown. */
+     boolean isDefaultGoogleLogoShown() {
+-        return mIsDefaultSearchEngineGoogle
+-                && mShouldShowLogo
++        // LemurX: the wordmark is shown for every search engine (see getDefaultGoogleLogoDrawable).
++        return mShouldShowLogo
+                 && mLogoModel.get(LogoProperties.VISIBILITY)
+                 && mLogoModel.get(LogoProperties.LOGO) == null;
+     }
+@@ -263,6 +269,14 @@ public class LogoMediator implements TemplateUrlServiceObserver {
+         // record, don't bother loading the logo image.
+         if (mHasLogoLoadedForCurrentSearchEngine || mProfile == null || !mShouldShowLogo) return;
+ 
++        // LemurX: the NTP shows the static LemurX wordmark (ic_google_logo is overlaid with it),
++        // never a search-provider doodle. Skip LogoBridge/ImageFetcher entirely so no doodle
++        // request is made and the logo does not flicker between states.
++        mHasLogoLoadedForCurrentSearchEngine = true;
++        mLogoModel.set(LogoProperties.ANIMATION_ENABLED, false);
++        showSearchProviderInitialView();
++        if (LEMURX_STATIC_LOGO) return;
++
+         if (mLogoBridge == null) {
+             mLogoBridge = new LogoBridge(mProfile);
+         }
+@@ -338,7 +352,8 @@ public class LogoMediator implements TemplateUrlServiceObserver {
+     }
+ 
+     private void updateVisibility() {
+-        mShouldShowLogo = doesDefaultSearchEngineHaveLogo(mProfile);
++        // LemurX: the wordmark is the browser's, not the search engine's -- always shown.
++        mShouldShowLogo = LEMURX_STATIC_LOGO || doesDefaultSearchEngineHaveLogo(mProfile);
+         mLogoModel.set(LogoProperties.VISIBILITY, mShouldShowLogo);
+         for (LogoCoordinator.VisibilityObserver observer : mVisibilityObservers) {
+             observer.onLogoVisibilityChanged();
+@@ -352,12 +367,8 @@ public class LogoMediator implements TemplateUrlServiceObserver {
+      */
+     @VisibleForTesting
+     @Nullable Drawable getDefaultGoogleLogoDrawable() {
+-        if (mProfile == null
+-                || !TemplateUrlServiceFactory.getForProfile(mProfile)
+-                        .isDefaultSearchEngineGoogle()) {
+-            return null;
+-        }
+-
++        // LemurX: the "default Google logo" slot holds the LemurX wordmark (resource overlay of
++        // ic_google_logo), shown regardless of the default search engine.
+         return mDefaultGoogleLogoDrawable;
+     }
+ 

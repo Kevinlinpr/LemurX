@@ -1,0 +1,24 @@
+diff --git a/chrome/browser/ntp_customization/java/src/org/chromium/chrome/browser/ntp_customization/NtpCustomizationUtils.java b/chrome/browser/ntp_customization/java/src/org/chromium/chrome/browser/ntp_customization/NtpCustomizationUtils.java
+index cccd443303..c229626896 100644
+--- a/chrome/browser/ntp_customization/java/src/org/chromium/chrome/browser/ntp_customization/NtpCustomizationUtils.java
++++ b/chrome/browser/ntp_customization/java/src/org/chromium/chrome/browser/ntp_customization/NtpCustomizationUtils.java
+@@ -127,6 +127,9 @@ import java.util.concurrent.Executor;
+ @NullMarked
+ @JNINamespace("ntp_customization")
+ public class NtpCustomizationUtils {
++    /** LemurX: the NTP always shows the LemurX wordmark; see LogoMediator. */
++    private static final boolean LEMURX_STATIC_LOGO = true;
++
+ 
+     // LINT.IfChange(NtpBackgroundType)
+     @IntDef({
+@@ -1651,6 +1654,9 @@ public class NtpCustomizationUtils {
+      * @return True if the default search engine supports showing a logo, false otherwise.
+      */
+     public static boolean doesDefaultSearchEngineHaveLogo(@Nullable Profile profile) {
++        // LemurX: the NTP always shows the LemurX wordmark above the search box (LogoMediator),
++        // so layout code that keys off "search engine has a logo" must agree.
++        if (LEMURX_STATIC_LOGO) return true;
+         return profile != null
+                 ? TemplateUrlServiceFactory.getForProfile(profile).doesDefaultSearchEngineHaveLogo()
+                 : ChromeSharedPreferences.getInstance()

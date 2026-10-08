@@ -1,5 +1,5 @@
-# LemurX default build arguments (arm64 release).
-# gn gen out/lemurx --args="$(cat ../tools/args.gn)"   (run from chromium/src)
+# LemurX default build arguments (arm64 release, local).
+# gn gen out/lemurx --args="$(cat ../../tools/args.gn)"   (run from chromium/src)
 target_os = "android"
 target_cpu = "arm64"
 is_debug = false
@@ -8,20 +8,25 @@ is_component_build = false
 is_official_build = true
 treat_warnings_as_errors = false
 
-# Distributed build on the self-hosted REAPI cluster (see chromium/.gclient
-# custom_vars and tools/rbe/backend.star). Siso talks to the cluster directly;
-# reclient is not used. The cluster is plaintext gRPC, so run
-# `autoninja -C out/lemurx -reapi_insecure ...` (or export RBE_service_no_security=true).
-use_remoteexec = true
+# Local Siso. Remote execution is opt-in: set use_remoteexec=true and fill
+# reapi_* in chromium/.gclient (see README "Distributed build").
+use_remoteexec = false
 use_siso = true
 use_reclient = false
 
 # LemurX: no extension system. Lua is the only extension surface.
 enable_extensions = false
 
-ffmpeg_branding = "Chrome"
-proprietary_codecs = true
-enable_widevine = true
+# Codec *bundle*, not the app name. "Chromium" is the royalty-free set
+# (VP8/VP9/AV1, Opus, Vorbis). "Chrome" also pulls in H.264/AAC, which you
+# must not redistribute without patent licenses. App identity is
+# branding_path_component below. For a private distribution APK you may add:
+#   ffmpeg_branding = "Chrome"
+#   proprietary_codecs = true
+#   enable_widevine = true
+ffmpeg_branding = "Chromium"
+proprietary_codecs = false
+enable_widevine = false
 enable_remoting = false
 chrome_pgo_phase = 0
 android_channel = "stable"

@@ -6,13 +6,12 @@ solutions = [
     "custom_deps": {},
     "custom_vars": {
       "checkout_pgo_profiles": True,
-      # Self-hosted REAPI (Buildbarn) cluster for distributed builds.
-      # Pairs with use_remoteexec=true / use_siso=true in tools/args.gn.
-      # The backend config lives in this repo (tools/rbe/backend.star); the
-      # configure_siso hook copies it into build/config/siso/backend_config/.
-      "reapi_address": "192.168.0.18:8980",
-      "reapi_instance": "default",
-      "reapi_backend_config_path": "/home/user/code/lemurx/tools/rbe/backend.star",
+      # Optional: point these at your own REAPI cluster, then set
+      # use_remoteexec=true in GN args. Defaults are local-only so a public
+      # clone does not try to reach a private builder.
+      # "reapi_address": "reapi.example:8980",
+      # "reapi_instance": "default",
+      # "reapi_backend_config_path": "/absolute/path/to/lemurx/tools/rbe/backend.star",
     },
   },
 ]

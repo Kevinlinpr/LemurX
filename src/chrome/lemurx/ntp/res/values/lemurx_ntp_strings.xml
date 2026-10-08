@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The LemurX Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+<resources>
+    <string name="lemurx_fav_more">More</string>
+    <string name="lemurx_fav_bookmarks">Bookmarks</string>
+    <string name="lemurx_fav_history">History</string>
+    <string name="lemurx_fav_edit_title">Rename</string>
+    <string name="lemurx_fav_edit_hint">Enter a new name</string>
+    <string name="lemurx_fav_edit_confirm">Done</string>
+    <string name="lemurx_fav_add">Add shortcut</string>
+    <string name="lemurx_fav_add_url_hint">Enter or paste a URL</string>
+    <string name="lemurx_fav_add_url_title_hint">Name (optional)</string>
+    <string name="lemurx_fav_tab_bookmarks">Bookmarks</string>
+    <string name="lemurx_fav_tab_history">History</string>
+    <string name="lemurx_fav_tab_url">URL</string>
+    <string name="lemurx_fav_added">Added</string>
+    <string name="lemurx_fav_empty_bookmarks">No bookmarks yet</string>
+    <string name="lemurx_fav_empty_history">No history yet</string>
+    <string name="lemurx_fav_full">No more room on the home page</string>
+    <string name="lemurx_fav_folder_full">This folder is full</string>
+    <string name="lemurx_fav_sheet_opened_half">Add shortcut sheet opened halfway</string>
+    <string name="lemurx_fav_sheet_opened_full">Add shortcut sheet opened</string>
+    <string name="lemurx_fav_sheet_closed">Add shortcut sheet closed</string>
+    <string name="lemurx_fav_delete">Remove</string>
+    <string name="lemurx_fav_drag_hint">Long-press a shortcut to edit, drag to reorder, drop on another to make a folder</string>
+</resources>

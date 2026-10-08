@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The LemurX Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="56dp"
+    android:background="?attr/selectableItemBackground"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <ImageView
+        android:id="@+id/lemurx_fav_row_icon"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:importantForAccessibility="no"
+        android:scaleType="centerCrop" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/lemurx_fav_row_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/lemurx_ntp_text_primary"
+            android:textSize="14sp"
+            tools:text="Title" />
+
+        <TextView
+            android:id="@+id/lemurx_fav_row_url"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/lemurx_ntp_text_secondary"
+            android:textSize="12sp"
+            tools:text="https://example.com" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/lemurx_fav_row_action"
+        android:layout_width="wrap_content"
+        android:layout_height="32dp"
+        android:background="@drawable/lemurx_fav_edit_field_bg"
+        android:gravity="center"
+        android:minWidth="64dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:textColor="@color/lemurx_ntp_text_primary"
+        android:textSize="12sp"
+        tools:text="Add" />
+</LinearLayout>

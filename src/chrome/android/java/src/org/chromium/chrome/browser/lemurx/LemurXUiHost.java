@@ -141,6 +141,19 @@ class LemurXUiHost {
         if ("dialog".equals(act) || "prompt".equals(act) || "alert".equals(act)) {
             return dialog(json);
         }
+        // Agent 底座：屏幕坐标系的点按 / 滑动、整窗截图、网页视口映射。
+        if ("tap".equals(act) || "longpress".equals(act) || "long_press".equals(act)) {
+            return tapScreen(json, act.contains("long"));
+        }
+        if ("swipe".equals(act)) {
+            return swipeScreen(json);
+        }
+        if ("screenshot".equals(act)) {
+            return LemurXMoatHost.windowScreenshot(json);
+        }
+        if ("viewport".equals(act)) {
+            return LemurXMoatHost.viewport(json);
+        }
         if ("render".equals(act)
                 || "unmount".equals(act)
                 || "style".equals(act)
@@ -568,7 +581,29 @@ class LemurXUiHost {
                         }
                         boolean prompt = opt.optBoolean("prompt", opt.has("hint"));
                         EditText input = null;
-                        if (prompt) {
+                        JSONArray items = opt.optJSONArray("items");
+                        if (items != null && items.length() > 0) {
+                            // 单选列表：点某项回 dialog:<id>:select {index, text}
+                            final String[] labels = new String[items.length()];
+                            for (int i = 0; i < items.length(); i++) {
+                                labels[i] = items.optString(i, "");
+                            }
+                            builder.setItems(
+                                    labels,
+                                    (d, which) -> {
+                                        JSONObject ev = new JSONObject();
+                                        try {
+                                            ev.put("id", dialogId);
+                                            ev.put("action", "select");
+                                            ev.put("index", which);
+                                            ev.put("text", labels[which]);
+                                        } catch (Exception ignored) {
+                                            // 保持已写入字段
+                                        }
+                                        LemurXBridge.notifyUiClick(
+                                                "dialog:" + dialogId + ":select", ev.toString());
+                                    });
+                        } else if (prompt) {
                             LinearLayout box = new LinearLayout(host);
                             int pad = dp(host, 20);
                             box.setPadding(pad, dp(host, 8), pad, 0);
@@ -586,10 +621,10 @@ class LemurXUiHost {
                         } else if (!TextUtils.isEmpty(message)) {
                             builder.setMessage(message);
                         }
-                        String ok = opt.optString("ok", prompt ? "确定" : "好");
+                        String ok = opt.optString("ok", items != null ? "" : (prompt ? "确定" : "好"));
                         String cancel = opt.optString("cancel", prompt ? "取消" : "");
                         EditText captured = input;
-                        builder.setPositiveButton(
+                        if (!TextUtils.isEmpty(ok) || items == null) builder.setPositiveButton(
                                 TextUtils.isEmpty(ok) ? "好" : ok,
                                 (d, w) -> {
                                     JSONObject ev = new JSONObject();
@@ -679,6 +714,14 @@ class LemurXUiHost {
     static List<View> findViews(JSONObject query, int max) {
         List<View> out = new ArrayList<>();
         if (query == null) {
+            return out;
+        }
+        // ref 精确命中：dump/find 给出的句柄，跳过整棵树的模糊匹配。
+        if (query.has("ref")) {
+            View exact = viewForRef(query.optInt("ref", -1));
+            if (exact != null) {
+                out.add(exact);
+            }
             return out;
         }
         for (View root : allWindowRoots()) {
@@ -834,8 +877,54 @@ class LemurXUiHost {
                 || requireClickable;
     }
 
+    // ------------------------------------------------------------ 节点 ref
+
+    /**
+     * 稳定的节点句柄：dump/find 返回的每个节点都带一个整数 {@code ref}，之后
+     * {@code lemurx.ui.click({ref=N})} / {@code lemurx.agent.act{ref="n12"}} 可以直接指回同一个
+     * View，而不用再拿 id/text 去猜（Agent 一轮观察多个同名按钮时必须这样）。
+     * 弱引用，View 回收后 ref 自动失效；同一个 View 多次 dump 拿到同一个 ref。
+     */
+    private static final java.util.WeakHashMap<View, Integer> sRefByView =
+            new java.util.WeakHashMap<>();
+
+    private static final Map<Integer, java.lang.ref.WeakReference<View>> sViewByRef =
+            new HashMap<>();
+    private static int sNextRef = 1;
+
+    static int refFor(View view) {
+        Integer ref = sRefByView.get(view);
+        if (ref != null) {
+            return ref;
+        }
+        ref = sNextRef++;
+        sRefByView.put(view, ref);
+        sViewByRef.put(ref, new java.lang.ref.WeakReference<>(view));
+        if (sViewByRef.size() > 4096) {
+            // 定期把已经回收的条目清掉，避免无限增长。
+            java.util.Iterator<Map.Entry<Integer, java.lang.ref.WeakReference<View>>> it =
+                    sViewByRef.entrySet().iterator();
+            while (it.hasNext()) {
+                if (it.next().getValue().get() == null) {
+                    it.remove();
+                }
+            }
+        }
+        return ref;
+    }
+
+    static View viewForRef(int ref) {
+        java.lang.ref.WeakReference<View> weak = sViewByRef.get(ref);
+        View view = weak == null ? null : weak.get();
+        if (view == null || !view.isAttachedToWindow()) {
+            return null;
+        }
+        return view;
+    }
+
     static JSONObject describe(View view, boolean withChildren) throws Exception {
         JSONObject node = new JSONObject();
+        node.put("ref", refFor(view));
         node.put("class", view.getClass().getSimpleName());
         node.put("id", viewIdName(view));
         String rid = resourceEntryName(view);
@@ -929,6 +1018,175 @@ class LemurXUiHost {
             current = parent instanceof View ? (View) parent : null;
         }
         return tapCenter(view, longClick);
+    }
+
+    // ------------------------------------------------------------ 屏幕坐标输入
+
+    /**
+     * 在屏幕坐标 (x, y) 上点一下。找到覆盖该点的最上层窗口根（Dialog / PopupWindow /
+     * Activity），换算成该窗口的局部坐标后走 dispatchTouchEvent —— 和 dump/find 报出的
+     * x/y/w/h 是同一个坐标系（{@link View#getLocationOnScreen}），Agent 拿到节点就能点。
+     * 网页内部的点用 lemurx.input.tap（相对网页 View）或 agent.act 自动换算。
+     */
+    private static String tapScreen(String json, boolean longPress) {
+        String result =
+                uiBlocking(
+                        () -> {
+                            JSONObject out = new JSONObject();
+                            JSONObject opt = parseJson(json);
+                            float[] xy = screenPoint(opt, "x", "y");
+                            View root = rootAt(xy[0], xy[1]);
+                            if (root == null) {
+                                out.put("ok", false);
+                                out.put("error", "no window at point");
+                                return out.toString();
+                            }
+                            int[] loc = new int[2];
+                            root.getLocationOnScreen(loc);
+                            float lx = xy[0] - loc[0];
+                            float ly = xy[1] - loc[1];
+                            long hold = longPress ? Math.max(600, opt.optInt("hold", 700)) : 48;
+                            long down = SystemClock.uptimeMillis();
+                            MotionEvent press =
+                                    MotionEvent.obtain(
+                                            down, down, MotionEvent.ACTION_DOWN, lx, ly, 0);
+                            boolean ok = root.dispatchTouchEvent(press);
+                            press.recycle();
+                            if (longPress) {
+                                // 长按需要真实经过时间，否则 GestureDetector 不会判成 long press；
+                                // UP 延后投递，不阻塞 UI 线程。
+                                final View target = root;
+                                root.postDelayed(
+                                        () -> {
+                                            MotionEvent release =
+                                                    MotionEvent.obtain(
+                                                            down,
+                                                            SystemClock.uptimeMillis(),
+                                                            MotionEvent.ACTION_UP,
+                                                            lx,
+                                                            ly,
+                                                            0);
+                                            target.dispatchTouchEvent(release);
+                                            release.recycle();
+                                        },
+                                        hold);
+                            } else {
+                                MotionEvent release =
+                                        MotionEvent.obtain(
+                                                down,
+                                                down + hold,
+                                                MotionEvent.ACTION_UP,
+                                                lx,
+                                                ly,
+                                                0);
+                                ok = root.dispatchTouchEvent(release) || ok;
+                                release.recycle();
+                            }
+                            out.put("ok", ok);
+                            out.put("x", xy[0]);
+                            out.put("y", xy[1]);
+                            out.put("window", viewIdName(root));
+                            return out.toString();
+                        });
+        return result == null ? "{\"ok\":false}" : result;
+    }
+
+    private static String swipeScreen(String json) {
+        String result =
+                uiBlocking(
+                        () -> {
+                            JSONObject out = new JSONObject();
+                            JSONObject opt = parseJson(json);
+                            float[] a = screenPoint(opt, "x1", "y1");
+                            float[] b = screenPoint(opt, "x2", "y2");
+                            int duration = Math.max(80, opt.optInt("duration", 320));
+                            View root = rootAt(a[0], a[1]);
+                            if (root == null) {
+                                out.put("ok", false);
+                                out.put("error", "no window at point");
+                                return out.toString();
+                            }
+                            int[] loc = new int[2];
+                            root.getLocationOnScreen(loc);
+                            float x1 = a[0] - loc[0];
+                            float y1 = a[1] - loc[1];
+                            float x2 = b[0] - loc[0];
+                            float y2 = b[1] - loc[1];
+                            long down = SystemClock.uptimeMillis();
+                            MotionEvent press =
+                                    MotionEvent.obtain(
+                                            down, down, MotionEvent.ACTION_DOWN, x1, y1, 0);
+                            boolean ok = root.dispatchTouchEvent(press);
+                            press.recycle();
+                            int steps = Math.max(6, duration / 16);
+                            for (int i = 1; i <= steps; i++) {
+                                float t = i / (float) steps;
+                                MotionEvent move =
+                                        MotionEvent.obtain(
+                                                down,
+                                                down + (long) (duration * t),
+                                                MotionEvent.ACTION_MOVE,
+                                                x1 + (x2 - x1) * t,
+                                                y1 + (y2 - y1) * t,
+                                                0);
+                                ok = root.dispatchTouchEvent(move) || ok;
+                                move.recycle();
+                            }
+                            MotionEvent release =
+                                    MotionEvent.obtain(
+                                            down,
+                                            down + duration,
+                                            MotionEvent.ACTION_UP,
+                                            x2,
+                                            y2,
+                                            0);
+                            ok = root.dispatchTouchEvent(release) || ok;
+                            release.recycle();
+                            out.put("ok", ok);
+                            return out.toString();
+                        });
+        return result == null ? "{\"ok\":false}" : result;
+    }
+
+    /** 屏幕坐标；unit="dp" 时按屏幕密度换算成像素。 */
+    private static float[] screenPoint(JSONObject opt, String xKey, String yKey) {
+        float x = (float) opt.optDouble(xKey, 0);
+        float y = (float) opt.optDouble(yKey, 0);
+        if ("dp".equalsIgnoreCase(opt.optString("unit", "px"))) {
+            Activity activity = hostActivity();
+            if (activity != null) {
+                float density = activity.getResources().getDisplayMetrics().density;
+                x *= density;
+                y *= density;
+            }
+        }
+        return new float[] {x, y};
+    }
+
+    /** 覆盖屏幕点 (x, y) 的最上层窗口根。WindowManagerGlobal 的列表按加入顺序，后加的在上面。 */
+    private static View rootAt(float x, float y) {
+        List<View> roots = allWindowRoots();
+        View hit = null;
+        for (View root : roots) {
+            if (root == null || !root.isAttachedToWindow() || root.getVisibility() != View.VISIBLE) {
+                continue;
+            }
+            int[] loc = new int[2];
+            root.getLocationOnScreen(loc);
+            if (x >= loc[0]
+                    && y >= loc[1]
+                    && x < loc[0] + root.getWidth()
+                    && y < loc[1] + root.getHeight()) {
+                hit = root; // 继续遍历，取最后一个（最上层）命中的
+            }
+        }
+        if (hit == null) {
+            Activity activity = hostActivity();
+            if (activity != null && activity.getWindow() != null) {
+                hit = activity.getWindow().getDecorView();
+            }
+        }
+        return hit;
     }
 
     private static boolean tapCenter(View view, boolean longClick) {
