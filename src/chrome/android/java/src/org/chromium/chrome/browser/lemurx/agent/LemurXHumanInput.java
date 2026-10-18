@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -495,78 +496,142 @@ final class LemurXHumanInput {
         InputConnection ic = ime == null ? null : ime.getActiveInputConnection();
         if (ic == null) return false;
 
+        // 每个字立刻提交。拉丁字母若留在组合区里，拼音输入法会把它和后面的汉字并成一个词。
+        finish(ic);
         List<String> clusters = graphemes(text);
-        StringBuilder composing = new StringBuilder();
-        StringBuilder typed = new StringBuilder(); // 已经打出去的全部文字（给屏幕回显）
-        boolean cjkRun = false;
-        int cjkCount = 0;
-        int cjkChunk = 2 + RNG.nextInt(3);
+        StringBuilder typed = new StringBuilder();
+        boolean prevCjk = false;
+        boolean havePrev = false;
         for (int i = 0; i < clusters.size(); i++) {
             if (abort.getAsBoolean()) {
-                if (composing.length() > 0) onIme(ic, ic::finishComposingText);
+                finish(ic);
                 return false;
             }
             String g = clusters.get(i);
             int cp = g.codePointAt(0);
             if (g.equals("\n")) {
-                if (composing.length() > 0) {
-                    commit(ic, composing.toString());
-                    composing.setLength(0);
-                }
+                finish(ic);
                 sleep(jitter(180, 80));
                 if (keys != null) keys.press("\n");
                 commit(ic, "\n"); // Chromium 把它转成软键盘的 Enter 按键
                 typed.append('⏎');
                 if (keys != null) keys.echo(typed.toString());
                 sleep(jitter(220, 100));
-                cjkRun = false;
-                cjkCount = 0;
+                havePrev = false;
                 continue;
             }
             boolean cjk = isCjk(cp);
-            boolean separator = !cjk && !Character.isLetterOrDigit(cp) && cp != '\'' && cp != '-';
-            if (separator) {
-                // 词结束：提交词 + 分隔符（Gboard 在空格 / 标点时提交）。
-                if (keys != null) keys.press(g);
-                composing.append(g);
-                commit(ic, composing.toString());
-                typed.append(composing);
-                composing.setLength(0);
-                if (keys != null) keys.echo(typed.toString());
-                sleep(jitter(cp == ' ' ? 140 : 200, 70));
-                cjkRun = false;
-                cjkCount = 0;
-                continue;
+            if (havePrev && cjk != prevCjk) {
+                finish(ic);
+                sleep(jitter(160, 40));
             }
-            if (cjk != cjkRun && composing.length() > 0) {
-                commit(ic, composing.toString());
-                typed.append(composing);
-                composing.setLength(0);
-                cjkCount = 0;
-            }
-            cjkRun = cjk;
+            prevCjk = cjk;
+            havePrev = true;
             if (keys != null) keys.press(g);
-            composing.append(g);
-            compose(ic, composing.toString());
-            if (keys != null) keys.echo(typed.toString() + composing);
-            sleep(jitter(cjk ? 140 : 70, 35));
-            if (cjk && ++cjkCount >= cjkChunk) {
-                // 拼音输入法：几个字一段候选确认。
-                commit(ic, composing.toString());
-                typed.append(composing);
-                composing.setLength(0);
-                cjkCount = 0;
-                cjkChunk = 2 + RNG.nextInt(3);
-                sleep(jitter(220, 90));
-            }
+            commit(ic, g);
+            typed.append(g);
+            if (keys != null) keys.echo(typed.toString());
+            sleep(jitter(cjk ? 150 : 70, 35));
             if (RNG.nextInt(100) < 3) sleep(400 + RNG.nextInt(500)); // 想一下
         }
-        if (composing.length() > 0) {
-            commit(ic, composing.toString());
-            typed.append(composing);
-        }
-        if (keys != null) keys.echo(typed.toString());
+        finish(ic);
         return true;
+    }
+
+    /** 关掉未完成的组合，避免拼音把下一段字母吞进去。 */
+    private static void finish(InputConnection ic) {
+        onIme(ic, ic::finishComposingText);
+    }
+
+    /** 把光标放到第 {@code index} 个字符前。 */
+    static void placeCursor(InputConnection ic, int index) {
+        onIme(ic, () -> ic.setSelection(index, index));
+    }
+
+    /** 选中 [start, end)。先结束组合，再选，顺序和真人长按后拖动手柄一致。 */
+    static void selectRange(InputConnection ic, int start, int end) {
+        onIme(
+                ic,
+                () -> {
+                    ic.finishComposingText();
+                    ic.setSelection(start, end);
+                });
+    }
+
+    /** 删光标前一个字，或者删掉当前选区。 */
+    static void backspace(InputConnection ic) {
+        onIme(
+                ic,
+                () -> {
+                    CharSequence selected = ic.getSelectedText(0);
+                    if (selected != null && selected.length() > 0) ic.commitText("", 1);
+                    else ic.deleteSurroundingText(1, 0);
+                });
+    }
+
+    /**
+     * 读出当前输入框里的全部文字（光标前 + 选区 + 光标后）。必须在输入法线程上读，所以投到
+     * {@link InputConnection#getHandler()} 再等结果。读不到返回 null，调用方就不要假装核对过。
+     */
+    static @Nullable String fieldText(@Nullable InputConnection ic) {
+        if (ic == null) return null;
+        AtomicReference<String> out = new AtomicReference<>();
+        CountDownLatch latch = new CountDownLatch(1);
+        Runnable job =
+                () -> {
+                    try {
+                        CharSequence before = ic.getTextBeforeCursor(10_000, 0);
+                        CharSequence selected = ic.getSelectedText(0);
+                        CharSequence after = ic.getTextAfterCursor(10_000, 0);
+                        String b = before == null ? "" : before.toString();
+                        String s = selected == null ? "" : selected.toString();
+                        String a = after == null ? "" : after.toString();
+                        out.set(b + s + a);
+                    } catch (Throwable t) {
+                        Log.i(TAG, "field text: %s", t.toString());
+                    } finally {
+                        latch.countDown();
+                    }
+                };
+        Handler h = ic.getHandler();
+        if (h == null || h.getLooper() == Looper.myLooper()) job.run();
+        else h.post(job);
+        try {
+            latch.await(2, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return out.get();
+    }
+
+    /** 清掉当前输入框。删除是异步落到 UI 线程的，调用方要再等一会儿才能读到空框。 */
+    static void clearField(@Nullable InputConnection ic) {
+        if (ic == null) return;
+        CountDownLatch latch = new CountDownLatch(1);
+        Runnable job =
+                () -> {
+                    try {
+                        CharSequence before = ic.getTextBeforeCursor(10_000, 0);
+                        CharSequence selected = ic.getSelectedText(0);
+                        CharSequence after = ic.getTextAfterCursor(10_000, 0);
+                        if (selected != null && selected.length() > 0) ic.commitText("", 1);
+                        int b = before == null ? 0 : before.length();
+                        int a = after == null ? 0 : after.length();
+                        if (b > 0 || a > 0) ic.deleteSurroundingText(b, a);
+                    } catch (Throwable t) {
+                        Log.i(TAG, "clear field: %s", t.toString());
+                    } finally {
+                        latch.countDown();
+                    }
+                };
+        Handler h = ic.getHandler();
+        if (h == null || h.getLooper() == Looper.myLooper()) job.run();
+        else h.post(job);
+        try {
+            latch.await(2, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**

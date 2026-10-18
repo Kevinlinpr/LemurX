@@ -742,9 +742,68 @@ class MuseChatView extends FrameLayout {
                                     @Override
                                     public void onError(String message) {
                                         if (!thread.equals(mThreadId)) return;
+                                        if (stalled(message)) {
+                                            recoverFromServer(message);
+                                            return;
+                                        }
                                         finishRun(message);
                                     }
                                 });
+    }
+
+    /** 连接断了或读超时：服务端多半已经把回复写进会话，拉回来，别停在工具状态上。 */
+    private static boolean stalled(String message) {
+        String m = message.toLowerCase(java.util.Locale.US);
+        return m.contains("timed out")
+                || m.contains("closed the connection")
+                || m.contains("unexpected end of stream")
+                || m.contains("connection reset");
+    }
+
+    private void recoverFromServer(String fallback) {
+        if (mThreadId == null) {
+            finishRun(fallback);
+            return;
+        }
+        final String id = mThreadId;
+        MuseApi.get()
+                .get(
+                        "/api/conversation?id=" + id,
+                        (value, error) -> {
+                            if (!id.equals(mThreadId)) return;
+                            String recovered = lastAssistantText(value);
+                            boolean shown = false;
+                            if (recovered != null) {
+                                for (Message m : mMessages) {
+                                    if ("assistant".equals(m.role) && recovered.equals(m.text)) {
+                                        shown = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            finishRun(null);
+                            if (recovered != null && !shown) {
+                                append(new Message(UUID.randomUUID().toString(), "assistant", recovered));
+                                persist();
+                                if (mStickToBottom) scrollToBottom(true);
+                            } else if (recovered == null) {
+                                showError(fallback);
+                            }
+                        });
+    }
+
+    private static @Nullable String lastAssistantText(@Nullable Object value) {
+        if (!(value instanceof JSONObject)) return null;
+        JSONArray messages = ((JSONObject) value).optJSONArray("messages");
+        if (messages == null) return null;
+        for (int i = messages.length() - 1; i >= 0; i--) {
+            JSONObject m = messages.optJSONObject(i);
+            if (m == null) continue;
+            if (!"assistant".equals(m.optString("role", ""))) continue;
+            String content = m.optString("content", "");
+            if (!TextUtils.isEmpty(content)) return content;
+        }
+        return null;
     }
 
     private void finishRun(@Nullable String error) {

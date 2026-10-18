@@ -1,6 +1,7 @@
 {
   "server": "",
   "token": "",
+  "access_key": "",
   "device_name": "Aero",
   "foreground": true,
   "banner": true

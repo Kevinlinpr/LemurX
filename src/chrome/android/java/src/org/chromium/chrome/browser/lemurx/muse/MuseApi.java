@@ -13,6 +13,7 @@ import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.lemurx.LemurXKillSwitch;
+import org.chromium.chrome.browser.lemurx.agent.LemurXDeviceConfig;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.json.JSONArray;
@@ -54,16 +55,18 @@ public final class MuseApi {
     private static final String KEY_TOKEN = "session_token";
     private static final String KEY_ACCESS_KEY = "access_key";
 
-    /** 家里 / 外出走公网隧道；局域网备一份，隧道抖的时候还能聊。 */
-    public static final String DEFAULT_API_URL =
-            "https://released-mumbai-rare-apply.trycloudflare.com";
+    /** 部署在新加坡的 Aero 服务；局域网备一份，公网不通的时候还能聊。 */
+    public static final String DEFAULT_API_URL = "http://18.143.226.219:8787";
     public static final String LAN_API_URL = "http://192.168.0.37:8787";
     private static @Nullable String sLiveUrl;
 
     private static final int CONNECT_TIMEOUT_MS = 10_000;
     private static final int READ_TIMEOUT_MS = 30_000;
-    /** 对话流一次回复可能跑很久（工具调用、浏览网页）。 */
-    private static final int STREAM_READ_TIMEOUT_MS = 10 * 60_000;
+    /**
+     * 对话流上服务端每 15 秒有一条心跳。45 秒一个字节都没有，就是连接死了，不是模型还在想。
+     * 死了就收尾，让界面去把已经写好的回复拉回来，而不是停在「reading a page」上干等。
+     */
+    private static final int STREAM_READ_TIMEOUT_MS = 45_000;
 
     private static @Nullable MuseApi sInstance;
 
@@ -163,7 +166,19 @@ public final class MuseApi {
 
     /** live 模式服务器的访问密钥；sample 模式留空。 */
     public static boolean hasAccessKey() {
-        return !TextUtils.isEmpty(prefs().getString(KEY_ACCESS_KEY, null));
+        return !TextUtils.isEmpty(accessKey());
+    }
+
+    /** 设置里手填的优先；没有就用打包时注入的那份。 */
+    private static String accessKey() {
+        String key = null;
+        try {
+            key = prefs().getString(KEY_ACCESS_KEY, null);
+        } catch (Exception e) {
+            // 读不到就用打包进去的
+        }
+        if (TextUtils.isEmpty(key)) key = LemurXDeviceConfig.packagedAccessKey();
+        return key == null ? "" : key.trim();
     }
 
     public static void setAccessKey(@Nullable String key) {
@@ -205,7 +220,15 @@ public final class MuseApi {
                     try {
                         value = requestBlocking(method, path, body, true);
                     } catch (Exception e) {
-                        error = describe(e);
+                        if (staleConnection(e)) {
+                            try {
+                                value = requestBlocking(method, path, body, true);
+                            } catch (Exception again) {
+                                error = describe(again);
+                            }
+                        } else {
+                            error = describe(e);
+                        }
                     }
                     final Object v = value;
                     final String err = error;
@@ -316,7 +339,7 @@ public final class MuseApi {
             String token = prefs().getString(KEY_TOKEN, null);
             if (!TextUtils.isEmpty(token)) return token;
             JSONObject body = new JSONObject();
-            String accessKey = prefs().getString(KEY_ACCESS_KEY, null);
+            String accessKey = accessKey();
             if (!TextUtils.isEmpty(accessKey)) body.put("accessKey", accessKey);
             HttpURLConnection connection = open("POST", "/api/session", null, false);
             try {
@@ -361,7 +384,7 @@ public final class MuseApi {
     public Run run(
             String threadId, JSONArray messages, @Nullable JSONArray context, RunListener listener) {
         Run run = new Run();
-        mExecutor.execute(() -> runBlocking(run, threadId, messages, context, listener));
+        mExecutor.execute(() -> runBlocking(run, threadId, messages, context, listener, true));
         return run;
     }
 
@@ -370,9 +393,11 @@ public final class MuseApi {
             String threadId,
             JSONArray messages,
             @Nullable JSONArray context,
-            RunListener listener) {
+            RunListener listener,
+            boolean retryStale) {
         HttpURLConnection connection = null;
         boolean finished = false;
+        boolean sawLine = false;
         try {
             String token = ensureToken();
             JSONObject body = new JSONObject();
@@ -413,6 +438,7 @@ public final class MuseApi {
             StringBuilder data = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {
+                sawLine = true;
                 if (run.isCancelled()) return;
                 if (line.isEmpty()) {
                     if (data.length() > 0) {
@@ -433,6 +459,13 @@ public final class MuseApi {
             if (!finished) ThreadUtils.postOnUiThread(listener::onFinished);
         } catch (Exception e) {
             if (run.isCancelled()) return;
+            // 流还没开始就撞上被拆掉的空闲连接：重开一次。已经收到事件就不要重跑，避免操作执行两遍。
+            if (retryStale && !sawLine && staleConnection(e)) {
+                if (connection != null) connection.disconnect();
+                connection = null;
+                runBlocking(run, threadId, messages, context, listener, false);
+                return;
+            }
             Throwable cause = e.getCause();
             Log.w(
                     TAG,
@@ -566,7 +599,17 @@ public final class MuseApi {
                 || blob.contains("fetched failed")) {
             return "Cannot reach the agent server (" + apiUrl() + ")";
         }
+        if (staleConnection(e)) return "The agent server closed the connection. Send again.";
         if (TextUtils.isEmpty(message)) return e.getClass().getSimpleName();
         return message;
+    }
+
+    /** 服务器拆掉了空闲连接，客户端还拿它发请求。 */
+    private static boolean staleConnection(Exception e) {
+        String message = e.getMessage();
+        Throwable cause = e.getCause();
+        String causeMsg = cause == null ? "" : String.valueOf(cause.getMessage());
+        String blob = ((message == null ? "" : message) + " " + causeMsg).toLowerCase();
+        return blob.contains("unexpected end of stream") || blob.contains("connection reset");
     }
 }

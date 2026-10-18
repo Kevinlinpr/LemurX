@@ -39,6 +39,7 @@ public final class LemurXDeviceConfig {
     static final String PREF_FILE = "lemurx_agent";
     private static final String KEY_SERVER = "server";
     private static final String KEY_TOKEN = "token";
+    private static final String KEY_ACCESS_KEY = "access_key";
     private static final String KEY_DEVICE_NAME = "device_name";
     private static final String KEY_FOREGROUND = "foreground";
     private static final String KEY_BANNER = "banner";
@@ -96,6 +97,13 @@ public final class LemurXDeviceConfig {
     /** 设备令牌（服务端 .env 的 LEMURX_DEVICE_TOKEN）；空表示这台设备没接桥。 */
     public static String token() {
         return pick(KEY_TOKEN, "").trim();
+    }
+
+    /**
+     * 打包进去的访问密钥（服务端 .env 的 OPENMUSE_ACCESS_KEY）。仓库里的 device.json 留空，打包时注入。设置页另存的那份不在这里。
+     */
+    public static String packagedAccessKey() {
+        return asset().optString(KEY_ACCESS_KEY, "").trim();
     }
 
     public static String deviceName() {

@@ -14,6 +14,8 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.Typeface;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -22,6 +24,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
@@ -50,12 +53,15 @@ import org.chromium.chrome.browser.tabmodel.TabClosureParams;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
+import org.chromium.content_public.browser.ImeAdapter;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.RenderCoordinates;
 import org.chromium.content_public.browser.WebContents;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -72,6 +78,8 @@ import java.util.Map;
 import java.util.TimeZone;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -111,7 +119,7 @@ import java.util.regex.Pattern;
  * 坐标漂移由此消解。网页之外的原生对话框（JS 对话框、select、日期时间、长按菜单）由
  * {@link LemurXDialogs} 报告和回答。
  *
- * <p>线程模型：一条后台线程跑轮询 + HTTP；每条命令在它上面串行执行，需要碰标签页的步骤用
+ * <p>线程模型：一条后台线程守着到服务端的长连接；每条命令在它上面串行执行，需要碰标签页的步骤用
  * {@link #onUi} 切到 UI 线程并等结果（带超时），所以 UI 线程从不阻塞。这是从旧的 Lua 版本
  * （openmuse.lua）逐函数移植过来的，REST 语义保持一致。
  */
@@ -120,8 +128,8 @@ public final class LemurXDeviceBridge {
 
     // 与 OpenMuse 侧对齐：BrowserService.request() 45s 超时，桥 40s，本机每条命令预算 30s。
     private static final long COMMAND_BUDGET_MS = 30_000;
-    private static final int POLL_WAIT_S = 25;
-    private static final int POLL_TIMEOUT_MS = 40_000;
+    /** 长连接上 15 秒一个 ping；这么久没字节就当连接断了，重新接上。 */
+    private static final int STREAM_READ_TIMEOUT_MS = 45_000;
     private static final int HTTP_TIMEOUT_MS = 15_000;
     private static final long UI_TIMEOUT_MS = 10_000;
     /** 无障碍树快照最多序列化这么多节点（正文 + 元素都从里面来）。 */
@@ -269,11 +277,36 @@ public final class LemurXDeviceBridge {
     private static volatile int sCommands;
     /** 用户点了「接管」：本次进程内不再连接，重新打开 Aero 后恢复。 */
     private static volatile boolean sPausedByUser;
+    /**
+     * 读长连接和执行命令必须分开。命令在读线程里跑的时候（打开网页、截图）没人读心跳，
+     * 对端或代理会把这条连接拆掉；OkHttp 的读超时还会 interrupt 读线程，循环一看到中断标志就退出，
+     * 这次进程里再也不会连上。
+     */
+    private static final ExecutorService sCommandRunner =
+            Executors.newSingleThreadExecutor(
+                    (Runnable r) -> {
+                        Thread t = new Thread(r, "LemurXAgentCommands");
+                        t.setDaemon(true);
+                        return t;
+                    });
+    private static final Handler sWatchdog = new Handler(Looper.getMainLooper());
+    private static final Runnable sWatchdogTick = LemurXDeviceBridge::watchdog;
+    private static boolean sWatchdogArmed;
 
     private static @Nullable Map<String, Session> sSessions;
     private static @Nullable View sBanner;
     private static @Nullable LemurXTouchOverlay sOverlay;
     private static @Nullable LemurXAgentKeyboard sKeyboard;
+    /** 系统输入法被按住不弹的那个网页。收起 agent 键盘时放开。 */
+    private static @Nullable WebContents sSuppressedIme;
+    /** 打字还没结束时不许收键盘、不许放开系统输入法。点击回调会迟到，不能把正在打的字打断。 */
+    private static volatile int sImeHold;
+    private static @Nullable View sImeView;
+    private static final Runnable sImeWatch = LemurXDeviceBridge::watchIme;
+    /** 最近一次打字核对的结果。只在这一次输入的回复里用，不留在日志里。 */
+    private static boolean sFieldChecked;
+    private static boolean sFieldMatched;
+    private static @Nullable String sFieldValue;
     private static final Runnable sHideKeyboard = LemurXDeviceBridge::hideKeyboardNow;
     private static int sBannerTab = Tab.INVALID_TAB_ID;
 
@@ -289,6 +322,7 @@ public final class LemurXDeviceBridge {
         sActivity = activity;
         overlay(); // 提前挂好并完成布局，第一下点击就能画在正确位置
         start();
+        armWatchdog();
     }
 
     /** 窗口销毁：停轮询、收横幅、撤通知。UI 线程。 */
@@ -366,68 +400,182 @@ public final class LemurXDeviceBridge {
         ThreadUtils.runOnUiThread(() -> notifyConnected(connected));
     }
 
-    // ---------------------------------------------------------------- 轮询循环（后台线程）
+    // ---------------------------------------------------------------- 长连接（后台线程）
 
     private static void loop(int generation) {
         long backoff = BACKOFF_MIN_MS;
-        while (sGeneration == generation && !Thread.currentThread().isInterrupted()) {
-            String url;
-            try {
-                url =
-                        LemurXDeviceConfig.server()
-                                + "/lemurx/device/poll?wait="
-                                + POLL_WAIT_S
-                                + "&fg="
-                                + (foreground() ? "1" : "0")
-                                + "&name="
-                                + URLEncoder.encode(LemurXDeviceConfig.deviceName(), "UTF-8");
-            } catch (Exception e) {
-                url = LemurXDeviceConfig.server() + "/lemurx/device/poll?wait=" + POLL_WAIT_S;
-            }
-            HttpResult r = http("GET", url, null, POLL_TIMEOUT_MS);
-            if (sGeneration != generation) break;
-            sLastPollMs = System.currentTimeMillis();
-            if (r.status == 200) {
-                if (!sConnected) Log.i(TAG, "connected to %s", LemurXDeviceConfig.server());
-                setConnected(true);
-                sLastError = null;
-                backoff = BACKOFF_MIN_MS;
-                JSONArray commands = null;
+        try {
+            while (sGeneration == generation) {
+                // 读超时会留下中断标志。那只说明这条 socket 断了，stop() 才会改 generation。
+                Thread.interrupted();
+                String why = holdStream(generation);
+                if (sGeneration != generation) break;
+                if (why == null) {
+                    backoff = BACKOFF_MIN_MS;
+                    continue;
+                }
+                if ("disabled".equals(why)) break;
+                if (sConnected || !why.equals(sLastError)) Log.w(TAG, "stream ended: %s", why);
+                setConnected(false);
+                sLastError = why;
                 try {
-                    commands = new JSONObject(r.body).optJSONArray("commands");
-                } catch (Exception e) {
-                    Log.i(TAG, "poll body: %s", e.getMessage());
+                    Thread.sleep(backoff);
+                } catch (InterruptedException e) {
+                    if (sGeneration != generation) break;
+                    Thread.interrupted();
                 }
-                if (commands != null) {
-                    for (int i = 0; i < commands.length() && sGeneration == generation; i++) {
-                        JSONObject cmd = commands.optJSONObject(i);
-                        if (cmd != null) handle(cmd);
-                    }
-                }
-                continue;
+                backoff = Math.min(backoff * 2, BACKOFF_MAX_MS);
             }
-            if (LemurXKillSwitch.isDisabledStatus(r.status, r.body)) {
-                Log.i(TAG, "test build disabled by server");
-                LemurXKillSwitch.activate();
-                break;
-            }
-            String why =
-                    r.status == 401
-                            ? "device token rejected (401)"
-                            : r.status == 404
-                                    ? "server has no Aero bridge (404)"
-                                    : r.error != null ? r.error : "http " + r.status;
-            if (sConnected || !why.equals(sLastError)) Log.i(TAG, "poll failed: %s", why);
-            setConnected(false);
-            sLastError = why;
-            try {
-                Thread.sleep(backoff);
-            } catch (InterruptedException e) {
-                break;
-            }
-            backoff = Math.min(backoff * 2, BACKOFF_MAX_MS);
+        } catch (Throwable t) {
+            Log.w(TAG, "bridge loop crashed", t);
         }
+        Log.w(TAG, "bridge loop exit paused=%s", sPausedByUser);
         if (sGeneration == generation) setConnected(false);
+    }
+
+    /** 线程自己退出时拉起来。用户点了接管、或测试包被关停，就不要再连。 */
+    private static void armWatchdog() {
+        if (sWatchdogArmed) return;
+        sWatchdogArmed = true;
+        sWatchdog.postDelayed(sWatchdogTick, 3_000);
+    }
+
+    private static void watchdog() {
+        try {
+            if (sActivity != null
+                    && !sPausedByUser
+                    && !LemurXKillSwitch.isDisabled()
+                    && (sThread == null || !sThread.isAlive())
+                    && !TextUtils.isEmpty(LemurXDeviceConfig.token())) {
+                Log.w(TAG, "bridge thread gone; starting again");
+                start();
+            }
+        } finally {
+            sWatchdog.postDelayed(sWatchdogTick, 3_000);
+        }
+    }
+
+    /**
+     * 守住一条 {@code /lemurx/device/stream}。返回 null 表示正常结束还要立刻重连；其它字符串是失败原因。
+     */
+    private static @Nullable String holdStream(int generation) {
+        String url;
+        try {
+            url =
+                    LemurXDeviceConfig.server()
+                            + "/lemurx/device/stream?fg="
+                            + (foreground() ? "1" : "0")
+                            + "&name="
+                            + URLEncoder.encode(LemurXDeviceConfig.deviceName(), "UTF-8");
+        } catch (Exception e) {
+            url = LemurXDeviceConfig.server() + "/lemurx/device/stream";
+        }
+        HttpURLConnection connection = null;
+        boolean reportedFg = foreground();
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(HTTP_TIMEOUT_MS);
+            connection.setReadTimeout(STREAM_READ_TIMEOUT_MS);
+            connection.setUseCaches(false);
+            connection.setRequestProperty(
+                    "Authorization", "Bearer " + LemurXDeviceConfig.token());
+            connection.setRequestProperty("Accept", "text/event-stream");
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                String body = readLimited(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+                if (LemurXKillSwitch.isDisabledStatus(status, body)) {
+                    Log.i(TAG, "test build disabled by server");
+                    LemurXKillSwitch.activate();
+                    return "disabled";
+                }
+                if (status == 401) return "device token rejected (401)";
+                if (status == 404) return "server has no Aero bridge (404)";
+                return "http " + status;
+            }
+            if (!sConnected) Log.i(TAG, "connected to %s", LemurXDeviceConfig.server());
+            setConnected(true);
+            sLastError = null;
+            sLastPollMs = System.currentTimeMillis();
+            BufferedReader reader =
+                    new BufferedReader(
+                            new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8));
+            StringBuilder data = new StringBuilder();
+            String line;
+            while (sGeneration == generation && (line = reader.readLine()) != null) {
+                sLastPollMs = System.currentTimeMillis();
+                if (line.isEmpty()) {
+                    if (data.length() > 0) {
+                        dispatchStream(data.toString(), generation);
+                        data.setLength(0);
+                    }
+                    continue;
+                }
+                if (line.startsWith(":")) {
+                    boolean fg = foreground();
+                    if (fg != reportedFg) {
+                        reportedFg = fg;
+                        reportPresence(fg);
+                    }
+                    continue;
+                }
+                if (line.startsWith("data:")) {
+                    String chunk = line.substring(5);
+                    if (chunk.startsWith(" ")) chunk = chunk.substring(1);
+                    if (data.length() > 0) data.append('\n');
+                    data.append(chunk);
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            if (sGeneration != generation) return null;
+            return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private static void dispatchStream(String json, int generation) {
+        try {
+            JSONArray commands = new JSONObject(json).optJSONArray("commands");
+            if (commands == null) return;
+            for (int i = 0; i < commands.length(); i++) {
+                JSONObject cmd = commands.optJSONObject(i);
+                if (cmd == null) continue;
+                sCommandRunner.execute(
+                        () -> {
+                            if (sGeneration != generation) return;
+                            handle(cmd);
+                        });
+            }
+        } catch (Exception e) {
+            Log.i(TAG, "stream event: %s", e.getMessage());
+        }
+    }
+
+    private static void reportPresence(boolean foreground) {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("fg", foreground);
+            body.put("name", LemurXDeviceConfig.deviceName());
+            http("POST", LemurXDeviceConfig.server() + "/lemurx/device/presence",
+                    body.toString(), HTTP_TIMEOUT_MS);
+        } catch (Exception e) {
+            Log.i(TAG, "presence: %s", e.getMessage());
+        }
+    }
+
+    private static String readLimited(@Nullable InputStream in) {
+        if (in == null) return "";
+        try {
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            byte[] chunk = new byte[1024];
+            int n;
+            while (buffer.size() < 2048 && (n = in.read(chunk)) > 0) buffer.write(chunk, 0, n);
+            return new String(buffer.toByteArray(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private static void handle(JSONObject cmd) {
@@ -926,6 +1074,32 @@ public final class LemurXDeviceBridge {
             float x = (float) (clamp(body.optDouble("x", 0), 0, CONSOLE_W - 1) / CONSOLE_W * vp[0]);
             float y = (float) (clamp(body.optDouble("y", 0), 0, CONSOLE_H - 1) / CONSOLE_H * vp[1]);
             ok = gestureTap(tab.id, x, vp[2] + y, body.optBoolean("long", false));
+        } else if ("select".equals(kind) && body.has("text")) {
+            String text = body.optString("text", "");
+            if (text.isEmpty() || text.length() > 500) {
+                throw new SessionError(400, "INVALID_INPUT", "Unsupported browser input.");
+            }
+            pace();
+            if (body.has("x") && body.has("y")) {
+                float[] vp = viewportPx(tab.id);
+                if (vp == null) {
+                    throw new SessionError(502, "INPUT_FAILED", "The page is not ready for input.");
+                }
+                float x = (float) (clamp(body.optDouble("x", 0), 0, CONSOLE_W - 1) / CONSOLE_W * vp[0]);
+                float y = (float) (clamp(body.optDouble("y", 0), 0, CONSOLE_H - 1) / CONSOLE_H * vp[1]);
+                gestureTap(tab.id, x, vp[2] + y, true);
+                sleep(300);
+            }
+            int r = selectFieldText(tab.id, text);
+            if (r == TYPE_NO_FOCUS) {
+                throw new SessionError(409, "NO_INPUT_FOCUS",
+                        "No text field is focused. Click the field first, then select.");
+            }
+            if (r != TYPE_OK) {
+                throw new SessionError(404, "TEXT_NOT_FOUND",
+                        "That text is not in the focused field.");
+            }
+            ok = true;
         } else if ("text".equals(kind) && body.has("text")) {
             String text = body.optString("text", "");
             if (text.length() > 10_000) {
@@ -937,8 +1111,12 @@ public final class LemurXDeviceBridge {
                 LemurXPage.Element e = focusTarget(tab.id, body.opt("target"));
                 resolved = LemurXPage.brief(e);
             }
+            sFieldChecked = false;
+            sFieldMatched = false;
+            sFieldValue = null;
             int r = typeText(tab.id, text);
             if (r == TYPE_NO_FOCUS) {
+                hideKeyboard();
                 throw new SessionError(409, "NO_INPUT_FOCUS",
                         "No text field is focused. Click the field first, then type.");
             }
@@ -1006,6 +1184,11 @@ public final class LemurXDeviceBridge {
         JSONObject view = s.view();
         try {
             if (resolved != null) view.put("target", resolved);
+            if ("text".equals(kind) && sFieldChecked) {
+                view.put("fieldMatched", sFieldMatched);
+                // 对上了就不把内容再带回服务端。没对上才带回去，让模型改。
+                if (!sFieldMatched && sFieldValue != null) view.put("fieldValue", sFieldValue);
+            }
             JSONObject dialog = dialog(tab.id);
             if (dialog != null) view.put("dialog", dialog);
         } catch (Exception ignored) {
@@ -1298,19 +1481,163 @@ public final class LemurXDeviceBridge {
     private static final int TYPE_NO_FOCUS = 1;
     private static final int TYPE_FAILED = 2;
 
-    /** 输入法通道打字（后台线程按节拍睡眠）。 */
+    /** 输入法通道打字，打完读回输入框。对不上就退格或长按选中错的那一段，只改那一段。 */
     private static int typeText(int tabId, String text) {
+        WebContents wc = onUi(() -> {
+            Tab t = findTab(tabId);
+            if (t == null) return null;
+            WebContents w = t.getWebContents();
+            if (w != null) holdIme(w, t.getContentView());
+            return w;
+        });
+        if (wc == null) return TYPE_FAILED;
+        try {
+            if (!LemurXHumanInput.hasEditableFocus(wc)) return TYPE_NO_FOCUS;
+            String before = LemurXHumanInput.fieldText(inputConnection(wc));
+            LemurXAgentKeyboard keys = onUi(() -> showKeyboard(30_000, wc));
+            awaitImeHidden();
+            boolean ok = LemurXHumanInput.typeText(wc, text, LemurXDeviceBridge::userActive, keys);
+            if (!ok) return TYPE_FAILED;
+            // 短字段（邮箱、用户名）打完必须就是这段文字。原来框里已经有一大段正文时，才是接在后面。
+            String want = wantField(before, text);
+            sleep(220);
+            String after = LemurXHumanInput.fieldText(inputConnection(wc));
+            if (after == null) {
+                Log.i(TAG, "field check unread want=%d", want.length());
+                return TYPE_OK;
+            }
+            sFieldChecked = true;
+            sFieldValue = after;
+            if (sameField(after, want)) {
+                sFieldMatched = true;
+                Log.i(TAG, "field check matched len=%d", after.length());
+                return TYPE_OK;
+            }
+            Log.i(TAG, "field check mismatch before=%d after=%d want=%d",
+                    before == null ? -1 : before.length(), after.length(), want.length());
+            if (userActive()) return TYPE_OK;
+            fixField(tabId, wc, after, want, keys);
+            sleep(220);
+            String again = LemurXHumanInput.fieldText(inputConnection(wc));
+            if (again == null) return TYPE_OK;
+            sFieldValue = again;
+            sFieldMatched = sameField(again, want);
+            Log.i(TAG, "field check retried matched=%s len=%d", sFieldMatched, again.length());
+            return TYPE_OK;
+        } finally {
+            ThreadUtils.runOnUiThread(LemurXDeviceBridge::releaseIme);
+        }
+    }
+
+    /** 空框或短框：留下的就该是这次要填的字。长正文才把新字接在原来的后面。 */
+    private static String wantField(@Nullable String before, String typed) {
+        if (before != null && before.length() > 40 && !sameField(before, typed)) return before + typed;
+        return typed;
+    }
+
+    private static boolean sameField(String actual, String intended) {
+        return actual.replace("\r\n", "\n").trim().equals(intended.replace("\r\n", "\n").trim());
+    }
+
+    /**
+     * 像人一样改错：尾巴错了就按退格；中间错了一段就长按选中它，再打上正确的字。
+     * 不把整个输入框清空重打。
+     */
+    private static void fixField(
+            int tabId, WebContents wc, String actual, String want, @Nullable LemurXAgentKeyboard keys) {
+        int prefix = commonPrefix(actual, want);
+        int suffix = commonSuffix(actual, want, prefix);
+        String bad = actual.substring(prefix, actual.length() - suffix);
+        String good = want.substring(prefix, want.length() - suffix);
+        InputConnection ic = inputConnection(wc);
+        if (ic == null) return;
+        if (bad.isEmpty()) {
+            LemurXHumanInput.placeCursor(ic, prefix);
+            sleep(160);
+            if (!good.isEmpty()) {
+                LemurXHumanInput.typeText(wc, good, LemurXDeviceBridge::userActive, keys);
+            }
+            return;
+        }
+        // 只是末尾多了或错了几个字：退格，再补上。
+        if (suffix == 0 && bad.length() <= 16) {
+            for (int i = 0; i < bad.length() && !userActive(); i++) {
+                if (keys != null) keys.pressKey("Backspace");
+                LemurXHumanInput.backspace(ic);
+                sleep(70 + (int) (Math.random() * 50));
+            }
+            if (!good.isEmpty() && !userActive()) {
+                LemurXHumanInput.typeText(wc, good, LemurXDeviceBridge::userActive, keys);
+            }
+            return;
+        }
+        longPressFocused(tabId);
+        LemurXHumanInput.selectRange(ic, prefix, actual.length() - suffix);
+        sleep(280);
+        if (userActive()) return;
+        if (good.isEmpty()) {
+            if (keys != null) keys.pressKey("Backspace");
+            LemurXHumanInput.backspace(ic);
+        } else {
+            LemurXHumanInput.typeText(wc, good, LemurXDeviceBridge::userActive, keys);
+        }
+    }
+
+    private static int commonPrefix(String a, String b) {
+        int n = Math.min(a.length(), b.length());
+        int i = 0;
+        while (i < n && a.charAt(i) == b.charAt(i)) i++;
+        return i;
+    }
+
+    private static int commonSuffix(String a, String b, int prefix) {
+        int i = 0;
+        int aLimit = a.length() - prefix;
+        int bLimit = b.length() - prefix;
+        while (i < aLimit && i < bLimit
+                && a.charAt(a.length() - 1 - i) == b.charAt(b.length() - 1 - i)) {
+            i++;
+        }
+        return i;
+    }
+
+    /** 长按当前输入框，让选中看起来是手指按出来的。 */
+    private static void longPressFocused(int tabId) {
+        LemurXPage.Snapshot snap = snapshot(tabId);
+        if (snap == null) return;
+        LemurXPage.Element focused = snap.focused();
+        if (focused == null || focused.px.isEmpty()) return;
+        gestureTap(tabId, focused.cx(), focused.cy(), true);
+    }
+
+    /**
+     * 在聚焦的输入框里长按并选中 {@code text}。找不到返回 {@link #TYPE_FAILED}，
+     * 没有焦点返回 {@link #TYPE_NO_FOCUS}。
+     */
+    private static int selectFieldText(int tabId, String text) {
         WebContents wc = onUi(() -> {
             Tab t = findTab(tabId);
             return t == null ? null : t.getWebContents();
         });
         if (wc == null) return TYPE_FAILED;
         if (!LemurXHumanInput.hasEditableFocus(wc)) return TYPE_NO_FOCUS;
-        LemurXAgentKeyboard keys = onUi(() -> showKeyboard(8_000));
-        awaitImeHidden();
-        boolean ok = LemurXHumanInput.typeText(wc, text, LemurXDeviceBridge::userActive, keys);
-        if (keys != null) ThreadUtils.postOnUiThread(() -> scheduleHideKeyboard(2_500));
-        return ok ? TYPE_OK : TYPE_FAILED;
+        InputConnection ic = inputConnection(wc);
+        String field = LemurXHumanInput.fieldText(ic);
+        if (field == null || ic == null) return TYPE_FAILED;
+        int at = field.indexOf(text);
+        if (at < 0) return TYPE_FAILED;
+        longPressFocused(tabId);
+        LemurXHumanInput.selectRange(ic, at, at + text.length());
+        sleep(240);
+        sFieldChecked = true;
+        sFieldValue = text;
+        sFieldMatched = true;
+        return TYPE_OK;
+    }
+
+    private static @Nullable InputConnection inputConnection(WebContents wc) {
+        ImeAdapter ime = ImeAdapter.fromWebContents(wc);
+        return ime == null ? null : ime.getActiveInputConnection();
     }
 
     private static boolean pressKey(int tabId, String name) {
@@ -1323,7 +1650,7 @@ public final class LemurXDeviceBridge {
         WebContents wc = (WebContents) target[0];
         if (LemurXHumanInput.hasEditableFocus(wc) && LemurXHumanInput.isKnownKey(name)) {
             // 有输入焦点：手指在 agent 键盘上按出这个键。
-            LemurXAgentKeyboard keys = onUi(() -> showKeyboard(2_500));
+            LemurXAgentKeyboard keys = onUi(() -> showKeyboard(2_500, wc));
             if (keys != null) keys.pressKey(name);
         } else {
             caption("按键  " + name);
@@ -1337,12 +1664,18 @@ public final class LemurXDeviceBridge {
      * 显示 agent 自己的键盘并收起系统输入法（UI 线程）；{@code idleMs} 内没再用就自动收起。
      * 系统输入法是别的进程的窗口，手指画不到它上面，所以 agent 打字时用自己的那块。
      */
-    private static @Nullable LemurXAgentKeyboard showKeyboard(long idleMs) {
+    private static @Nullable LemurXAgentKeyboard showKeyboard(long idleMs, @Nullable WebContents wc) {
         ThreadUtils.assertOnUiThread();
         ChromeTabbedActivity activity = sActivity;
         if (activity == null) return null;
         ViewGroup content = activity.findViewById(android.R.id.content);
         if (content == null) return null;
+        // 系统输入法是另一个窗口，压在我们上面。按住它，屏幕上只留这一块。
+        setImeSuppressed(wc, true);
+        for (int i = content.getChildCount() - 1; i >= 0; i--) {
+            View child = content.getChildAt(i);
+            if (child instanceof LemurXAgentKeyboard && child != sKeyboard) content.removeViewAt(i);
+        }
         if (sKeyboard == null || sKeyboard.getParent() == null) {
             // 只避让系统导航条（不能用 systemWindowInsets——此刻系统输入法可能还在，它的高度
             // 也算在里面）；LemurX 底栏露着时再把键盘抬到它上面。
@@ -1361,11 +1694,74 @@ public final class LemurXDeviceBridge {
         }
         LemurXTouchOverlay o = overlay();
         if (o != null) o.bringToFront();
-        InputMethodManager imm =
-                (InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE);
-        if (imm != null) imm.hideSoftInputFromWindow(content.getWindowToken(), 0);
         scheduleHideKeyboard(idleMs);
         return sKeyboard;
+    }
+
+    /** 按住或放开系统输入法。UI 线程。网页还在时才动。 */
+    private static void setImeSuppressed(@Nullable WebContents wc, boolean suppress) {
+        ThreadUtils.assertOnUiThread();
+        if (!suppress) {
+            WebContents prev = sSuppressedIme;
+            sSuppressedIme = null;
+            if (prev != null && !prev.isDestroyed()) {
+                ImeAdapter ime = ImeAdapter.fromWebContents(prev);
+                if (ime != null) ime.setKeyboardSuppressed(false);
+            }
+            return;
+        }
+        if (wc == null || wc.isDestroyed()) return;
+        if (sSuppressedIme != null && sSuppressedIme != wc) setImeSuppressed(null, false);
+        ImeAdapter ime = ImeAdapter.fromWebContents(wc);
+        if (ime != null) ime.setKeyboardSuppressed(true);
+        sSuppressedIme = wc;
+    }
+
+    /** 打字开始：按住系统输入法，并在打完之前反复把它按下去。UI 线程。 */
+    private static void holdIme(@Nullable WebContents wc, @Nullable View view) {
+        ThreadUtils.assertOnUiThread();
+        sImeHold++;
+        sImeView = view;
+        forceHideSystemIme(wc);
+        sWatchdog.removeCallbacks(sImeWatch);
+        sWatchdog.post(sImeWatch);
+    }
+
+    /** 打字结束。还有别的打字没完就先不放开。UI 线程。 */
+    private static void releaseIme() {
+        ThreadUtils.assertOnUiThread();
+        if (sImeHold > 0) sImeHold--;
+        if (sImeHold == 0) scheduleHideKeyboard(800);
+    }
+
+    private static void watchIme() {
+        if (sImeHold <= 0) return;
+        forceHideSystemIme(sSuppressedIme);
+        sWatchdog.postDelayed(sImeWatch, 200);
+    }
+
+    /** 系统输入法从哪扇窗弹出来都收掉。UI 线程。 */
+    private static void forceHideSystemIme(@Nullable WebContents wc) {
+        ThreadUtils.assertOnUiThread();
+        setImeSuppressed(wc, true);
+        ChromeTabbedActivity activity = sActivity;
+        if (activity == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.view.WindowInsetsController controller = activity.getWindow().getInsetsController();
+            if (controller != null) controller.hide(WindowInsets.Type.ime());
+        }
+        InputMethodManager imm =
+                (InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm == null) return;
+        hideImeToken(imm, activity.getWindow().getDecorView());
+        hideImeToken(imm, activity.findViewById(android.R.id.content));
+        hideImeToken(imm, sImeView);
+    }
+
+    private static void hideImeToken(InputMethodManager imm, @Nullable View view) {
+        if (view == null) return;
+        android.os.IBinder token = view.getWindowToken();
+        if (token != null) imm.hideSoftInputFromWindow(token, 0);
     }
 
     /**
@@ -1376,6 +1772,7 @@ public final class LemurXDeviceBridge {
     private static void awaitImeHidden() {
         long deadline = SystemClock.uptimeMillis() + 800;
         while (SystemClock.uptimeMillis() < deadline) {
+            ThreadUtils.runOnUiThread(() -> forceHideSystemIme(sSuppressedIme));
             Boolean visible = onUi(LemurXDeviceBridge::imeVisible);
             if (visible == null || !visible) break;
             try {
@@ -1414,8 +1811,15 @@ public final class LemurXDeviceBridge {
     }
 
     private static void hideKeyboardNow() {
+        // 字还没打完。点击那一头的延迟回调不能在这时把键盘拆掉，否则系统键盘会弹回来。
+        if (sImeHold > 0 && !userActive()) {
+            scheduleHideKeyboard(800);
+            return;
+        }
         View k = sKeyboard;
         sKeyboard = null;
+        sImeView = null;
+        setImeSuppressed(null, false);
         if (k == null) return;
         k.removeCallbacks(sHideKeyboard);
         if (k.getParent() instanceof ViewGroup) ((ViewGroup) k.getParent()).removeView(k);
@@ -1451,13 +1855,19 @@ public final class LemurXDeviceBridge {
                 // 点到输入框：系统输入法会弹出来；换成 agent 自己的键盘，让用户看见接下来的敲击。
                 // 页面可能在点击后过一会儿才把焦点移进输入框（搜索浮层的动画等），所以查两次。
                 WebContents wc = tab.getWebContents();
-                for (long delay : new long[] {350, 1_000}) {
+                sImeView = view;
+                forceHideSystemIme(wc);
+                for (long delay : new long[] {200, 800}) {
                     ThreadUtils.postOnUiThreadDelayed(() -> {
-                        if (userActive()) return;
-                        if (LemurXHumanInput.hasEditableFocus(wc)) {
-                            showKeyboard(8_000);
-                        } else if (delay == 350) {
+                        if (userActive()) {
                             hideKeyboardNow();
+                            return;
+                        }
+                        if (LemurXHumanInput.hasEditableFocus(wc)) {
+                            showKeyboard(30_000, wc);
+                        } else if (delay == 800 && sImeHold == 0 && sKeyboard == null) {
+                            // 没点进输入框，也没有正在用的键盘：放开系统输入法。
+                            setImeSuppressed(null, false);
                         }
                     }, delay);
                 }
