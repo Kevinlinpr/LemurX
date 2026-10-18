@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- lucide RefreshCw: reconnect. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M3 12a9 9 0 0 1 15-6.7L21 8"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M21 3v5h-5"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M21 12a9 9 0 0 1-15 6.7L3 16"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M8 16H3v5"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+</vector>

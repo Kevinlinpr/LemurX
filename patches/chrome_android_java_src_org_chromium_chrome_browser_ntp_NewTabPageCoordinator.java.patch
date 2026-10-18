@@ -1,0 +1,81 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPageCoordinator.java b/chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPageCoordinator.java
+index 63ad92399f..d020b12dc9 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPageCoordinator.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPageCoordinator.java
+@@ -73,6 +73,7 @@ import org.chromium.chrome.browser.profiles.Profile;
+ import org.chromium.chrome.browser.setup_list.SetupListManager;
+ import org.chromium.chrome.browser.setup_list.SetupListModuleUtils;
+ import org.chromium.chrome.browser.signin.SigninAndHistorySyncActivityLauncherImpl;
++import org.chromium.chrome.browser.lemurx.favorites.LemurXFavoritesCoordinator;
+ import org.chromium.chrome.browser.suggestions.tile.MostVisitedTilesCoordinator;
+ import org.chromium.chrome.browser.suggestions.tile.TileGroup;
+ import org.chromium.chrome.browser.tab.Tab;
+@@ -168,6 +169,8 @@ public class NewTabPageCoordinator implements ModuleDelegateHost {
+     private @Nullable LogoCoordinator mLogoCoordinator;
+     private @Nullable NtpSearchBox mNtpSearchBox;
+     private @Nullable MostVisitedTilesCoordinator mMostVisitedTilesCoordinator;
++    // LemurX: favorites grid (Lemur-style shortcuts) shown instead of Most Visited tiles.
++    private @Nullable LemurXFavoritesCoordinator mLemurXFavorites;
+     private @Nullable OnSearchBoxScrollListener mSearchBoxScrollListener;
+     private @Nullable UiConfig mUiConfig;
+     private @Nullable DisplayStyleObserver mDisplayStyleObserver;
+@@ -677,6 +680,35 @@ public class NewTabPageCoordinator implements ModuleDelegateHost {
+         View mvTilesContainerLayout = mNewTabPageLayout.findViewById(R.id.mv_tiles_container);
+         assert mvTilesContainerLayout != null;
+ 
++        // LemurX: the NTP shows a user-curated favorites grid (folders, drag to reorder, add from
++        // bookmarks/history) in the Most Visited slot. The upstream tiles stay in the layout but
++        // hidden, so everything else that measures against mv_tiles_container keeps working.
++        if (mLemurXFavorites == null) {
++            mvTilesContainerLayout.setVisibility(View.GONE);
++            ViewGroup parent = (ViewGroup) mvTilesContainerLayout.getParent();
++            int index = parent.indexOfChild(mvTilesContainerLayout) + 1;
++            ViewGroup.MarginLayoutParams lp =
++                    new ViewGroup.MarginLayoutParams(
++                            (ViewGroup.MarginLayoutParams) mvTilesContainerLayout.getLayoutParams());
++            lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
++            lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
++            LemurXFavoritesCoordinator favorites =
++                    new LemurXFavoritesCoordinator(
++                            mActivity,
++                            profile,
++                            params -> mManager.loadUrl(params, /* incognito= */ false),
++                            mBottomSheetController,
++                            parent,
++                            index,
++                            lp);
++            mLemurXFavorites = favorites;
++            // Tapping blank page space toggles the "+" tile / leaves edit mode (Lemur).
++            mNewTabPageLayout.setOnClickListener(v -> favorites.handleOutsideTouch());
++            // Nothing else reports "tiles loaded"; unblock the logo + onLoadingComplete.
++            onTilesLoaded();
++            return;
++        }
++
+         mMostVisitedTilesCoordinator =
+                 new MostVisitedTilesCoordinator(
+                         mActivity,
+@@ -1424,6 +1456,12 @@ public class NewTabPageCoordinator implements ModuleDelegateHost {
+             mMostVisitedTilesCoordinator = null;
+         }
+ 
++        if (mLemurXFavorites != null) {
++            mNewTabPageLayout.setOnClickListener(null);
++            mLemurXFavorites.destroy();
++            mLemurXFavorites = null;
++        }
++
+         if (mLogoCoordinator != null) {
+             mLogoCoordinator.destroy();
+             mLogoCoordinator = null;
+@@ -1481,6 +1519,10 @@ public class NewTabPageCoordinator implements ModuleDelegateHost {
+             mMostVisitedTilesCoordinator.updateMvtWidth(boundedSearchBoxWidth);
+         }
+ 
++        if (mLemurXFavorites != null) {
++            mLemurXFavorites.setWidth(boundedSearchBoxWidth);
++        }
++
+         mContextMenuStartPosition = null;
+     }
+ 

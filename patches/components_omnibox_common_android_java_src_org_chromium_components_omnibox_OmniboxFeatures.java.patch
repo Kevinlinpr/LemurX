@@ -1,0 +1,15 @@
+diff --git a/components/omnibox/common/android/java/src/org/chromium/components/omnibox/OmniboxFeatures.java b/components/omnibox/common/android/java/src/org/chromium/components/omnibox/OmniboxFeatures.java
+index b9b9d782e4..805520e106 100644
+--- a/components/omnibox/common/android/java/src/org/chromium/components/omnibox/OmniboxFeatures.java
++++ b/components/omnibox/common/android/java/src/org/chromium/components/omnibox/OmniboxFeatures.java
+@@ -162,8 +162,9 @@ public class OmniboxFeatures {
+                     OmniboxFeatureList.SUPPRESS_STATUS_ICON_DURING_HTTP_NAVIGATION,
+                     FeatureState.ENABLED_IN_PROD);
+ 
++    // LemurX: the fusebox / AI Mode "+" button is disabled (matches the native default).
+     private static final CachedFlag sOmniboxMultimodalInput =
+-            newFlag(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT, FeatureState.ENABLED_IN_PROD);
++            newFlag(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT, FeatureState.DISABLED);
+ 
+     public static final BooleanCachedFeatureParam sMultiattachmentFusebox =
+             newBooleanParam(sOmniboxMultimodalInput, "multi_context", true);

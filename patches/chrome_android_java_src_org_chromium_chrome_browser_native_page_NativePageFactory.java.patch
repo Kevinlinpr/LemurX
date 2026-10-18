@@ -1,0 +1,52 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/native_page/NativePageFactory.java b/chrome/android/java/src/org/chromium/chrome/browser/native_page/NativePageFactory.java
+index 480b1a90ae..aabf5ee1a5 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/native_page/NativePageFactory.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/native_page/NativePageFactory.java
+@@ -461,6 +461,18 @@ public class NativePageFactory {
+                     mBackPressManager,
+                     url);
+         }
++
++        /** LemurX console (chat / activity / data), see lemurx/muse/MusePage.java. */
++        protected NativePage buildLemurXPage(Tab tab, String url) {
++            return new org.chromium.chrome.browser.lemurx.muse.MusePage(
++                    tab,
++                    new TabShim(
++                            tab,
++                            mBrowserControlsManager,
++                            mTabModelSelector,
++                            mEdgeToEdgeControllerSupplier),
++                    url);
++        }
+     }
+ 
+     /**
+@@ -504,6 +516,18 @@ public class NativePageFactory {
+                 page = candidatePage;
+                 break;
+             case NativePageType.NTP:
++                // LemurX: an NTP that got here without passing TabImpl.loadUrl (restored
++                // session entry). Show the agent conversation right away so the stock NTP never
++                // paints, and let the shell swap the history entry for the chat URL.
++                String lemurxChat =
++                        org.chromium.chrome.browser.lemurx.LemurXConsoleShell.rewriteNewTabUrl(
++                                url, tab.isIncognito());
++                if (lemurxChat != null) {
++                    page = getBuilder().buildLemurXPage(tab, lemurxChat);
++                    org.chromium.chrome.browser.lemurx.LemurXConsoleShell.replaceNewTabEntry(
++                            tab, lemurxChat);
++                    break;
++                }
+                 page = getBuilder().buildNewTabPage(tab, url);
+                 break;
+             case NativePageType.BOOKMARKS:
+@@ -536,6 +560,9 @@ public class NativePageFactory {
+             case NativePageType.SETTINGS:
+                 page = getBuilder().buildSettingsPage(tab, url);
+                 break;
++            case NativePageType.LEMURX:
++                page = getBuilder().buildLemurXPage(tab, url);
++                break;
+             default:
+                 assert false;
+                 return null;

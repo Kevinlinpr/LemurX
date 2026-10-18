@@ -1,0 +1,38 @@
+diff --git a/content/public/android/java/src/org/chromium/content/browser/picker/InputDialogContainer.java b/content/public/android/java/src/org/chromium/content/browser/picker/InputDialogContainer.java
+index a032ea4872..19140ccaea 100644
+--- a/content/public/android/java/src/org/chromium/content/browser/picker/InputDialogContainer.java
++++ b/content/public/android/java/src/org/chromium/content/browser/picker/InputDialogContainer.java
+@@ -55,6 +55,9 @@ public class InputDialogContainer {
+ 
+     // Prevents sending two notifications (from onClick and from onDismiss)
+     private boolean mDialogAlreadyDismissed;
++    // LemurX: the Material date picker is a fragment, not mDialog; remember it so dismissDialog()
++    // can close it too.
++    private @Nullable MaterialDatePickerProvider mMaterialPickerProvider;
+ 
+     private @Nullable AlertDialog mDialog;
+     private final InputActionDelegate mInputActionDelegate;
+@@ -301,7 +304,10 @@ public class InputDialogContainer {
+                                         mInputActionDelegate.cancelDateTimeDialog();
+                                     }
+                                 });
+-                if (status) return;
++                if (status) {
++                    mMaterialPickerProvider = datePickerProvider;
++                    return;
++                }
+             }
+             DatePickerDialogCompat dateDialog =
+                     new DatePickerDialogCompat(
+@@ -412,6 +418,11 @@ public class InputDialogContainer {
+     }
+ 
+     public void dismissDialog() {
++        if (mMaterialPickerProvider != null) {
++            MaterialDatePickerProvider provider = mMaterialPickerProvider;
++            mMaterialPickerProvider = null;
++            provider.dismissDatePicker(mContext);
++        }
+         if (!isDialogShowing()) return;
+         try {
+             mDialog.dismiss();

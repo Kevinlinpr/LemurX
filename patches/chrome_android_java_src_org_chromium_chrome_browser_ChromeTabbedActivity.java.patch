@@ -1,0 +1,40 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java b/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
+index 9ef575c93d..5c33618e7c 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
+@@ -109,6 +109,8 @@ import org.chromium.chrome.browser.auxiliary_search.AuxiliarySearchMetrics;
+ import org.chromium.chrome.browser.auxiliary_search.module.AuxiliarySearchModuleBuilder;
+ import org.chromium.chrome.browser.back_press.BackPressManager;
+ import org.chromium.chrome.browser.back_press.MinimizeAppAndCloseTabBackPressHandler;
++import org.chromium.chrome.browser.lemurx.LemurXConsoleShell;
++import org.chromium.chrome.browser.lemurx.agent.LemurXDeviceBridge;
+ import org.chromium.chrome.browser.back_press.MinimizeAppAndCloseTabBackPressHandler.MinimizeAppAndCloseTabType;
+ import org.chromium.chrome.browser.bookmarks.BookmarkModel;
+ import org.chromium.chrome.browser.bookmarks.BookmarkPane;
+@@ -1657,6 +1659,11 @@ public class ChromeTabbedActivity extends ChromeActivity implements PreAttachInt
+ 
+             super.finishNativeInitialization();
+ 
++            // LemurX: mount the native console shell (per-tab agent chat) and the agent
++            // device bridge (this window becomes OpenMuse's browser worker) on this window.
++            LemurXConsoleShell.attach(this);
++            LemurXDeviceBridge.attach(this);
++
+             TabbedStartupWindowPolicyDelegate.getInstance().initializeWithNative(profile);
+ 
+             if (!ChromeFeatureList.sAndroidStartupImprovements.isEnabled()) {
+@@ -5450,6 +5457,14 @@ public class ChromeTabbedActivity extends ChromeActivity implements PreAttachInt
+         }
+     }
+ 
++    @Override
++    public boolean dispatchTouchEvent(android.view.MotionEvent event) {
++        // LemurX: every touch that enters through the window is the user's (the agent's
++        // synthetic finger goes straight to the tab view). The agent yields immediately.
++        LemurXDeviceBridge.onUserTouch(event);
++        return super.dispatchTouchEvent(event);
++    }
++
+     @Override
+     public boolean dispatchKeyEvent(KeyEvent event) {
+         Boolean result =

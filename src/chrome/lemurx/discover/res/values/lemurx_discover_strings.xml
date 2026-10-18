@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 The LemurX Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file. -->
+<resources>
+    <!-- Footer states of the Discover news list on the new tab page. -->
+    <string name="lemurx_discover_loading">Loading…</string>
+    <string name="lemurx_discover_load_more">Load more</string>
+    <string name="lemurx_discover_no_more">No more news</string>
+    <string name="lemurx_discover_empty">No news yet. Tap to refresh</string>
+    <string name="lemurx_discover_failed_retry">Couldn\'t load news. Tap to retry</string>
+    <string name="lemurx_discover_load_more_failed">Couldn\'t load more. Tap to retry</string>
+</resources>

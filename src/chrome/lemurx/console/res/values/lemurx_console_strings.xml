@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Content descriptions of the LemurX bottom bar slots (web / tasks / chat / search / tabs). -->
+<resources>
+    <string name="lemurx_console_back">Back</string>
+    <string name="lemurx_console_forward">Forward</string>
+    <string name="lemurx_console_web">Web page</string>
+    <string name="lemurx_console_tasks">Tasks</string>
+    <string name="lemurx_console_chat">Chat</string>
+    <string name="lemurx_console_search">Search</string>
+    <string name="lemurx_console_tabs">Tabs</string>
+</resources>

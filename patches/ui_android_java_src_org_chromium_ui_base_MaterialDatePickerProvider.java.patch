@@ -1,0 +1,17 @@
+diff --git a/ui/android/java/src/org/chromium/ui/base/MaterialDatePickerProvider.java b/ui/android/java/src/org/chromium/ui/base/MaterialDatePickerProvider.java
+index 9c30c0539f..fc1f3c1cf8 100644
+--- a/ui/android/java/src/org/chromium/ui/base/MaterialDatePickerProvider.java
++++ b/ui/android/java/src/org/chromium/ui/base/MaterialDatePickerProvider.java
+@@ -26,6 +26,12 @@ public interface MaterialDatePickerProvider {
+      * @param onDismiss The callback invoked when the dialog is dismissed or canceled.
+      * @return Whether the Material Date Picker dialog was successfully shown.
+      */
++    /**
++     * LemurX: close the Material Date Picker shown by {@link #showDatePicker} if it is still on
++     * screen (its dismiss callback fires as if the user had cancelled).
++     */
++    default void dismissDatePicker(Context context) {}
++
+     boolean showDatePicker(
+             Context context,
+             long initialTime,

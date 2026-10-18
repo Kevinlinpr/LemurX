@@ -1,0 +1,46 @@
+# Copyright 2026 The LemurX Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/android/rules.gni")
+
+assert(is_android)
+
+# Search-engine quick picker (LemurXSearchEnginePicker.java). Chrome's focused
+# omnibox shows the default search engine's logo on the left; LemurX turns that
+# logo into a button that drops down the list of search engines and switches
+# the default in place. It replaces the AI Mode / fusebox "+" entry point,
+# which is disabled at the feature level (components/omnibox: kAimEnabled,
+# kOmniboxMultimodalInput).
+#
+# Wired in from chrome/browser/ui/android/omnibox/BUILD.gn (":java" deps) and
+# called from StatusMediator.maybeUpdateStatusIconForSearchEngineIcon(). Kept
+# free of //chrome/browser/ui/android/omnibox deps so there is no cycle.
+android_library("java") {
+  sources = [ "java/src/org/chromium/chrome/browser/lemurx/search/LemurXSearchEnginePicker.java" ]
+  deps = [
+    ":java_resources",
+    "//base:base_java",
+    "//build/android:build_java",
+    "//chrome/browser/profiles/android:java",
+    "//chrome/browser/regional_capabilities/android:java",
+    "//chrome/browser/search_engines/android:java",
+    "//chrome/browser/ui/android/favicon:java",
+    "//components/regional_capabilities/android:java",
+    "//components/search_engines/android:java",
+    "//third_party/androidx:androidx_annotation_annotation_java",
+    "//third_party/androidx:androidx_appcompat_appcompat_resources_java",
+    "//url:gurl_java",
+  ]
+  resources_package = "org.chromium.chrome.browser.lemurx.search"
+}
+
+android_resources("java_resources") {
+  sources = [
+    "res/drawable/lemurx_search_ic_check.xml",
+    "res/drawable/lemurx_search_ic_engine.xml",
+    "res/drawable/lemurx_search_popup_bg.xml",
+    "res/values-zh-rCN/lemurx_search_strings.xml",
+    "res/values/lemurx_search_strings.xml",
+  ]
+}

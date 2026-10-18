@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lemurx_search_pick_engine">选择搜索引擎</string>
+    <string name="lemurx_search_engine_current">%1$s，当前使用</string>
+</resources>

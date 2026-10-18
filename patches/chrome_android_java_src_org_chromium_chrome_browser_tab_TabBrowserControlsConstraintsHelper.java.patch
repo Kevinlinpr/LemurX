@@ -1,0 +1,15 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/tab/TabBrowserControlsConstraintsHelper.java b/chrome/android/java/src/org/chromium/chrome/browser/tab/TabBrowserControlsConstraintsHelper.java
+index de5e3fc758..4dba380c8a 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tab/TabBrowserControlsConstraintsHelper.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tab/TabBrowserControlsConstraintsHelper.java
+@@ -287,6 +287,10 @@ public class TabBrowserControlsConstraintsHelper implements UserData {
+     }
+ 
+     private @BrowserControlsState int getConstraints() {
++        // LemurX: OpenMuse 控制台外壳（原生）设定的外壳状态是硬约束。它在标签自己的可见性代理之前生效，所以加载中、出错页、
++        // 换渲染进程、地址栏聚焦这些会把工具栏拉出来的时机，都按外壳的意思走。
++        int forced = org.chromium.chrome.browser.lemurx.LemurXConsoleShell.controlsConstraint();
++        if (forced != BrowserControlsState.BOTH) return forced;
+         return mVisibilityDelegate == null ? BrowserControlsState.BOTH : mVisibilityDelegate.get();
+     }
+ 

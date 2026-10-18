@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- lucide Info: about / version. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M12 16v-4"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M12 8h.01"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+</vector>

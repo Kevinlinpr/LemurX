@@ -1,0 +1,20 @@
+# Chromium checkout lives here; only .gclient / fetch.sh are tracked.
+/chromium/*
+!/chromium/.gclient
+!/chromium/fetch.sh
+/depot_tools/
+/out/
+*.log
+dist/
+__pycache__/
+
+# Local / private artifacts — do not publish.
+*.xlsx
+*.apk
+*.aab
+*.keystore
+*.jks
+*.pem
+.env
+.env.*
+local_args.gn

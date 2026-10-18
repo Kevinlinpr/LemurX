@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- lucide ListChecks: the "tasks" slot of the LemurX bottom bar (stroke 1.8/24). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="m3 17 2 2 4-4"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="m3 7 2 2 4-4"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M13 6h8"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M13 12h8"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M13 18h8"
+        android:strokeWidth="1.8"
+        android:strokeColor="@color/lemurx_console_icon"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+</vector>

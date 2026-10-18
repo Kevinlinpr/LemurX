@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings of the search-engine quick picker (LemurXSearchEnginePicker.java). -->
+<resources>
+    <!-- Content description of the engine logo button in the focused address bar. -->
+    <string name="lemurx_search_pick_engine">Choose search engine</string>
+    <!-- Row announcement: "<engine>, current" for the engine that is the default right now. -->
+    <string name="lemurx_search_engine_current">%1$s, current</string>
+</resources>

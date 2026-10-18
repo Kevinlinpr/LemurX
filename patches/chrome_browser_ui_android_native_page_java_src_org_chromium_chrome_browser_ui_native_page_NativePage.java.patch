@@ -1,0 +1,37 @@
+diff --git a/chrome/browser/ui/android/native_page/java/src/org/chromium/chrome/browser/ui/native_page/NativePage.java b/chrome/browser/ui/android/native_page/java/src/org/chromium/chrome/browser/ui/native_page/NativePage.java
+index cea05f2908..2fa4da583f 100644
+--- a/chrome/browser/ui/android/native_page/java/src/org/chromium/chrome/browser/ui/native_page/NativePage.java
++++ b/chrome/browser/ui/android/native_page/java/src/org/chromium/chrome/browser/ui/native_page/NativePage.java
+@@ -199,6 +199,7 @@ public interface NativePage {
+         NativePageType.PDF,
+         NativePageType.BRICKS,
+         NativePageType.SETTINGS,
++        NativePageType.LEMURX,
+     })
+     @Retention(RetentionPolicy.SOURCE)
+     @interface NativePageType {
+@@ -214,8 +215,15 @@ public interface NativePage {
+         int PDF = 9;
+         int BRICKS = 10;
+         int SETTINGS = 11;
++        // LemurX console pages: chrome-native://lemurx/{chat/<id>,activity,data}
++        // (see chrome/android/.../lemurx/muse/MuseUrls.java). Native Android views,
++        // one page object per tab reused across sections (CANDIDATE path).
++        int LEMURX = 12;
+     }
+ 
++    /** Host of the LemurX console pages; kept in sync with lemurx/muse/MuseUrls.HOST. */
++    String LEMURX_HOST = "lemurx";
++
+     /**
+      * @param url The URL to be checked.
+      * @param isIncognito Whether the page will be displayed in incognito mode.
+@@ -317,6 +325,8 @@ public interface NativePage {
+                 && SettingsInTab.isEnabled()
+                 && !isIncognito) {
+             return NativePageType.SETTINGS;
++        } else if (LEMURX_HOST.equals(host)) {
++            return NativePageType.LEMURX;
+         } else {
+             return NativePageType.NONE;
+         }

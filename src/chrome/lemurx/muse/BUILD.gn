@@ -1,0 +1,51 @@
+# Copyright 2026 The LemurX Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/android/rules.gni")
+
+assert(is_android)
+
+# LemurX native console pages (chrome/android/.../lemurx/muse/*.java): the
+# chat / activity / data NativePages at chrome-native://lemurx/... and the
+# LemurX settings fragment. Icons (lucide, same stroke as the console bar) and
+# strings. Wired in from chrome/android/BUILD.gn (chrome_app_java_resources deps).
+android_resources("muse_resources") {
+  deps = [
+    "//chrome/android:chrome_public_apk_base_module_resources",
+    "//chrome/lemurx/console:console_resources",
+  ]
+  sources = [
+    "res/drawable-xxhdpi/lemurx_login_ic_google.png",
+    "res/drawable/lemurx_muse_ic_accessibility.xml",
+    "res/drawable/lemurx_muse_ic_bell.xml",
+    "res/drawable/lemurx_muse_ic_card.xml",
+    "res/drawable/lemurx_muse_ic_chevron.xml",
+    "res/drawable/lemurx_muse_ic_cloud.xml",
+    "res/drawable/lemurx_muse_ic_code.xml",
+    "res/drawable/lemurx_muse_ic_down.xml",
+    "res/drawable/lemurx_muse_ic_download.xml",
+    "res/drawable/lemurx_muse_ic_eye_off.xml",
+    "res/drawable/lemurx_muse_ic_home.xml",
+    "res/drawable/lemurx_muse_ic_info.xml",
+    "res/drawable/lemurx_muse_ic_key.xml",
+    "res/drawable/lemurx_muse_ic_languages.xml",
+    "res/drawable/lemurx_muse_ic_lock.xml",
+    "res/drawable/lemurx_muse_ic_logout.xml",
+    "res/drawable/lemurx_muse_ic_menu.xml",
+    "res/drawable/lemurx_muse_ic_palette.xml",
+    "res/drawable/lemurx_muse_ic_pin.xml",
+    "res/drawable/lemurx_muse_ic_plus.xml",
+    "res/drawable/lemurx_muse_ic_refresh.xml",
+    "res/drawable/lemurx_muse_ic_send.xml",
+    "res/drawable/lemurx_muse_ic_server.xml",
+    "res/drawable/lemurx_muse_ic_settings.xml",
+    "res/drawable/lemurx_muse_ic_shield.xml",
+    "res/drawable/lemurx_muse_ic_sparkles.xml",
+    "res/drawable/lemurx_muse_ic_stop.xml",
+    "res/drawable/lemurx_muse_ic_trash.xml",
+    "res/drawable/lemurx_muse_ic_user.xml",
+    "res/values-zh-rCN/lemurx_muse_strings.xml",
+    "res/values/lemurx_muse_strings.xml",
+  ]
+}

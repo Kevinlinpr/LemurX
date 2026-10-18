@@ -1,0 +1,29 @@
+diff --git a/chrome/android/feed/core/java/src/org/chromium/chrome/browser/feed/FeedSurfaceCoordinator.java b/chrome/android/feed/core/java/src/org/chromium/chrome/browser/feed/FeedSurfaceCoordinator.java
+index 241ed934af..09cecc284e 100644
+--- a/chrome/android/feed/core/java/src/org/chromium/chrome/browser/feed/FeedSurfaceCoordinator.java
++++ b/chrome/android/feed/core/java/src/org/chromium/chrome/browser/feed/FeedSurfaceCoordinator.java
+@@ -62,6 +62,7 @@ import org.chromium.chrome.browser.ntp_customization.theme.upload_image.Backgrou
+ import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+ import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
+ import org.chromium.chrome.browser.privacy.settings.PrivacyPreferencesManagerImpl;
++import org.chromium.chrome.browser.lemurx.LemurXDiscoverStream;
+ import org.chromium.chrome.browser.profiles.Profile;
+ import org.chromium.chrome.browser.share.ShareDelegate;
+ import org.chromium.chrome.browser.toolbar.top.Toolbar;
+@@ -1052,7 +1053,15 @@ public class FeedSurfaceCoordinator
+      * @param kind Kind of stream being created.
+      * @return The FeedStream created.
+      */
+-    FeedStream createFeedStream(@StreamKind int kind, Stream.StreamsMediator streamsMediator) {
++    Stream createFeedStream(@StreamKind int kind, Stream.StreamsMediator streamsMediator) {
++        // LemurX: the upstream feed needs the proprietary xsurface renderer, which is only a
++        // stub in public builds, so FeedStream can never show anything but the "can't
++        // refresh" zero state. Swap in the native LemurX news stream instead; the header,
++        // the on/off switch and the ARTICLES_LIST_VISIBLE pref are untouched.
++        if (LemurXDiscoverStream.isEnabled()) {
++            return new LemurXDiscoverStream(
++                    mActivity, mActionDelegate, streamsMediator, getLateralPaddingsPx());
++        }
+         return new FeedStream(
+                 mActivity,
+                 mProfile,

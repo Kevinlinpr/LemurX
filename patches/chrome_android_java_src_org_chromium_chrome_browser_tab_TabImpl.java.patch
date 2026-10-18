@@ -1,0 +1,18 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/tab/TabImpl.java b/chrome/android/java/src/org/chromium/chrome/browser/tab/TabImpl.java
+index 53be725c22..357d2349f6 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tab/TabImpl.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tab/TabImpl.java
+@@ -868,6 +868,13 @@ class TabImpl implements Tab, TabInternal {
+                 return new LoadUrlResult(TabLoadStatus.DEFAULT_PAGE_LOAD, null);
+             }
+ 
++            // LemurX: the new tab page is never shown; every NTP load (new tab, home button,
++            // typed chrome://newtab, ...) becomes this tab's agent conversation instead.
++            String lemurxChat =
++                    org.chromium.chrome.browser.lemurx.LemurXConsoleShell.rewriteNewTabUrl(
++                            params.getUrl(), isIncognito());
++            if (lemurxChat != null) params.setUrl(lemurxChat);
++
+             // TODO(tedchoc): When showing the android NTP, delay the call to
+             // TabImplJni.get().loadUrl until the android view has entirely rendered.
+             if (!mIsNativePageCommitPending) {

@@ -1,0 +1,70 @@
+diff --git a/testing/variations/fieldtrial_testing_config.json b/testing/variations/fieldtrial_testing_config.json
+index ee8a7a342c..d349dcf6bd 100644
+--- a/testing/variations/fieldtrial_testing_config.json
++++ b/testing/variations/fieldtrial_testing_config.json
+@@ -9378,36 +9378,6 @@
+             ]
+         }
+     ],
+-    "GlicAndroid": [
+-        {
+-            "platforms": [
+-                "android"
+-            ],
+-            "experiments": [
+-                {
+-                    "name": "Enabled_Arm2_BottomBar_1A_with_GLIC_filled",
+-                    "params": {
+-                        "adaptive-toolbar-auto-pin": "false",
+-                        "always_use_filled_glic_icon": "true",
+-                        "disable_on_ntp": "false",
+-                        "dont_show_fusebox": "true",
+-                        "glic-min-required-ram-mb": "3600",
+-                        "show_glic_setting_toggle": "true"
+-                    },
+-                    "enable_features": [
+-                        "AndroidBottomBar",
+-                        "AndroidPageInfoAsAppMenuItem",
+-                        "ContextualCueing",
+-                        "Glic",
+-                        "GlicActor",
+-                        "GlicRollout",
+-                        "IPH_SiteControls",
+-                        "TabBottomSheet"
+-                    ]
+-                }
+-            ]
+-        }
+-    ],
+     "GlicAutoLogin": [
+         {
+             "platforms": [
+@@ -14125,28 +14095,6 @@
+             ]
+         }
+     ],
+-    "OmniboxMultimodalInput": [
+-        {
+-            "platforms": [
+-                "android"
+-            ],
+-            "experiments": [
+-                {
+-                    "name": "Enabled",
+-                    "params": {
+-                        "compact_fusebox": "true",
+-                        "show_bottom_sheet_popup": "true",
+-                        "show_ntp_plus_button": "true",
+-                        "use_ask_hint_for_ntp": "true"
+-                    },
+-                    "enable_features": [
+-                        "ComposeboxUsesChromeComposeClient",
+-                        "OmniboxMultimodalInput"
+-                    ]
+-                }
+-            ]
+-        }
+-    ],
+     "OmniboxOnDeviceBrainModel": [
+         {
+             "platforms": [

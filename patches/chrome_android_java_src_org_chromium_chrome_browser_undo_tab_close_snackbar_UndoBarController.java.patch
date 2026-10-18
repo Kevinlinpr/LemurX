@@ -1,0 +1,26 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/undo_tab_close_snackbar/UndoBarController.java b/chrome/android/java/src/org/chromium/chrome/browser/undo_tab_close_snackbar/UndoBarController.java
+index 1194b1f864..83a02ae00a 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/undo_tab_close_snackbar/UndoBarController.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/undo_tab_close_snackbar/UndoBarController.java
+@@ -13,6 +13,7 @@ import org.chromium.base.metrics.RecordHistogram;
+ import org.chromium.build.annotations.NullMarked;
+ import org.chromium.build.annotations.Nullable;
+ import org.chromium.chrome.R;
++import org.chromium.chrome.browser.lemurx.LemurXConsoleShell;
+ import org.chromium.chrome.browser.tab.Tab;
+ import org.chromium.chrome.browser.tabmodel.TabModel;
+ import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+@@ -123,6 +124,13 @@ public abstract class UndoBarController
+             List<Tab> closedTabs, List<String> savedTabGroupSyncIds, boolean isAllTabs) {
+         if (closedTabs.isEmpty() && savedTabGroupSyncIds.isEmpty()) return;
+ 
++        // LemurX: 标签页管理里关掉就是关掉，不弹底部的"撤销"条；直接提交关闭，
++        // 不然这些标签会一直挂在"待关闭"状态。
++        if (LemurXConsoleShell.isEnabled()) {
++            for (Tab closedTab : closedTabs) commitTabClosure(closedTab.getId());
++            return;
++        }
++
+         boolean singleTab = closedTabs.size() == 1;
+         Pair<String, String> templateAndContent =
+                 getTemplateAndContentText(closedTabs, savedTabGroupSyncIds);

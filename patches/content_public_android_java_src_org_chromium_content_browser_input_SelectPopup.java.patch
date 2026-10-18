@@ -1,0 +1,52 @@
+diff --git a/content/public/android/java/src/org/chromium/content/browser/input/SelectPopup.java b/content/public/android/java/src/org/chromium/content/browser/input/SelectPopup.java
+index 6158ac5c7e..3be34f94cb 100644
+--- a/content/public/android/java/src/org/chromium/content/browser/input/SelectPopup.java
++++ b/content/public/android/java/src/org/chromium/content/browser/input/SelectPopup.java
+@@ -167,6 +167,10 @@ public class SelectPopup
+         for (int i = 0; i < items.length; i++) {
+             popupItems.add(new SelectPopupItem(items[i], enabled[i]));
+         }
++        // LemurX: keep what is on screen so the agent device bridge can describe and answer it.
++        mLemurXItems = popupItems;
++        mLemurXMultiple = multiple;
++        mLemurXSelected = selectedIndices;
+         if (DeviceFormFactor.isTablet()
+                 && !multiple
+                 && !AccessibilityState.isTouchExplorationEnabled()) {
+@@ -190,6 +194,36 @@ public class SelectPopup
+         mPopupView.show();
+     }
+ 
++    // LemurX ------------------------------------------------------------------------------
++    private @Nullable List<SelectPopupItem> mLemurXItems;
++    private boolean mLemurXMultiple;
++    private int @Nullable [] mLemurXSelected;
++
++    /** LemurX: items of the popup currently on screen, or null when none is showing. */
++    public @Nullable List<SelectPopupItem> getShowingItemsForLemurX() {
++        return mPopupView == null ? null : mLemurXItems;
++    }
++
++    /** LemurX: whether the showing popup allows several selections. */
++    public boolean isShowingMultipleForLemurX() {
++        return mLemurXMultiple;
++    }
++
++    /** LemurX: indices selected when the popup opened. */
++    public int @Nullable [] getShowingSelectedForLemurX() {
++        return mLemurXSelected;
++    }
++
++    /**
++     * LemurX: close the showing popup and report {@code indices} (null = cancel) to the page,
++     * exactly as if the user had tapped them.
++     */
++    public void answerForLemurX(int @Nullable [] indices) {
++        if (mPopupView == null) return;
++        mPopupView.hide(/* sendsCancelMessage= */ false);
++        selectMenuItems(indices);
++    }
++
+     /** Called when the &lt;select&gt; popup needs to be hidden. */
+     @CalledByNative
+     public void hideWithoutCancel() {

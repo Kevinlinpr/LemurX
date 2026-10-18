@@ -1,0 +1,55 @@
+diff --git a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/status/StatusMediator.java b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/status/StatusMediator.java
+index 385bde76bf..06acc59f5a 100644
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/status/StatusMediator.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/status/StatusMediator.java
+@@ -28,6 +28,7 @@ import org.chromium.base.supplier.NullableObservableSupplier;
+ import org.chromium.base.supplier.OneshotSupplier;
+ import org.chromium.build.annotations.NullMarked;
+ import org.chromium.build.annotations.Nullable;
++import org.chromium.chrome.browser.lemurx.search.LemurXSearchEnginePicker;
+ import org.chromium.chrome.browser.omnibox.FuseboxSessionState;
+ import org.chromium.chrome.browser.omnibox.LocationBarDataProvider;
+ import org.chromium.chrome.browser.omnibox.R;
+@@ -387,6 +388,7 @@ public class StatusMediator
+         if (!mUrlHasFocus) return;
+ 
+         mUrlHasFocus = false;
++        LemurXSearchEnginePicker.dismiss(); // LemurX
+         setFuseboxSessionState(null);
+         updateVerboseStatusTextVisibility();
+         updateLocationBarIcon(IconTransitionType.CROSSFADE);
+@@ -787,11 +789,33 @@ public class StatusMediator
+ 
+         mModel.set(
+                 StatusProperties.STATUS_ICON_RESOURCE, getStatusIconResourceForSearchEngineIcon());
+-        setStatusClickListener(null);
++        // LemurX: while the omnibox is focused the engine logo is a button that drops down the
++        // search-engine picker (the replacement for the AI Mode "+" entry point). Not during
++        // site search, where the icon stands for the keyword's site instead.
++        boolean siteSearch = mSiteSearchDataSupplier != null && mSiteSearchDataSupplier.get() != null;
++        boolean picker = mUrlHasFocus && !siteSearch;
++        // A description also makes the StatusView clickable / focusable (see
++        // StatusView.setStatusIconDescription); without the picker fall back to the usual one so
++        // the picker's label does not linger on the unfocused logo.
++        mModel.set(
++                StatusProperties.STATUS_ICON_DESCRIPTION_RES,
++                picker
++                        ? org.chromium.chrome.browser.lemurx.search.R.string
++                                .lemurx_search_pick_engine
++                        : getAccessibilityDescriptionRes());
++        setStatusClickListener(picker ? this::onClickSearchEnginePicker : null);
+         updateStatusViewVisibility();
+         return true;
+     }
+ 
++    /** LemurX: opens the search-engine quick picker anchored at the status icon. */
++    private void onClickSearchEnginePicker(View view) {
++        Profile profile = mProfileSupplier.get();
++        TemplateUrlService templateUrlService = mTemplateUrlServiceSupplier.get();
++        if (profile == null || templateUrlService == null) return;
++        LemurXSearchEnginePicker.show(mContext, view, profile, templateUrlService);
++    }
++
+     /**
+      * Returns whether the search engine icon should be displayed in the current context. This is
+      * independent from alpha/visibility.

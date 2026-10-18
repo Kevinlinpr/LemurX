@@ -1,0 +1,79 @@
+diff --git a/content/public/android/java/src/org/chromium/content/browser/input/DateTimeChooserAndroid.java b/content/public/android/java/src/org/chromium/content/browser/input/DateTimeChooserAndroid.java
+index 0468f468ee..a161532a56 100644
+--- a/content/public/android/java/src/org/chromium/content/browser/input/DateTimeChooserAndroid.java
++++ b/content/public/android/java/src/org/chromium/content/browser/input/DateTimeChooserAndroid.java
+@@ -20,10 +20,54 @@ import org.chromium.ui.base.WindowAndroid;
+ /** Plumbing for the different date/time dialog adapters. */
+ @JNINamespace("content")
+ @NullMarked
+-class DateTimeChooserAndroid {
++public class DateTimeChooserAndroid {
+     private long mNativeDateTimeChooserAndroid;
+     private final InputDialogContainer mInputDialogContainer;
+ 
++    // LemurX: the chooser currently on screen, so the agent device bridge can read and fill it.
++    private static @Nullable DateTimeChooserAndroid sLemurXActive;
++    private int mLemurXType;
++    private double mLemurXValue;
++    private double mLemurXMin;
++    private double mLemurXMax;
++    private double mLemurXStep;
++
++    /** LemurX: the chooser on screen, or null. */
++    public static @Nullable DateTimeChooserAndroid getActiveForLemurX() {
++        return sLemurXActive;
++    }
++
++    /** LemurX: {@link org.chromium.ui.base.ime.TextInputType} of the input being edited. */
++    public int getDialogTypeForLemurX() {
++        return mLemurXType;
++    }
++
++    /** LemurX: {current, min, max, step} in the dialog's units. */
++    public double[] getRangeForLemurX() {
++        return new double[] {mLemurXValue, mLemurXMin, mLemurXMax, mLemurXStep};
++    }
++
++    /**
++     * LemurX: hand {@code value} (dialog units) to the page and close the dialog. The native
++     * side answers the page exactly once, so the pointer is cleared before the dialog's own
++     * dismiss listener runs (it would otherwise send a cancel on top of the answer).
++     */
++    public void replaceDateTimeForLemurX(double value) {
++        if (sLemurXActive == this) sLemurXActive = null;
++        long nativePtr = mNativeDateTimeChooserAndroid;
++        mNativeDateTimeChooserAndroid = 0;
++        if (nativePtr != 0) {
++            DateTimeChooserAndroidJni.get().replaceDateTime(nativePtr, value);
++        }
++        mInputDialogContainer.dismissDialog();
++    }
++
++    /** LemurX: close the dialog without changing the input (the dismiss listener cancels). */
++    public void cancelForLemurX() {
++        if (sLemurXActive == this) sLemurXActive = null;
++        mInputDialogContainer.dismissDialog();
++    }
++
+     private DateTimeChooserAndroid(Context context, long nativeDateTimeChooserAndroid) {
+         mNativeDateTimeChooserAndroid = nativeDateTimeChooserAndroid;
+         mInputDialogContainer =
+@@ -57,11 +101,18 @@ class DateTimeChooserAndroid {
+             double max,
+             double step,
+             DateTimeSuggestion[] suggestions) {
++        mLemurXType = dialogType;
++        mLemurXValue = dialogValue;
++        mLemurXMin = min;
++        mLemurXMax = max;
++        mLemurXStep = step;
++        sLemurXActive = this;
+         mInputDialogContainer.showDialog(dialogType, dialogValue, min, max, step, suggestions);
+     }
+ 
+     @CalledByNative
+     private void dismissAndDestroy() {
++        if (sLemurXActive == this) sLemurXActive = null;
+         mNativeDateTimeChooserAndroid = 0;
+         mInputDialogContainer.dismissDialog();
+     }

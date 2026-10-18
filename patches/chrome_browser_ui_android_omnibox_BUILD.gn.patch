@@ -1,0 +1,15 @@
+diff --git a/chrome/browser/ui/android/omnibox/BUILD.gn b/chrome/browser/ui/android/omnibox/BUILD.gn
+index 0e09e88313..b1e0398d91 100644
+--- a/chrome/browser/ui/android/omnibox/BUILD.gn
++++ b/chrome/browser/ui/android/omnibox/BUILD.gn
+@@ -235,6 +235,10 @@ android_library("java") {
+     "//chrome/browser/history_clusters:java",
+     "//chrome/browser/language/android:java",
+     "//chrome/browser/lens:java",
++
++    # LemurX: search-engine quick picker opened from the focused omnibox's
++    # engine logo (StatusMediator.maybeUpdateStatusIconForSearchEngineIcon).
++    "//chrome/lemurx/search:java",
+     "//chrome/browser/locale:java",
+     "//chrome/browser/preferences:java",
+     "//chrome/browser/preferences:pref_service_java",

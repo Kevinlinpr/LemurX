@@ -1,0 +1,39 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/settings/SettingsActivity.java b/chrome/android/java/src/org/chromium/chrome/browser/settings/SettingsActivity.java
+index a82ab1ed00..7c12f2be00 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/settings/SettingsActivity.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/settings/SettingsActivity.java
+@@ -64,6 +64,7 @@ import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
+ import org.chromium.chrome.browser.profiles.Profile;
+ import org.chromium.chrome.browser.profiles.ProfileManager;
+ import org.chromium.chrome.browser.profiles.ProfileManagerUtils;
++import org.chromium.chrome.browser.lemurx.muse.LemurXSettingsIcons;
+ import org.chromium.chrome.browser.settings.search.SettingsSearchCoordinator;
+ import org.chromium.chrome.browser.ui.desktop_windowing.AppHeaderCoordinator;
+ import org.chromium.chrome.browser.ui.device_lock.MissingDeviceLockLauncher;
+@@ -260,6 +261,18 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
+                 /* recursive= */ true);
+         fragmentManager.registerFragmentLifecycleCallbacks(
+                 new SettingsMetricsReporter(MAIN_FRAGMENT_TAG), /* recursive= */ true);
++        // LemurX: every settings row (including Chromium's nested pages) gets a leading icon.
++        fragmentManager.registerFragmentLifecycleCallbacks(
++                new FragmentManager.FragmentLifecycleCallbacks() {
++                    @Override
++                    public void onFragmentResumed(FragmentManager fm, Fragment f) {
++                        if (f instanceof PreferenceFragmentCompat) {
++                            LemurXSettingsIcons.apply(
++                                    ((PreferenceFragmentCompat) f).getPreferenceScreen());
++                        }
++                    }
++                },
++                /* recursive= */ true);
+ 
+         mContainmentHelper.registerCallbacks(fragmentManager);
+ 
+@@ -513,6 +526,7 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
+ 
+     @Override
+     public void onPreferencesUpdated(PreferenceFragmentCompat fragment) {
++        LemurXSettingsIcons.apply(fragment.getPreferenceScreen());
+         mContainmentHelper.postUpdateContainmentOnLayout(fragment);
+     }
+ 

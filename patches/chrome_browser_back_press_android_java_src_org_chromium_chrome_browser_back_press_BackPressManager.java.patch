@@ -1,0 +1,115 @@
+diff --git a/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java b/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java
+index 79cabb0027..811075f886 100644
+--- a/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java
++++ b/chrome/browser/back_press/android/java/src/org/chromium/chrome/browser/back_press/BackPressManager.java
+@@ -91,6 +91,50 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
+         sMetricsMap = map;
+     }
+ 
++    // LemurX console shell: the per-tab agent overlay drawn over a live web page. Consulted
++    // before any built-in handler so that a back press closes the overlay instead of
++    // navigating the page underneath. "isActive" is the side-effect free "would the console
++    // consume right now?" check, used when a predictive back gesture *starts* so that no
++    // built-in handler begins a transition (TabOnBackGestureHandler slides the page) for a
++    // gesture the console is going to swallow at commit time; otherwise the page is left
++    // shifted with no cancel/commit and the next gesture fails to navigate.
++    private static java.util.function.@Nullable BooleanSupplier sLemurXConsoleInterceptor;
++    private static java.util.function.@Nullable BooleanSupplier sLemurXConsoleActive;
++
++    public static void setLemurXConsoleInterceptor(
++            java.util.function.@Nullable BooleanSupplier interceptor,
++            java.util.function.@Nullable BooleanSupplier isActive) {
++        sLemurXConsoleInterceptor = interceptor;
++        sLemurXConsoleActive = isActive;
++    }
++
++    // LemurX: live managers, so the console can ask them to re-evaluate whether the
++    // OnBackPressedCallback should be enabled when its overlay appears / disappears
++    // (no built-in handler changes state at that moment, and with system back the callback
++    // is otherwise disabled -> the system would minimize the app).
++    private static final java.util.List<BackPressManager> sLemurXInstances =
++            new java.util.ArrayList<>();
++
++    public static void lemurXConsoleStateChanged() {
++        for (BackPressManager manager : new java.util.ArrayList<>(sLemurXInstances)) {
++            manager.backPressStateChanged();
++        }
++    }
++
++    private static boolean isLemurXConsoleActive() {
++        return sLemurXConsoleInterceptor != null
++                && sLemurXConsoleActive != null
++                && sLemurXConsoleActive.getAsBoolean();
++    }
++
++    private static boolean lemurXConsoleConsumes() {
++        return sLemurXConsoleInterceptor != null && sLemurXConsoleInterceptor.getAsBoolean();
++    }
++
++    private static boolean isLemurXInterceptActive() {
++        return isLemurXConsoleActive();
++    }
++
+     public @Nullable Boolean processEscapeKeyEvent() {
+         boolean failed = false;
+         for (BackPressHandler handler : mHandlers) {
+@@ -138,6 +182,19 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
+         @Override
+         public void handleOnBackPressed() {
+             mLastCalledHandlerType = -1;
++            // LemurX: the console overlay may claim the back press before any built-in
++            // handler.
++            if (lemurXConsoleConsumes()) {
++                // A handler may already have started a predictive-back transition for
++                // this gesture (interception toggled on mid-gesture, or pre-API 34 paths).
++                // It must be told the gesture ended, or the page stays half swiped.
++                if (mActiveHandler != null) {
++                    mActiveHandler.handleOnBackCancelled();
++                }
++                mActiveHandler = null;
++                mLastBackEvent = null;
++                return;
++            }
+             if (mActiveHandler != null) {
+                 Boolean enabled = mActiveHandler.getHandleBackPressChangedSupplier().get();
+                 if (enabled != null && enabled) {
+@@ -187,6 +244,14 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
+         // Following methods are only triggered on API 34+.
+         @Override
+         public void handleOnBackStarted(BackEventCompat backEvent) {
++            // LemurX: the console will swallow this back; don't let any built-in handler start
++            // a transition it would never get to commit or cancel. Progress/cancel are no-ops
++            // with mActiveHandler == null, and the press goes to the interceptor.
++            if (isLemurXInterceptActive()) {
++                mActiveHandler = null;
++                mLastBackEvent = backEvent;
++                return;
++            }
+             mActiveHandler = getEnabledBackPressHandler();
+             assert mActiveHandler != null;
+             mActiveHandler.handleOnBackStarted(backEvent);
+@@ -270,6 +335,7 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
+             createOnSystemNavigationCallback();
+         }
+ 
++        sLemurXInstances.add(this); // LemurX
+         backPressStateChanged();
+     }
+ 
+@@ -487,6 +553,7 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
+ 
+     @Override
+     public void destroy() {
++        sLemurXInstances.remove(this); // LemurX
+         for (int i = 0; i < mHandlers.length; i++) {
+             if (has(i)) {
+                 removeHandler(i);
+@@ -497,6 +564,8 @@ public class BackPressManager implements Destroyable, BackPressHandlerRegistry {
+ 
+     @VisibleForTesting
+     boolean shouldInterceptBackPress() {
++        // LemurX: the console overlay wants the back press even if no built-in handler does.
++        if (isLemurXConsoleActive()) return true;
+         for (BackPressHandler handler : mHandlers) {
+             if (handler == null) continue;
+             if (!Boolean.TRUE.equals(handler.getHandleBackPressChangedSupplier().get())) continue;

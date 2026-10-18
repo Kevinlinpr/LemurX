@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The LemurX Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+
+Overlays the toolbar's home_surface_search_box_background: Lemur's
+"Search_default" input: 48dp pill, 2dp outline in the text colour, no fill
+(lemur_bg_ntp_search_box). ComposeplateUtils.applyWhiteBackground() may
+mutate the fill to white on image themes; the outline is kept.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@android:color/transparent" />
+    <stroke
+        android:width="2dp"
+        android:color="@color/lemurx_ntp_outline" />
+    <corners android:radius="@dimen/lemurx_ntp_search_box_radius" />
+</shape>

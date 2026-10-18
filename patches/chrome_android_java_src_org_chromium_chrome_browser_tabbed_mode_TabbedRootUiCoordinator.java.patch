@@ -1,0 +1,35 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedRootUiCoordinator.java b/chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedRootUiCoordinator.java
+index 4f9ae229d8..0e77e1ca7b 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedRootUiCoordinator.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedRootUiCoordinator.java
+@@ -138,6 +138,7 @@ import org.chromium.chrome.browser.language.AppLanguagePromoDialog;
+ import org.chromium.chrome.browser.layouts.LayoutManager;
+ import org.chromium.chrome.browser.layouts.LayoutStateProvider;
+ import org.chromium.chrome.browser.layouts.LayoutType;
++import org.chromium.chrome.browser.lemurx.LemurXChromeHost;
+ import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
+ import org.chromium.chrome.browser.lifecycle.PauseResumeWithNativeObserver;
+ import org.chromium.chrome.browser.lifetime.ApplicationLifetime;
+@@ -2820,7 +2821,13 @@ public class TabbedRootUiCoordinator extends RootUiCoordinator {
+         mNotificationPermissionController =
+                 new NotificationPermissionController(mWindowAndroid, rationaleUIDelegateSupplier);
+         NotificationPermissionController.attach(mWindowAndroid, mNotificationPermissionController);
+-        if (mNotificationPermissionController.requestPermissionIfNeeded(/* contextual= */ false)) {
++        // LemurX: no startup notification-permission rationale and no startup promos. The
++        // controller stays attached so contextual requests (downloads, incognito, ...) still work.
++        // See LemurXChromeHost.suppressStartupPrompts.
++        boolean lemurxSuppressPrompts = LemurXChromeHost.suppressStartupPrompts();
++        if (!lemurxSuppressPrompts
++                && mNotificationPermissionController.requestPermissionIfNeeded(
++                        /* contextual= */ false)) {
+             return true;
+         }
+ 
+@@ -2829,6 +2836,7 @@ public class TabbedRootUiCoordinator extends RootUiCoordinator {
+             return true;
+         }
+ 
++        if (lemurxSuppressPrompts) return false;
+         return triggerPromo(profile, intentWithEffect);
+     }
+ 

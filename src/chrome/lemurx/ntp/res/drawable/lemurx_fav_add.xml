@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The "+" tile (lemur_ic_to_add_favorite): thin ring + plus. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="42dp"
+    android:height="42dp"
+    android:viewportWidth="42"
+    android:viewportHeight="42">
+    <path
+        android:pathData="M21,21m-20.5,0a20.5,20.5 0,1 1,41 0a20.5,20.5 0,1 1,-41 0"
+        android:strokeWidth="1"
+        android:fillColor="#00000000"
+        android:strokeColor="@color/lemurx_ntp_hairline" />
+    <path
+        android:pathData="M21,14C21.552,14 22,14.448 22,15L22,20L27,20C27.552,20 28,20.448 28,21C28,21.552 27.552,22 27,22L22,22L22,27C22,27.552 21.552,28 21,28C20.448,28 20,27.552 20,27L20,22L15,22C14.448,22 14,21.552 14,21C14,20.448 14.448,20 15,20L20,20L20,15C20,14.448 20.448,14 21,14Z"
+        android:fillColor="@color/lemurx_ntp_icon" />
+</vector>

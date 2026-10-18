@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The LemurX Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+<resources>
+    <string name="lemurx_fav_more">更多</string>
+    <string name="lemurx_fav_bookmarks">书签</string>
+    <string name="lemurx_fav_history">历史</string>
+    <string name="lemurx_fav_edit_title">名称编辑</string>
+    <string name="lemurx_fav_edit_hint">请输入新名称</string>
+    <string name="lemurx_fav_edit_confirm">完成</string>
+    <string name="lemurx_fav_add">添加常用网址</string>
+    <string name="lemurx_fav_add_url_hint">输入或粘贴网址</string>
+    <string name="lemurx_fav_add_url_title_hint">名称（可选）</string>
+    <string name="lemurx_fav_tab_bookmarks">书签</string>
+    <string name="lemurx_fav_tab_history">历史</string>
+    <string name="lemurx_fav_tab_url">网址</string>
+    <string name="lemurx_fav_added">已添加</string>
+    <string name="lemurx_fav_empty_bookmarks">还没有书签</string>
+    <string name="lemurx_fav_empty_history">还没有历史记录</string>
+    <string name="lemurx_fav_full">首页没有空间了</string>
+    <string name="lemurx_fav_folder_full">文件夹已满</string>
+    <string name="lemurx_fav_sheet_opened_half">添加常用网址面板已半开</string>
+    <string name="lemurx_fav_sheet_opened_full">添加常用网址面板已打开</string>
+    <string name="lemurx_fav_sheet_closed">添加常用网址面板已关闭</string>
+    <string name="lemurx_fav_delete">删除</string>
+    <string name="lemurx_fav_drag_hint">长按常用网址进入编辑，拖动排序，拖到另一个上合并为文件夹</string>
+</resources>

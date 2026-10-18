@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Colours of the OpenMuse bottom bar, copied from apps/mobile App.tsx. -->
+<resources>
+    <color name="lemurx_console_icon">#FF132631</color>
+    <color name="lemurx_console_pill">#FFFFFFFF</color>
+    <color name="lemurx_console_pill_stroke">#FFF8F8F8</color>
+    <color name="lemurx_console_cell_pressed">#FFF0F1F2</color>
+    <color name="lemurx_console_cell_active">#FFF0F1F2</color>
+    <color name="lemurx_console_shadow">#FF132631</color>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Geometry of the OpenMuse bottom bar (App.tsx nav): outer padding 22/10/22/7,
+     pill maxWidth 370 + padding 5, slot height 47 radius 28, icon 23. -->
+<resources>
+    <dimen name="lemurx_console_nav_padding_horizontal">22dp</dimen>
+    <dimen name="lemurx_console_nav_padding_top">10dp</dimen>
+    <dimen name="lemurx_console_nav_padding_bottom">7dp</dimen>
+    <dimen name="lemurx_console_pill_max_width">370dp</dimen>
+    <dimen name="lemurx_console_pill_padding">5dp</dimen>
+    <dimen name="lemurx_console_pill_elevation">3dp</dimen>
+    <dimen name="lemurx_console_cell_height">47dp</dimen>
+    <dimen name="lemurx_console_icon_size">23dp</dimen>
+    <dimen name="lemurx_console_icon_size_small">22dp</dimen>
+</resources>

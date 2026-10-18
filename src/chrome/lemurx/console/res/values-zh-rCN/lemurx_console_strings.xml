@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lemurx_console_back">后退</string>
+    <string name="lemurx_console_forward">前进</string>
+    <string name="lemurx_console_web">网页</string>
+    <string name="lemurx_console_tasks">任务</string>
+    <string name="lemurx_console_chat">对话</string>
+    <string name="lemurx_console_search">搜索</string>
+    <string name="lemurx_console_tabs">标签页</string>
+</resources>

@@ -1,0 +1,25 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/firstrun/FirstRunFlowSequencer.java b/chrome/android/java/src/org/chromium/chrome/browser/firstrun/FirstRunFlowSequencer.java
+index b7e2f6e46c..6450ffe419 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/firstrun/FirstRunFlowSequencer.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/firstrun/FirstRunFlowSequencer.java
+@@ -32,6 +32,7 @@ import org.chromium.chrome.browser.LaunchIntentDispatcher;
+ import org.chromium.chrome.browser.customtabs.AuthTabIntentDataProvider;
+ import org.chromium.chrome.browser.flags.ChromeFeatureList;
+ import org.chromium.chrome.browser.flags.ChromeSwitches;
++import org.chromium.chrome.browser.lemurx.LemurXChromeHost;
+ import org.chromium.chrome.browser.locale.LocaleManager;
+ import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
+ import org.chromium.chrome.browser.profiles.Profile;
+@@ -251,6 +252,12 @@ public abstract class FirstRunFlowSequencer {
+             // Promo pages are removed, so there is nothing else to show in FRE.
+             return false;
+         }
++        // LemurX: no first-run wizard (Chrome account sign-in / sync, search engine, default
++        // browser pages). Marks the flow complete so the rest of Chrome treats this as a
++        // returning user. See LemurXChromeHost.skipFirstRun.
++        if (LemurXChromeHost.skipFirstRun()) {
++            return false;
++        }
+         if (FirstRunStatus.isFirstRunSkippedByPolicy() && (isCct || preferLightweightFre)) {
+             // Domain policies may have caused CCTs to skip the FRE. While this needs to be figured
+             // out at runtime for each app restart, it should apply to all CCTs for the duration of

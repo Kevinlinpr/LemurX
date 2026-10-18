@@ -1,0 +1,35 @@
+# Copyright 2026 The LemurX Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/android/rules.gni")
+
+assert(is_android)
+
+# OpenMuse console shell (LemurXConsoleShell.java): the OpenMuse web app is the
+# home page and the console over every tab. Chrome's own address bar, progress
+# bar and bottom controls stay hidden; on every page that is not the home page
+# a native copy of the web app's bottom bar floats over the content. These are
+# its icons (lucide, same set and stroke as apps/mobile App.tsx), pill and slot
+# backgrounds, colours, dimens and content descriptions.
+#
+# Wired in from chrome/android/BUILD.gn (chrome_app_java_resources deps).
+android_resources("console_resources") {
+  deps = [ "//chrome/android:chrome_public_apk_base_module_resources" ]
+  sources = [
+    "res/drawable/lemurx_console_cell_active_bg.xml",
+    "res/drawable/lemurx_console_cell_bg.xml",
+    "res/drawable/lemurx_console_ic_back.xml",
+    "res/drawable/lemurx_console_ic_chat.xml",
+    "res/drawable/lemurx_console_ic_forward.xml",
+    "res/drawable/lemurx_console_ic_search.xml",
+    "res/drawable/lemurx_console_ic_tabs.xml",
+    "res/drawable/lemurx_console_ic_tasks.xml",
+    "res/drawable/lemurx_console_ic_web.xml",
+    "res/drawable/lemurx_console_pill_bg.xml",
+    "res/values-zh-rCN/lemurx_console_strings.xml",
+    "res/values/lemurx_console_colors.xml",
+    "res/values/lemurx_console_dimens.xml",
+    "res/values/lemurx_console_strings.xml",
+  ]
+}

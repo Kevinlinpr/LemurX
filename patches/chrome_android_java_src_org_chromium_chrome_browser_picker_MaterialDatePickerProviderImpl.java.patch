@@ -1,0 +1,30 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/picker/MaterialDatePickerProviderImpl.java b/chrome/android/java/src/org/chromium/chrome/browser/picker/MaterialDatePickerProviderImpl.java
+index 42e418a6c7..fc763efaa1 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/picker/MaterialDatePickerProviderImpl.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/picker/MaterialDatePickerProviderImpl.java
+@@ -7,6 +7,8 @@ package org.chromium.chrome.browser.picker;
+ import android.content.Context;
+ 
+ import androidx.appcompat.app.AppCompatActivity;
++import androidx.fragment.app.DialogFragment;
++import androidx.fragment.app.Fragment;
+ 
+ import com.google.android.material.datepicker.CalendarConstraints;
+ import com.google.android.material.datepicker.DateValidatorPointForward;
+@@ -68,4 +70,16 @@ public class MaterialDatePickerProviderImpl implements MaterialDatePickerProvide
+                 ((AppCompatActivity) context).getSupportFragmentManager(), "MaterialDatePicker");
+         return true;
+     }
++
++    // LemurX: the agent device bridge answers the <input type=date> directly and then needs
++    // the picker gone, exactly as if the user had dismissed it.
++    @Override
++    public void dismissDatePicker(Context context) {
++        if (!(context instanceof AppCompatActivity)) return;
++        Fragment f =
++                ((AppCompatActivity) context)
++                        .getSupportFragmentManager()
++                        .findFragmentByTag("MaterialDatePicker");
++        if (f instanceof DialogFragment) ((DialogFragment) f).dismissAllowingStateLoss();
++    }
+ }

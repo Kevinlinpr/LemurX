@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lemur Browser — The browser that runs your code</title>
+  <meta name="description" content="Lemur is Chromium for Android with a Lua 5.4 runtime inside the browser process. Script tabs, network, the DevTools Protocol, the native UI, every renderer process — no extension API in the way.">
+  <meta property="og:title" content="Lemur Browser — The browser that runs your code">
+  <meta property="og:description" content="Chromium with a Lua runtime inside the browser process. Every layer is scriptable.">
+  <meta property="og:image" content="assets/logo-512.png">
+  <meta name="theme-color" content="#070b14">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/logo-32.png">
+  <link rel="apple-touch-icon" href="assets/logo-180.png">
+  <link rel="alternate" hreflang="en" href="?lang=en">
+  <link rel="alternate" hreflang="id" href="?lang=id">
+  <link rel="alternate" hreflang="zh-CN" href="?lang=zh-CN">
+  <link rel="alternate" hreflang="pt-BR" href="?lang=pt-BR">
+  <link rel="alternate" hreflang="es-MX" href="?lang=es-MX">
+  <link rel="alternate" hreflang="fil" href="?lang=fil">
+  <link rel="alternate" hreflang="hi" href="?lang=hi">
+  <link rel="alternate" hreflang="vi" href="?lang=vi">
+  <link rel="alternate" hreflang="bn" href="?lang=bn">
+  <link rel="alternate" hreflang="ms" href="?lang=ms">
+  <link rel="alternate" hreflang="x-default" href="./">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Lucide icons (ISC) — https://lucide.dev -->
+  <svg xmlns="http://www.w3.org/2000/svg" hidden aria-hidden="true" style="display:none" width="0" height="0">
+    <symbol id="i-file-code" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /><path d="M14 2v5a1 1 0 0 0 1 1h5" /><path d="M10 12.5 8 15l2 2.5" /><path d="m14 12.5 2 2.5-2 2.5" /></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="M12 19h8" /><path d="m4 17 6-6-6-6" /></symbol>
+    <symbol id="i-layout-template" viewBox="0 0 24 24"><rect width="18" height="7" x="3" y="3" rx="1" /><rect width="9" height="7" x="3" y="14" rx="1" /><rect width="5" height="7" x="16" y="14" rx="1" /></symbol>
+    <symbol id="i-pen-tool" viewBox="0 0 24 24"><path d="M15.707 21.293a1 1 0 0 1-1.414 0l-1.586-1.586a1 1 0 0 1 0-1.414l5.586-5.586a1 1 0 0 1 1.414 0l1.586 1.586a1 1 0 0 1 0 1.414z" /><path d="m18 13-1.375-6.874a1 1 0 0 0-.746-.776L3.235 2.028a1 1 0 0 0-1.207 1.207L5.35 15.879a1 1 0 0 0 .776.746L13 18" /><path d="m2.3 2.3 7.286 7.286" /><circle cx="11" cy="11" r="2" /></symbol>
+    <symbol id="i-arrow-right-left" viewBox="0 0 24 24"><path d="m16 3 4 4-4 4" /><path d="M20 7H4" /><path d="m8 21-4-4 4-4" /><path d="M4 17h16" /></symbol>
+    <symbol id="i-coffee" viewBox="0 0 24 24"><path d="M10 2v2" /><path d="M14 2v2" /><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1" /><path d="M6 2v2" /></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><path d="M12 20v2" /><path d="M12 2v2" /><path d="M17 20v2" /><path d="M17 2v2" /><path d="M2 12h2" /><path d="M2 17h2" /><path d="M2 7h2" /><path d="M20 12h2" /><path d="M20 17h2" /><path d="M20 7h2" /><path d="M7 20v2" /><path d="M7 2v2" /><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="8" y="8" width="8" height="8" rx="1" /></symbol>
+    <symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="m9 12 2 2 4-4" /></symbol>
+    <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M12 5v16" /><path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z" /></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M15.914 4a1.5 1.5 0 00-2.474-1.561l-9 9A1.5 1.5 0 005.5 14h4.002a.5.5 0 01.471.666L8.086 20a1.5 1.5 0 002.475 1.56l9-9A1.5 1.5 0 0018.5 10h-3.997a.5.5 0 01-.472-.667z" /></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" /><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" /><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" /><path d="m2 2 20 20" /></symbol>
+    <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z" /></symbol>
+    <symbol id="i-scroll-text" viewBox="0 0 24 24"><path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" /></symbol>
+    <symbol id="i-file-code-2" viewBox="0 0 24 24"><path d="M4 12.15V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2h-3.35" /><path d="M14 2v5a1 1 0 0 0 1 1h5" /><path d="m5 16-3 3 3 3" /><path d="m9 22 3-3-3-3" /></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z" /></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" /></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+    <symbol id="i-bell-ring" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0" /><path d="M22 8c0-2.3-.8-4.3-2-6" /><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" /><path d="M4 2C2.8 3.7 2 5.7 2 8" /></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z" /></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3" /><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+  </svg>
+  <a class="skip" href="#main" data-i18n="page.a1">Skip to content</a>
+
+  <header class="nav" id="nav">
+    <div class="wrap nav__inner">
+      <a class="brand" href="#top" aria-label="LemurX home">
+        <img class="brand__logo" src="assets/logo-180.png" width="36" height="36" alt="">
+        <span class="brand__name">LemurX</span>
+        <span class="brand__tag">browser</span>
+      </a>
+      <nav class="nav__links" id="navLinks" aria-label="Primary">
+        <a href="#why" data-i18n="navLinks.a1">Why</a>
+        <a href="#features" data-i18n="navLinks.a2">Features</a>
+        <a href="#code" data-i18n="navLinks.a3">Code</a>
+        <a href="#architecture" data-i18n="navLinks.a4">Architecture</a>
+        <a href="#extensions" data-i18n="navLinks.a5">Extensions</a>
+        <a href="#community" data-i18n="navLinks.a6">Community</a>
+        <a href="#story" data-i18n="navLinks.a7">Story</a>
+        <a href="#docs" data-i18n="navLinks.a8">Docs</a>
+        <a class="btn btn--small btn--primary" href="#download" data-i18n="navLinks.a9">Download</a>
+      </nav>
+      <label class="lang" title="Language">
+        <span class="lang__icon" aria-hidden="true">🌐</span>
+        <select id="langSelect" aria-label="Language" data-i18n-aria="ui.language"></select>
+      </label>
+      <button class="nav__toggle" id="navToggle" aria-expanded="false" aria-controls="navLinks" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ============================================================ HERO -->
+    <section class="hero" id="top">
+      <div class="hero__glow hero__glow--a"></div>
+      <div class="hero__glow hero__glow--b"></div>
+      <div class="wrap hero__inner">
+        <div class="hero__copy reveal">
+          <p class="eyebrow" data-i18n="hero.p1"><span class="dot"></span> Next generation · launching end of 2026 · Chromium · Android · Lua 5.4</p>
+          <h1 data-i18n="hero.h12">The browser that<br><span class="grad">runs your code.</span></h1>
+          <div class="hero__proof">
+            <ul class="hero__facts">
+              <li class="hero__fact--lead" data-i18n="hero.dau"><strong>200K</strong> open it every day</li>
+              <li class="hero__fact--lead" data-i18n="hero.ret"><strong>67%</strong> come back</li>
+            </ul>
+            <p class="hero__reach" data-i18n="hero.reach">The household desktop-class browser in Indonesia, Vietnam, Brazil, India and the Philippines.</p>
+          </div>
+          <p class="lede" data-i18n="hero.p3">
+            Lemur is Chromium with a Lua runtime living <em>inside</em> the browser process.
+            Not an extension API — the whole thing: tabs, network, the DevTools Protocol,
+            the native toolbar, every renderer process. Drop a <code>.lua</code> file in,
+            restart, and the browser is yours.
+          </p>
+          <div class="hero__cta">
+            <a class="btn btn--primary btn--large" href="#download" data-i18n="hero.a4">Download for Android</a>
+            <a class="btn btn--ghost btn--large" href="#code" data-i18n="hero.a5">See the code</a>
+          </div>
+          <ul class="hero__facts">
+            <li data-i18n="hero.li6"><strong>6</strong> years shipping</li>
+            <li data-i18n="hero.li7"><strong>5M</strong> geeks worldwide</li>
+            <li data-i18n="hero.li8"><strong>40+</strong> <code>lemurx.*</code> modules</li>
+            <li data-i18n="hero.li9"><strong>∞</strong> escape hatches</li>
+          </ul>
+          <ul class="hero__compat" aria-label="Compatible with">
+            <li data-i18n="hero.li10"><img src="assets/icons/googlechrome.svg" alt=""> Chrome extensions</li>
+            <li data-i18n="hero.li11"><img src="assets/icons/microsoftedge.svg" alt=""> Edge add-ons</li>
+            <li data-i18n="hero.li12"><img src="assets/icons/tampermonkey.svg" alt=""> Userscripts</li>
+            <li><span class="hero__compat-lua">λ</span> Lua</li>
+          </ul>
+        </div>
+
+        <div class="hero__visual reveal reveal--delay">
+          <div class="logo-stage">
+            <img class="logo-stage__img" src="assets/logo.png" width="512" height="512" alt="Lemur browser logo">
+          </div>
+          <div class="term" aria-label="Example script">
+            <div class="term__bar">
+              <span></span><span></span><span></span>
+              <b>files/lua/00_hello.lua</b>
+            </div>
+            <pre class="term__body"><code id="typewriter" class="lang-lua"></code><span class="caret"></span></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ WHY -->
+    <section class="section" id="why">
+      <div class="wrap">
+        <div class="section__head reveal">
+          <p class="eyebrow" data-i18n="why.p1">Why</p>
+          <h2 data-i18n="why.h22">Extensions ask permission.<br>Scripts just <span class="grad">do it.</span></h2>
+          <p class="lede" data-i18n="why.p3">
+            Browser extensions live in a sandbox on the far side of an API designed to keep them out.
+            A Lemur script is code running in the browser process, next to Chromium's own.
+            Same privileges as the browser, because it <em>is</em> the browser.
+          </p>
+        </div>
+
+        <div class="compare reveal" data-more="4">
+          <div class="compare__row compare__row--head">
+            <div data-i18n="why.div4">Can you…</div>
+            <div data-i18n="why.div5">Chrome extension</div>
+            <div class="compare__lemur" data-i18n="why.div6">Lemur script</div>
+          </div>
+          <div class="compare__row">
+            <div data-i18n="why.div7">Rewrite response bodies on the fly</div>
+            <div class="no" data-i18n="why.div8">Headers &amp; redirects only</div>
+            <div class="yes"><code>net.addRule{ replaceBody = … }</code></div>
+          </div>
+          <div class="compare__row">
+            <div data-i18n="why.div10">Put a button on the <em>real</em> toolbar, or replace the bottom bar</div>
+            <div class="no" data-i18n="why.div11">Popups and side panels</div>
+            <div class="yes"><code>ui.render("toolbar.end", …)</code></div>
+          </div>
+          <div class="compare__row">
+            <div data-i18n="why.div13">Dump, restyle or tear out any native View</div>
+            <div class="no">—</div>
+            <div class="yes"><code>ui.dump() · ui.style() · ui.replace()</code></div>
+          </div>
+          <div class="compare__row">
+            <div data-i18n="why.div15">Full Chrome DevTools Protocol on a phone</div>
+            <div class="no" data-i18n="why.div16">Desktop only, one domain at a time</div>
+            <div class="yes"><code>cdp.send(tab, "Any.method", …)</code></div>
+          </div>
+          <div class="compare__row">
+            <div data-i18n="why.div18">Fetch anything, no CORS, no host permissions</div>
+            <div class="no" data-i18n="why.div19">Declare every host up front</div>
+            <div class="yes"><code>http.fetch(url)</code></div>
+          </div>
+          <div class="compare__row">
+            <div data-i18n="why.div21">Read and write Chromium's own prefs, site permissions and feature flags</div>
+            <div class="no">—</div>
+            <div class="yes"><code>prefs.set · perm.set · features.enabled</code></div>
+          </div>
+          <div class="compare__row">
+            <div data-i18n="why.div23">Run Lua inside every renderer, on real DOM handles</div>
+            <div class="no">—</div>
+            <div class="yes"><code>page · dom_document · send-request</code></div>
+          </div>
+          <div class="compare__row">
+            <div data-i18n="why.div25">Drive other apps, not just the page</div>
+            <div class="no">—</div>
+            <div class="yes"><code>system.tree · system.tap · agent.run</code></div>
+          </div>
+          <div class="compare__row">
+            <div data-i18n="why.div28">Share it with strangers safely</div>
+            <div class="yes" data-i18n="why.div29">Store review</div>
+            <div class="yes" data-i18n="why.div30">Sandboxed UGC domain, separate Lua state</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ FEATURES -->
+    <section class="section section--alt" id="features">
+      <div class="wrap">
+        <div class="section__head reveal">
+          <p class="eyebrow" data-i18n="features.p1">Features</p>
+          <h2 data-i18n="features.h22">Every layer, <span class="grad">scriptable.</span></h2>
+          <p class="lede" data-i18n="features.p3">From the pixels on the toolbar down to the C++ services behind <code>chrome://</code> pages.</p>
+        </div>
+
+        <div class="grid grid--3" data-more="4">
+          <article class="card reveal">
+            <div class="card__icon"><svg class="ico" aria-hidden="true"><use href="#i-file-code"/></svg></div>
+            <h3 data-i18n="features.h34">Lua 5.4 in the browser process</h3>
+            <p data-i18n="features.p5">Scripts load from <code>files/lua/</code> at startup. Local scripts get the full standard library — <code>io</code>, <code>os</code>, <code>debug</code>, <code>require</code>. Your device, your rules.</p>
+            <code class="card__api">lemurx.tabs · net · http · fs · db · timer</code>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon"><svg class="ico" aria-hidden="true"><use href="#i-terminal"/></svg></div>
+            <h3 data-i18n="features.h36">Whole DevTools Protocol</h3>
+            <p data-i18n="features.p7">Every CDP domain against every tab, iframe, worker and service worker — plus a browser-level target. <code>v8.eval</code>, <code>dom.query</code>, <code>ax.tree</code>, network emulation, geolocation, UA overrides.</p>
+            <code class="card__api">lemurx.cdp · v8 · dom · ax · emulation</code>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon"><svg class="ico" aria-hidden="true"><use href="#i-layout-template"/></svg></div>
+            <h3 data-i18n="features.h38">Skins &amp; UI surgery</h3>
+            <p data-i18n="features.p9">Persistent themes, a declarative widget tree mounted on nine slots in the real shell, and a scalpel for the native View hierarchy: <code>style</code>, <code>replace</code>, <code>insert</code>, <code>detach</code>, <code>move</code>, <code>on</code>.</p>
+            <code class="card__api">lemurx.theme · ui.render · ui.style</code>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon"><svg class="ico" aria-hidden="true"><use href="#i-puzzle"/></svg></div>
+            <h3 data-i18n="features.h310">luakit, on a phone</h3>
+            <p data-i18n="features.p11">The complete C-level Lua API of luakit re-implemented on Chromium: <code>widget{}</code> trees mapped to Android views, <code>webview</code> bound to a tab, <code>luakit.register_scheme</code>, <code>sqlite3</code>, <code>regex</code>, <code>soup</code>, <code>stylesheet</code>, <code>timer</code>, <code>download</code>, <code>ipc_channel</code>. An <code>rc.lua</code> written for luakit runs here.</p>
+            <code class="card__api">widget · webview · luakit.register_scheme</code>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right-left"/></svg></div>
+            <h3 data-i18n="features.h312">Network rules</h3>
+            <p data-i18n="features.p13">Block, redirect, add or strip headers, rewrite response bodies with string replacements. Pattern-matched, per resource type, applied in the browser process before anything renders.</p>
+            <code class="card__api">lemurx.net.addRule</code>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon"><svg class="ico" aria-hidden="true"><use href="#i-cpu"/></svg></div>
+            <h3 data-i18n="features.h314">Lua in the renderer</h3>
+            <p data-i18n="features.p15">One <code>lua_State</code> per renderer process with <code>page</code>, <code>dom_document</code> and <code>dom_element</code> on real V8 handles, a synchronous <code>send-request</code> hook on every subresource, and <code>luakit.register_function</code> to expose Lua to page JavaScript.</p>
+            <code class="card__api">page · dom_document · send-request</code>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon"><svg class="ico" aria-hidden="true"><use href="#i-zap"/></svg></div>
+            <h3 data-i18n="features.h316">An automation base for AI agents</h3>
+            <p data-i18n="features.p17">Observe → act, in three layers and one coordinate system: the page (screenshot, set-of-marks, CDP), the browser shell (<code>ui.dump</code>, <code>ui.find</code>) and other apps through an accessibility service the user turns on once. Deciding is your model's job; <code>agent.run</code> is the loop.</p>
+            <code class="card__api">lemurx.agent · lemurx.system</code>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon"><svg class="ico" aria-hidden="true"><use href="#i-shield-check"/></svg></div>
+            <h3 data-i18n="features.h318">Two trust domains</h3>
+            <p data-i18n="features.p19">Local scripts are yours and run unrestricted. Shared scripts (UGC) run in their own <code>lua_State</code> with safe libraries only — no privileged API, no shared globals, no confused-deputy path back into yours.</p>
+            <code class="card__api">files/lua/ vs files/lua/ugc/</code>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon"><svg class="ico" aria-hidden="true"><use href="#i-book-open"/></svg></div>
+            <h3 data-i18n="features.h320">Discoverable from the REPL</h3>
+            <p data-i18n="features.p21"><code>lemurx.help()</code> prints the whole catalog, <code>lemurx.help("tabs")</code> one module, and <code>lemurx.catalog</code> is the same list as a table. <code>lemurx.ui.dump()</code> shows the native view tree, <code>lemurx.cdp.targets()</code> every DevTools target. You never have to read our source.</p>
+            <code class="card__api">lemurx.help · catalog · ui.dump</code>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ CODE -->
+    <section class="section" id="code">
+      <div class="wrap">
+        <div class="section__head reveal">
+          <p class="eyebrow" data-i18n="code.p1">Show me the code</p>
+          <h2 data-i18n="code.h22">Real scripts. <span class="grad">Real browser.</span></h2>
+          <p class="lede" data-i18n="code.p3">Each of these is a complete file. Save it to <code>files/lua/</code>, restart Lemur, done.</p>
+        </div>
+
+        <div class="tabs reveal" id="codeTabs">
+          <div class="tabs__list" role="tablist" aria-label="Examples">
+            <button role="tab" aria-selected="true" data-tab="clean" data-i18n="code.button4">Clean the web</button>
+            <button role="tab" aria-selected="false" data-tab="toolbar" data-i18n="code.button5">Toolbar button</button>
+            <button role="tab" aria-selected="false" data-tab="hud" data-i18n="code.button6">Live HUD</button>
+            <button role="tab" aria-selected="false" data-tab="cdp" data-i18n="code.button7">DevTools Protocol</button>
+            <button role="tab" aria-selected="false" data-tab="java" data-i18n="code.button8">Rewire the native shell</button>
+            <button role="tab" aria-selected="false" data-tab="native" data-i18n="code.button9">Chromium internals from Lua</button>
+          </div>
+
+          <div class="tabs__panels">
+            <div class="code" role="tabpanel" data-panel="clean">
+              <div class="code__bar"><b>files/lua/10_clean.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">-- Block trackers at the network layer, strip leftovers in every frame.
+lemurx.net.addRule({
+  match  = "*://*.doubleclick.net/*",
+  action = "block",
+})
+
+lemurx.tabs.on("document", function(ev)
+  lemurx.tabs.inject(ev.id, [[
+    document.querySelectorAll('.ad, [id^="ad-"], [class*="sponsored"]')
+            .forEach(function (e) { e.remove(); });
+  ]], { world = "isolated", frames = "all" })
+end)</code></pre>
+            </div>
+
+            <div class="code" role="tabpanel" data-panel="toolbar" hidden>
+              <div class="code__bar"><b>files/lua/20_reader.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">-- A real button on the real toolbar, plus a persistent skin.
+lemurx.theme.apply("midnight")
+
+lemurx.ui.render("toolbar.end", {
+  type = "button", text = "Reader",
+  onClick = function()
+    local tab = lemurx.tabs.current()
+    if not tab then return end
+    lemurx.tabs.inject(tab.id, [[
+      document.body.style.maxWidth = "42em";
+      document.body.style.margin   = "0 auto";
+      document.body.style.fontSize = "1.15em";
+    ]], { world = "main" })
+  end,
+})</code></pre>
+            </div>
+
+            <div class="code" role="tabpanel" data-panel="hud" hidden>
+              <div class="code__bar"><b>files/lua/30_hud.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">-- A floating HUD built from native views, refreshed twice a second.
+local h = lemurx.ui.h
+
+lemurx.ui.render("page.float", h("column", {
+  id = "hud", gravity = "end|bottom", padding = { 12, 8 }, radius = 14,
+  background = "#CC0B1020",
+  onClick = function() lemurx.ui.unmount("page.float") end,   -- tap to dismiss
+}, {
+  h("text", { id = "hud_title", text = "…", color = "#E6F1FF", size = 13, maxLines = 1, ellipsize = true }),
+  h("text", { id = "hud_meta",  text = "",  color = "#2EE6D6", size = 12, font = "monospace" }),
+}))
+
+lemurx.timer.every(500, function()
+  local t = lemurx.tabs.current()
+  if not t then return end
+  lemurx.ui.update("hud_title", { text = t.title or t.url })
+  lemurx.ui.update("hud_meta", {
+    text = ("%d tabs  zoom %d%%  %s"):format(
+      #lemurx.tabs.list(), lemurx.tabs.getZoom(t.id), t.loading and "loading" or "idle"),
+  })
+end)</code></pre>
+            </div>
+
+            <div class="code" role="tabpanel" data-panel="cdp" hidden>
+              <div class="code__bar"><b>files/lua/40_cdp.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">-- The entire Chrome DevTools Protocol, on a phone, from Lua.
+local tab = lemurx.tabs.current().id
+
+lemurx.cdp.send(tab, "Emulation.setGeolocationOverride", {
+  latitude = 35.6762, longitude = 139.6503, accuracy = 1,
+})
+lemurx.cdp.send(tab, "Network.emulateNetworkConditions", {
+  offline = false, latency = 400, downloadThroughput = 50 * 1024, uploadThroughput = 20 * 1024,
+})
+
+local dpr    = lemurx.v8.eval(tab, "innerWidth * devicePixelRatio")
+local frames = lemurx.blink.frames(tab)          -- Page.getFrameTree
+local a11y   = lemurx.ax.tree(tab)               -- full Blink accessibility tree, as a Lua table
+print(dpr, #frames.result.frameTree.childFrames, #a11y.result.nodes)</code></pre>
+            </div>
+
+            <div class="code" role="tabpanel" data-panel="java" hidden>
+              <div class="code__bar"><b>files/lua/50_shell.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">-- The toolbar, the menu and the system dialogs are plain Android views. Rewire them.
+local h = lemurx.ui.h
+
+-- Replace the real Home button with "to top".
+lemurx.ui.replace({ id = "home_button" }, h("button", {
+  id = "my_home", text = "↑", background = "#FF00C853", color = "#FFFFFFFF",
+  onClick = function()
+    local t = lemurx.tabs.current()
+    if t then lemurx.tabs.eval(t.id, "window.scrollTo({top:0,behavior:'smooth'})") end
+  end,
+}))
+
+-- Take over a native click without swallowing it; restyle the drawer once it is open.
+lemurx.ui.on({ id = "menu_button_wrapper" }, "click", function()
+  lemurx.timer.after(400, function()
+    lemurx.ui.style({ text = "History" }, { color = "#FFFF5252", once = true })
+  end)
+end, { consume = false })
+
+-- Don't know the id? Ask.
+print(lemurx.ui.shell().found)          -- known shell ids and whether they are still there
+lemurx.ui.dump({ maxDepth = 6 })        -- every window: Activity, Dialogs, PopupWindows</code></pre>
+            </div>
+
+            <div class="code" role="tabpanel" data-panel="native" hidden>
+              <div class="code__bar"><b>files/lua/60_internals.lua</b><button class="copy" type="button">Copy</button></div>
+<pre><code class="lang-lua">-- Chromium's own services, from Lua: PrefService, content settings, feature flags, browsing data.
+local p = lemurx.prefs.get("safebrowsing.enabled", "bool")
+print(p.value, p.isDefault, p.managed)
+lemurx.prefs.set("webkit.webprefs.default_font_size", "int", 18)
+
+lemurx.perm.set("https://example.com", "javascript", "block")
+lemurx.perm.set("https://maps.example", "geolocation", "allow")
+
+print(lemurx.features.enabled("BackForwardCache"),
+      lemurx.features.param("BackForwardCache", "cache_size"))
+
+for _, v in ipairs(lemurx.history.query("github")) do print(v.title, v.url) end
+for _, c in ipairs(lemurx.cookie.get("https://github.com")) do print(c.name, c.httpOnly) end
+
+lemurx.data.clear({ "cache", "site_data" }, "hour")      -- BrowsingDataRemover</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ ARCHITECTURE -->
+    <section class="section section--alt" id="architecture">
+      <div class="wrap">
+        <div class="section__head reveal">
+          <p class="eyebrow" data-i18n="architecture.p1">Architecture</p>
+          <h2 data-i18n="architecture.h22">Thin sugar. <span class="grad">Thick access.</span></h2>
+          <p class="lede" data-i18n="architecture.p3">One Lua thread, one JSON protocol in each direction, and every Chromium layer on the other side of it.</p>
+        </div>
+
+        <div class="arch reveal">
+          <div class="arch__layer arch__layer--top">
+            <div class="arch__label" data-i18n="architecture.div4">Your scripts</div>
+            <div class="arch__boxes">
+              <div class="arch__box arch__box--priv"><b>files/lua/*.lua</b><span data-i18n="architecture.span6">local · privileged · full stdlib</span></div>
+              <div class="arch__box arch__box--ugc"><b>files/lua/ugc/*.lua</b><span data-i18n="architecture.span8">shared · sandboxed · own lua_State</span></div>
+            </div>
+          </div>
+          <div class="arch__arrow">▼</div>
+          <div class="arch__layer">
+            <div class="arch__label">lemurx.* API</div>
+            <div class="arch__boxes">
+              <div class="arch__box"><b>init.lua</b><span data-i18n="architecture.span11">sugar: proxies, DSLs, async/await, help()</span></div>
+              <div class="arch__box"><b data-i18n="architecture.b12">C bindings</b><span data-i18n="architecture.span13">lua_CFunction · privilege checks · callback registry</span></div>
+            </div>
+          </div>
+          <div class="arch__arrow">▼</div>
+          <div class="arch__layer">
+            <div class="arch__label" data-i18n="architecture.div14">Hosts</div>
+            <div class="arch__boxes arch__boxes--3">
+              <div class="arch__box"><b data-i18n="architecture.b15">Java host</b><span data-i18n="architecture.span16">UI · skins · widgets · menu · intents · accessibility service</span></div>
+              <div class="arch__box"><b data-i18n="architecture.b17">C++ native</b><span data-i18n="architecture.span18">prefs · permissions · cookies · history · net rules · custom schemes · renderer Lua</span></div>
+              <div class="arch__box"><b>DevTools</b><span data-i18n="architecture.span20">DevToolsAgentHost per tab / frame / worker / browser</span></div>
+            </div>
+          </div>
+          <div class="arch__arrow">▼</div>
+          <div class="arch__layer arch__layer--base">
+            <div class="arch__label">Chromium 154 stable · Android</div>
+            <div class="arch__boxes">
+              <div class="arch__box arch__box--wide"><b data-i18n="architecture.b22">Browser process</b><span data-i18n="architecture.span23">the Lua runtime lives here, on a single sequenced thread</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid--3 arch__notes" data-more="1">
+          <div class="note reveal">
+            <h4 data-i18n="architecture.h424">Single-threaded Lua</h4>
+            <p data-i18n="architecture.p25">All scripts run on one sequenced thread. UI work is posted to the UI thread and awaited. Java callbacks that need a return value are refused instantly when Lua is busy — no UI↔Lua deadlock, ever.</p>
+          </div>
+          <div class="note reveal">
+            <h4 data-i18n="architecture.h426">Stock when idle</h4>
+            <p data-i18n="architecture.p27">Every hook added to Chromium — URL-loader and navigation throttles, certificate override, custom schemes, back press, app menu, renderer Lua — is gated on state that only a script can create. With no script running each hook is an early <code>return</code> and the browser behaves like the official build it was compiled from.</p>
+          </div>
+          <div class="note reveal">
+            <h4 data-i18n="architecture.h428">The user always wins</h4>
+            <p data-i18n="architecture.p29">The three-dot menu always ends with a plain Android switch for the Lua runtime that no Lua API can reach or hide. If the process dies twice within 20 s of starting scripts, the runtime disables itself and the browser comes up stock — a script can never lock you out of the browser you need to fix it.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ SCRIPTS / UGC -->
+    <section class="section" id="scripts">
+      <div class="wrap split">
+        <div class="split__copy reveal">
+          <p class="eyebrow" data-i18n="scripts.p1">Scripts</p>
+          <h2 data-i18n="scripts.h22">Share scripts.<br><span class="grad">Sandboxed by design.</span></h2>
+          <p class="lede" data-i18n="scripts.p3">
+            Anything in <code>files/lua/ugc/</code> is a shared script: it gets the browser-facing API — tabs, network rules,
+            HTTP, UI widgets, storage — and nothing that could read your cookies, history, or reach the DevTools Protocol.
+            Each one runs in its own Lua state, so it can't touch your globals or ride your privileged callbacks.
+          </p>
+          <ul class="checks">
+            <li data-i18n="scripts.li4">Text-only <code>load</code>, no bytecode, no <code>dofile</code></li>
+            <li data-i18n="scripts.li5">No <code>lemurx.cookie</code> · <code>history</code> · <code>cdp</code> · <code>prefs</code> · <code>system</code> · luakit natives</li>
+            <li data-i18n="scripts.li6"><code>fs</code> jailed to <code>lua/ugc</code>, <code>http.fetch</code> capped at 2 MB / 20 s</li>
+            <li data-i18n="scripts.li7"><code>lemurx.ugc.scan(src)</code> lints for forbidden calls before you publish</li>
+            <li data-i18n="scripts.li8">Local scripts can <code>expose()</code> a curated function for UGC to <code>import()</code></li>
+          </ul>
+        </div>
+        <div class="split__visual reveal reveal--delay">
+          <div class="term term--tall">
+            <div class="term__bar"><span></span><span></span><span></span><b>lemurx.help("ui")</b></div>
+<pre class="term__body"><code class="lang-lua">LemurX Lua 1.12.1  privileged=false
+脚本：filesDir/lua/*.lua 本地特权；filesDir/lua/ugc/*.lua 可分享、无特权
+调用：lemurx.help() 或 lemurx.help('tabs')
+
+## 原生界面  (ui)
+  show({id,type='button'|'text'|'edit', text, gravity, x, y, onClick})
+  remove(id) clear()
+  dump([{maxDepth,maxNodes,gone}])  -- 所有窗口，含工具抽屉 Dialog
+  find({text,id,desc,class}) click(query) longClick(query)
+  setText(query, text) getText(query) visible(query,false) enabled(query,false)
+  dialog({title,message,ok,cancel,onOk,onCancel}) alert() prompt()
+  shell()  -- 底栏/地址栏/搜索框已知 id + 是否还在
+  children(query)  replace(query, tree)  insert(query, tree[, {position='after'|'before'|'into'}])
+  detach(query) restore([query]) move(query, {parent,index,before,after})
+  on(query, 'click'|'longclick'|'touch'|'focus'|'text', fn[, {consume,move,max}])  off(key|'*')</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ EXTENSIONS -->
+    <section class="section section--alt" id="extensions">
+      <div class="wrap">
+        <div class="section__head reveal">
+          <p class="eyebrow" data-i18n="extensions.p1">Extensions</p>
+          <h2 data-i18n="extensions.h22">Your extensions <span class="grad">already work.</span></h2>
+          <p class="lede" data-i18n="extensions.p3">
+            Lemur runs the same extension engine as desktop Chromium. Install straight from the Chrome Web Store
+            or Edge Add-ons, drop in your userscripts, and keep the setup you've spent years tuning — on a phone.
+          </p>
+        </div>
+
+        <div class="compat reveal">
+          <a class="compat__tile" href="https://chromewebstore.google.com/" target="_blank" rel="noopener">
+            <img src="assets/icons/googlechrome.svg" alt="">
+            <div><b>Chrome Web Store</b><span data-i18n="extensions.span5">Manifest V2 &amp; V3, one tap to install</span></div>
+          </a>
+          <a class="compat__tile" href="https://microsoftedge.microsoft.com/addons/" target="_blank" rel="noopener">
+            <img src="assets/icons/microsoftedge.svg" alt="">
+            <div><b>Edge Add-ons</b><span data-i18n="extensions.span7">Same CRX format, same permissions model</span></div>
+          </a>
+          <a class="compat__tile" href="https://www.tampermonkey.net/" target="_blank" rel="noopener">
+            <img src="assets/icons/tampermonkey.svg" alt="">
+            <div><b data-i18n="extensions.b8">Userscripts</b><span data-i18n="extensions.span9">Tampermonkey, Violentmonkey, Greasy Fork — or plain Lua</span></div>
+          </a>
+        </div>
+
+        <div class="splash reveal" aria-label="Popular extensions that run on Lemur">
+          <div class="splash__box">
+            <div class="splash__lid"></div>
+            <div class="splash__body"><img src="assets/logo-180.png" alt="" width="56" height="56"></div>
+          </div>
+          <figure class="splash__item" style="--x:-230px;--y:190px;--d:0s;--r:-12deg"><img src="assets/icons/ublockorigin.svg" alt=""><figcaption>uBlock Origin</figcaption></figure>
+          <figure class="splash__item" style="--x:-110px;--y:250px;--d:.25s;--r:6deg"><img src="assets/icons/darkreader.svg" alt=""><figcaption>Dark Reader</figcaption></figure>
+          <figure class="splash__item" style="--x:110px;--y:250px;--d:.5s;--r:-4deg"><img src="assets/icons/bitwarden.svg" alt=""><figcaption>Bitwarden</figcaption></figure>
+          <figure class="splash__item" style="--x:230px;--y:190px;--d:.75s;--r:10deg"><img src="assets/icons/tampermonkey.svg" alt=""><figcaption>Tampermonkey</figcaption></figure>
+          <figure class="splash__item" style="--x:-335px;--y:78px;--d:1s;--r:8deg"><img src="assets/icons/adguard.svg" alt=""><figcaption>AdGuard</figcaption></figure>
+          <figure class="splash__item" style="--x:335px;--y:78px;--d:1.25s;--r:-8deg"><img src="assets/icons/grammarly.svg" alt=""><figcaption>Grammarly</figcaption></figure>
+          <figure class="splash__item" style="--x:-215px;--y:28px;--d:1.5s;--r:-6deg"><img src="assets/icons/1password.svg" alt=""><figcaption>1Password</figcaption></figure>
+          <figure class="splash__item" style="--x:215px;--y:28px;--d:1.75s;--r:5deg"><img src="assets/icons/notion.svg" alt=""><figcaption>Notion Web Clipper</figcaption></figure>
+          <figure class="splash__item" style="--x:0px;--y:190px;--d:2s;--r:0deg"><img src="assets/icons/lastpass.svg" alt=""><figcaption>LastPass</figcaption></figure>
+        </div>
+        <p class="splash__note reveal" data-i18n="extensions.p19">Extensions get their own toolbar slot, popups render as bottom sheets, and Lua can talk to them — <code>lemurx.ui.render("toolbar.end", …)</code> sits right next to their icons.</p>
+      </div>
+    </section>
+
+    <!-- ============================================================ ROBLOX -->
+    <section class="section" id="roblox">
+      <div class="wrap split">
+        <div class="split__visual reveal">
+          <img class="illus" src="assets/illus-roblox.jpg" alt="Avatar try-on and marketplace trading on a phone" data-i18n-alt="alt.roblox" loading="lazy" width="1152" height="864">
+        </div>
+        <div class="split__copy reveal reveal--delay">
+          <p class="eyebrow" data-i18n="roblox.p1"><img class="eyebrow__icon" src="assets/icons/roblox.svg" alt=""> Roblox power users</p>
+          <h2 data-i18n="roblox.h22">The metaverse,<br><span class="grad">with the pro tools on.</span></h2>
+          <p class="lede" data-i18n="roblox.p3">
+            A huge share of Lemur's community lives on Roblox — and they refuse to trade without their extensions.
+            RoPro, BTRoblox and Roblox+ run on Lemur exactly as they do on desktop: try outfits on your avatar before you buy,
+            watch limited-item prices, get trade notifications, and flip items from the phone in your pocket.
+          </p>
+          <div class="ext-row">
+            <figure class="ext-chip"><img src="assets/icons/ropro.png" alt="" width="40" height="40"><figcaption data-i18n="roblox.figcaption4"><b>RoPro</b><span>Trade values, outfit try-on, server filters</span></figcaption></figure>
+            <figure class="ext-chip"><img src="assets/icons/btroblox.png" alt="" width="40" height="40"><figcaption data-i18n="roblox.figcaption5"><b>BTRoblox</b><span>Better catalog, item history, profile tools</span></figcaption></figure>
+            <figure class="ext-chip"><img src="assets/icons/robloxplus.png" alt="" width="40" height="40"><figcaption data-i18n="roblox.figcaption6"><b>Roblox+</b><span>Trade &amp; friend notifications, quick actions</span></figcaption></figure>
+          </div>
+          <ul class="checks">
+            <li data-i18n="roblox.li7">Desktop-mode Roblox pages that stay in desktop mode — per-site, remembered</li>
+            <li data-i18n="roblox.li8">Extension popups as bottom sheets, thumb-reachable</li>
+            <li data-i18n="roblox.li9">Write your own price alerts in ten lines of Lua with <code>lemurx.timer</code> + <code>lemurx.http</code></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ FREEDOM -->
+    <section class="section section--alt" id="freedom">
+      <div class="wrap split">
+        <div class="split__copy reveal">
+          <p class="eyebrow" data-i18n="freedom.p1">Freedom</p>
+          <h2 data-i18n="freedom.h22">The most customizable<br>mobile browser <span class="grad">on Earth.</span></h2>
+          <p class="lede" data-i18n="freedom.p3">
+            Every other mobile browser gives you a theme picker. Lemur gives you the toolbar, the tab strip,
+            the gestures, the network stack and the rendering pipeline — and a scripting language to rewire them.
+            If you can describe it, you can ship it to yourself tonight.
+          </p>
+          <div class="freedom-grid">
+            <div class="freedom-item"><b data-i18n="freedom.b4">Skins</b><span data-i18n="freedom.span5">Persistent themes, per-site overrides, your own widget tree in the shell</span></div>
+            <div class="freedom-item"><b data-i18n="freedom.b6">Extensions</b><span data-i18n="freedom.span7">Chrome, Edge, userscripts — thousands of them, unmodified</span></div>
+            <div class="freedom-item"><b>Lua</b><span data-i18n="freedom.span9">Full browser-process access, Lua in every renderer, luakit widgets on real Android views</span></div>
+            <div class="freedom-item"><b data-i18n="freedom.b10">Behaviour</b><span data-i18n="freedom.span11">Back-gesture, omnibox, downloads, UA, headers: all interceptable</span></div>
+          </div>
+        </div>
+        <div class="split__visual reveal reveal--delay">
+          <img class="illus" src="assets/illus-custom.jpg" alt="Three phones running Lemur with completely different custom skins" data-i18n-alt="alt.custom" loading="lazy" width="1152" height="864">
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ ENGINE -->
+    <section class="section" id="engine">
+      <div class="wrap">
+        <div class="section__head reveal">
+          <p class="eyebrow" data-i18n="engine.p1"><img class="eyebrow__icon" src="assets/icons/chromium.svg" alt=""> Engine</p>
+          <h2 data-i18n="engine.h22">Rides the newest <span class="grad">Chromium.</span></h2>
+          <p class="lede" data-i18n="engine.p3">
+            Customization is worthless on a stale engine. Lemur rebases onto each new Chromium stable so the
+            security patches, V8 speedups and web-platform features land in your hands when they land in Chrome's.
+          </p>
+        </div>
+        <div class="engine reveal">
+          <div class="engine__logo">
+            <img src="assets/icons/chromium.svg" alt="Chromium" width="140" height="140">
+            <div class="engine__ticker" aria-hidden="true">
+              <span>M125</span><span>M126</span><span class="is-now">M127</span><span>M128</span><span>…</span>
+            </div>
+          </div>
+          <div class="engine__stats">
+            <div class="stat">
+              <div class="stat__icon"><svg class="ico" aria-hidden="true"><use href="#i-shield"/></svg></div>
+              <h3 data-i18n="engine.h34">Stable</h3>
+              <p data-i18n="engine.p5">Upstream site isolation, sandboxing and the same-day security fixes Chromium ships. Lemur's additions live beside Chromium's code, not on top of a fork that drifts.</p>
+            </div>
+            <div class="stat">
+              <div class="stat__icon"><svg class="ico" aria-hidden="true"><use href="#i-zap"/></svg></div>
+              <h3 data-i18n="engine.h36">Fast</h3>
+              <p data-i18n="engine.p7">Current V8, Skia and the latest Android graphics path. Lua runs on its own thread and never touches the render pipeline unless you tell it to.</p>
+            </div>
+            <div class="stat">
+              <div class="stat__icon"><svg class="ico" aria-hidden="true"><use href="#i-eye-off"/></svg></div>
+              <h3 data-i18n="engine.h38">Private</h3>
+              <p data-i18n="engine.p9">No account required, no tracking baked in. Block at the network layer, strip headers, kill third-party cookies — and audit every rule from Lua, because the rules are yours.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ SYNC -->
+    <section class="section section--alt" id="sync">
+      <div class="wrap split">
+        <div class="split__visual reveal">
+          <img class="illus" src="assets/illus-sync.jpg" alt="Bookmarks, extensions and Lua scripts syncing between phone, tablet and laptop" data-i18n-alt="alt.sync" loading="lazy" width="1152" height="864">
+        </div>
+        <div class="split__copy reveal reveal--delay">
+          <p class="eyebrow" data-i18n="sync.p1">Sync</p>
+          <h2 data-i18n="sync.h22">Bookmarks. Extensions. Scripts.<br><span class="grad">Everywhere you are.</span></h2>
+          <p class="lede" data-i18n="sync.p3">
+            Sign in once and your Lemur follows you. New phone? Restore the toolbar you built, the extensions you
+            trust and the Lua scripts you wrote — in the order you installed them, with their settings.
+          </p>
+          <ul class="checks">
+            <li data-i18n="sync.li4"><b>Bookmarks &amp; reading list</b> — the usual, plus folder order and favicons</li>
+            <li data-i18n="sync.li5"><b>Extensions</b> — IDs, enabled state, per-extension options where the extension allows it</li>
+            <li data-i18n="sync.li6"><b>Lua scripts</b> — <code>files/lua/</code> as a versioned bundle; roll back any script to any previous version</li>
+            <li data-i18n="sync.li7">Sync is opt-in per category; scripts flagged <code>-- @nosync</code> stay on the device</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ KIWI -->
+    <section class="section" id="kiwi">
+      <div class="wrap split">
+        <div class="split__copy reveal">
+          <p class="eyebrow" data-i18n="kiwi.p1"><img class="eyebrow__icon eyebrow__icon--round" src="assets/icons/kiwi.png" alt=""> Lineage</p>
+          <h2 data-i18n="kiwi.h22">Picking up<br><span class="grad">Kiwi's baton.</span></h2>
+          <p class="lede" data-i18n="kiwi.p3">
+            Kiwi Browser proved that a phone browser could run real extensions — then, in January 2025, its founder archived
+            the project after nearly seven years of solo maintenance. The idea was too good to let die.
+            Lemur carries it forward as a commercial, closed-source browser that opens as much as it possibly can through Lua:
+            extension-first, scriptable to the native layers, built so that what you need actually comes true.
+          </p>
+          <blockquote class="quote" data-i18n="kiwi.blockquote4">
+            "I just wanted extensions on mobile for myself."
+            <cite>— Arnaud Granal, on why Kiwi existed</cite>
+          </blockquote>
+          <ul class="checks">
+            <li data-i18n="kiwi.li5">Kiwi users: your extensions install the same way, your bookmarks import in one tap</li>
+            <li data-i18n="kiwi.li6">Closed source, open to you: every layer we can expose through Lua, we do — and we keep pushing that line</li>
+            <li data-i18n="kiwi.li7">More open, more free, more extensible: the three words we measure every release against</li>
+          </ul>
+          <p class="hacker-line" data-i18n="kiwi.p8">If you're a hacker, <span class="grad">Lemur was built for you.</span></p>
+        </div>
+        <div class="split__visual reveal reveal--delay">
+          <img class="illus" src="assets/illus-kiwi-handoff.jpg" alt="Relay baton passed from the Kiwi Browser icon to the Lemur icon" data-i18n-alt="alt.kiwi" loading="lazy" width="1152" height="864">
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ COMMUNITY / UGC -->
+    <section class="section section--alt" id="community">
+      <div class="wrap split">
+        <div class="split__visual reveal">
+          <img class="illus" src="assets/illus-community.jpg" alt="A creator community hub sharing extensions, userscripts and Lua scripts" data-i18n-alt="alt.community" loading="lazy" width="1152" height="864">
+        </div>
+        <div class="split__copy reveal reveal--delay">
+          <p class="eyebrow" data-i18n="community.p1">Community</p>
+          <h2 data-i18n="community.h22">Build it. Share it.<br><span class="grad">Watch it spread.</span></h2>
+          <p class="lede" data-i18n="community.p3">
+            Lemur's UGC community is one place for every kind of add-on: browser extensions, userscripts, and Lua scripts that
+            reach all the way down into the native layers. Publish with one tap, fork anyone's work, remix it, and ship it back.
+            The freedom to create is what turned a browser into a movement.
+          </p>
+          <div class="ugc-kinds">
+            <div class="ugc-kind"><span class="ugc-kind__icon"><svg class="ico" aria-hidden="true"><use href="#i-puzzle"/></svg></span><b data-i18n="community.b4">Extensions</b><span data-i18n="community.span5">CRX packages, curated collections, one-tap install</span></div>
+            <div class="ugc-kind"><span class="ugc-kind__icon"><svg class="ico" aria-hidden="true"><use href="#i-scroll-text"/></svg></span><b data-i18n="community.b6">Userscripts</b><span data-i18n="community.span7">Greasemonkey-style scripts with site targeting</span></div>
+            <div class="ugc-kind"><span class="ugc-kind__icon"><svg class="ico" aria-hidden="true"><use href="#i-file-code-2"/></svg></span><b data-i18n="community.b8">Lua scripts</b><span data-i18n="community.span9">Skins, HUDs, network rules, deep native tweaks</span></div>
+          </div>
+          <ul class="checks">
+            <li data-i18n="community.li10">Every shared Lua script runs sandboxed in its own state — creators get freedom, users keep safety</li>
+            <li data-i18n="community.li11">Versioned publishing, forks and changelogs; roll back any install to any version</li>
+            <li data-i18n="community.li12">Ratings, comments and collections surface the best ideas; <code>lemurx.ugc.scan()</code> lints before you publish</li>
+            <li data-i18n="community.li13">Local scripts can <code>expose()</code> curated APIs for community scripts to build on</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ PAIP.AI ECOSYSTEM -->
+    <section class="section" id="paip">
+      <div class="wrap split">
+        <div class="split__copy reveal">
+          <p class="eyebrow" data-i18n="paip.p1"><img class="eyebrow__icon eyebrow__icon--round" src="assets/icons/paip.png" alt=""> Ecosystem</p>
+          <h2 data-i18n="paip.h22">UGC powered by <span class="grad">Paip.AI.</span><br>One shared ecosystem.</h2>
+          <p class="lede" data-i18n="paip.p3">
+            Paip.AI is the interest-based social app the founding team built between 2024 and 2026 — real people, real posts,
+            and smart matching that finds friends on your wavelength. Lemur's UGC community runs on Paip.AI's technology and
+            shares one ecosystem with it: one identity, one creator profile, one feed where a Lua script, a skin or an extension
+            collection travels as naturally as a post.
+          </p>
+          <ul class="checks">
+            <li data-i18n="paip.li4">Publish a script in Lemur and it lands on your Paip.AI profile — followers, likes and comments carry over</li>
+            <li data-i18n="paip.li5">Interest matching recommends scripts and skins from creators on your wavelength, not just the most downloaded</li>
+            <li data-i18n="paip.li6">One account for both: sign in to Lemur with Paip.AI and your UGC library follows you</li>
+          </ul>
+          <div class="hero__cta paip__links">
+            <a class="btn btn--ghost" href="https://apps.apple.com/us/app/paip-ai/id6738325560" target="_blank" rel="noopener"><img class="btn__icon" src="assets/icons/appstore.svg" alt="">App Store</a>
+            <a class="btn btn--ghost" href="https://play.google.com/store/apps/details?id=com.aiosman.ravenow" target="_blank" rel="noopener"><img class="btn__icon" src="assets/icons/googleplay.svg" alt="">Google Play</a>
+          </div>
+        </div>
+        <div class="split__visual reveal reveal--delay">
+          <div class="paip">
+            <div class="paip__brand">
+              <img src="assets/icons/paip.png" alt="Paip.AI" width="72" height="72">
+              <div><b>Paip.AI</b><span>Find your vibe</span></div>
+              <span class="paip__x">×</span>
+              <img src="assets/logo-180.png" alt="LemurX" width="72" height="72">
+            </div>
+            <div class="paip__shots" aria-label="Paip.AI screenshots">
+              <img src="assets/paip/shot-1.webp" alt="Paip.AI home feed" data-i18n-alt="alt.paip" loading="lazy" width="560" height="1212">
+              <img src="assets/paip/shot-2.webp" alt="" loading="lazy" width="560" height="1212">
+              <img src="assets/paip/shot-3.webp" alt="" loading="lazy" width="560" height="1212">
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ STORY / MISSION -->
+    <section class="story" id="story">
+      <div class="story__bg" style="background-image:url('assets/illus-mission.jpg')"></div>
+      <div class="wrap story__inner">
+        <div class="section__head reveal story__head">
+          <p class="eyebrow" data-i18n="story.p1">Our mission</p>
+          <h2 data-i18n="story.h22">Six years. Five million geeks.<br><span class="grad">One browser that answers to you.</span></h2>
+          <p class="lede" data-i18n="story.p3">
+            Lemur was born in 2020 with a stubborn idea: the person holding the phone should have the final say over
+            the software on it. Six years later, five million power users across the world make Lemur their first choice —
+            not because it's the prettiest browser, but because it's the only one that does exactly what they tell it to.
+          </p>
+        </div>
+
+        <div class="story__stats reveal">
+          <div><strong>2020</strong><span data-i18n="story.span4">first release</span></div>
+          <div><strong>6</strong><span data-i18n="story.span5">years shipping</span></div>
+          <div><strong>5,000,000</strong><span data-i18n="story.span6">geeks who chose Lemur</span></div>
+          <div><strong>#1</strong><span data-i18n="story.span7">pick of power users worldwide</span></div>
+        </div>
+
+        <ol class="timeline reveal">
+          <li><b>2020</b><span data-i18n="story.span8">Lemur ships: a Chromium for Android that runs Chrome extensions, when almost nothing else on mobile did.</span></li>
+          <li><b>2021–2023</b><span data-i18n="story.span9">Desktop mode, per-site skins, ad and tracker blocking at the network layer. The Roblox community arrives and never leaves.</span></li>
+          <li><b>2024</b><span data-i18n="story.span10">On <b>6 March</b>, Kevinlinpr steps down as CEO and the founding team leaves to build <b>Paip.AI</b>, an interest-based social app.</span></li>
+          <li><b>2025</b><span data-i18n="story.span11">Kiwi Browser is archived. Lemur commits to keeping mobile extensions alive and open.</span></li>
+          <li class="is-now"><b>2026</b><span data-i18n="story.span12">On <b>6 September</b>, Kevinlinpr buys back <b>100%</b> of the company and retakes the helm — and makes the boldest call in Lemur's history: <b>a Lua runtime inside the browser process</b>, with every native layer open to it. <b>The next-generation Lemur launches at the end of 2026.</b></span></li>
+        </ol>
+
+        <div class="story__founder reveal">
+          <div class="story__founder-mark"><img src="assets/logo-180.png" alt="" width="72" height="72"></div>
+          <div>
+            <h3 data-i18n="story.h313">The founders are back.</h3>
+            <p data-i18n="story.p14">
+              On 6 March 2024, <b>Kevinlinpr</b> stepped down as CEO and the founding team left the company to build <b>Paip.AI</b>,
+              an interest-based social app. On 6 September 2026, Kevinlinpr bought back <b>100%</b> of the company and returned
+              to take charge of Lemur's future. The brief is simple: open every layer, ship on the latest Chromium, and never make
+              a decision the user can't override. The freedom we promised six years ago is about to get a lot bigger.
+            </p>
+            <ul class="team">
+              <li><span class="team__avatar" style="--a:#2ee6d6;--b:#1e6bff">K</span><b>Kevinlinpr</b><span data-i18n="story.span15">Chief Executive Officer</span></li>
+              <li><span class="team__avatar" style="--a:#f7a928;--b:#ff6b6b">S</span><b>Shirley</b><span data-i18n="story.span16">Chief Design Officer</span></li>
+              <li><span class="team__avatar" style="--a:#4f8cff;--b:#c792ea">D</span><b>Deacon</b><span data-i18n="story.span17">Chief Architect</span></li>
+              <li><span class="team__avatar" style="--a:#3ddc97;--b:#2ee6d6">A</span><b>AllenTom</b><span data-i18n="story.span18">Chief Technology Officer</span></li>
+            </ul>
+            <p class="story__tagline" data-i18n="story.p19">The next browser is <span class="grad">Lemur.</span></p>
+            <p class="story__launch" data-i18n="story.p20"><span class="dot"></span> Next-generation Lemur — arriving <b>end of 2026</b></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ DOCS -->
+    <section class="section section--alt" id="docs">
+      <div class="wrap">
+        <div class="section__head reveal">
+          <p class="eyebrow" data-i18n="docs.p1">Docs</p>
+          <h2 data-i18n="docs.h22">Everything is <span class="grad">written down.</span></h2>
+        </div>
+        <div class="grid grid--3">
+          <a class="doc reveal" href="lua.html#quickstart">
+            <span class="doc__kind" data-i18n="docs.span3">Guide</span>
+            <h3 data-i18n="docs.h34">Lua Scripting Guide</h3>
+            <p data-i18n="docs.p5">Five-minute start, threading model, the two trust domains, every module with examples, recipes, pitfalls, UGC publishing rules.</p>
+            <span class="doc__go" data-i18n="docs.span6">Read →</span>
+          </a>
+          <a class="doc reveal" href="lua.html#m-core">
+            <span class="doc__kind" data-i18n="docs.span7">Reference</span>
+            <h3 data-i18n="docs.h38">API catalog</h3>
+            <p data-i18n="docs.p9">The same list <code>lemurx.help()</code> prints, rendered: <code>tabs</code>, <code>net</code>, <code>cdp</code>, <code>ui</code>, <code>agent</code>, the luakit layer, the renderer classes and the rest.</p>
+            <span class="doc__go" data-i18n="docs.span10">Browse →</span>
+          </a>
+          <a class="doc reveal" href="lua.html#recipes">
+            <span class="doc__kind" data-i18n="docs.span11">Recipes</span>
+            <h3 data-i18n="docs.h312">Cookbook</h3>
+            <p data-i18n="docs.p13">Per-site skins, reader mode, desktop-mode memory, back-gesture guard, redirect-page skipping, cross-origin scraping into a floating panel.</p>
+            <span class="doc__go" data-i18n="docs.span14">Cook →</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ DOWNLOAD -->
+    <section class="section download" id="download">
+      <div class="wrap download__inner reveal">
+        <img class="download__logo" src="assets/logo-180.png" width="96" height="96" alt="">
+        <h2 data-i18n="download.h21">Get Lemur.</h2>
+        <p class="download__when" data-i18n="download.p2">Next-generation Lemur arrives <b>end of 2026</b>. The current Lemur Browser is on Google Play today.</p>
+        <p class="lede" data-i18n="download.p3">Android 8.0 or newer · arm64 · latest Chromium stable · Lua 5.4.7 · Chrome &amp; Edge extensions · userscripts</p>
+        <div class="hero__cta">
+          <!-- TODO: point these at the release artifacts -->
+          <a class="btn btn--primary btn--large" href="https://play.google.com/store/apps/details?id=com.lemurbrowser.exts" target="_blank" rel="noopener" data-i18n="download.a4"><img class="btn__icon" src="assets/icons/googleplay.svg" alt="">Get it on Google Play</a>
+          <a class="btn btn--ghost btn--large" href="lua.html" data-i18n="download.a5">Read the Lua guide</a>
+        </div>
+        <p class="download__hint" data-i18n="download.p6">
+          Then drop a <code>.lua</code> file into the app's <code>files/lua/</code> directory, restart,
+          and watch <code>lemurx.help()</code> print the whole API in logcat.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer__inner">
+      <div class="footer__brand">
+        <img src="assets/logo-32.png" width="24" height="24" alt="">
+        <span>Lemur Browser</span>
+      </div>
+      <nav class="footer__links" aria-label="Footer">
+        <a href="#features" data-i18n="page.a3">Features</a>
+        <a href="#code" data-i18n="page.a4">Code</a>
+        <a href="#architecture" data-i18n="page.a5">Architecture</a>
+        <a href="#extensions" data-i18n="page.a6">Extensions</a>
+        <a href="#community" data-i18n="page.a7">Community</a>
+        <a href="#story" data-i18n="page.a8">Story</a>
+        <a href="#docs" data-i18n="page.a9">Docs</a>
+        <a href="#download" data-i18n="page.a10">Download</a>
+      </nav>
+      <p class="footer__legal" data-i18n="page.p11">Built on Chromium. Lua is © PUC-Rio. Chrome, Edge, Roblox, Kiwi, Paip.AI and the extension names shown are trademarks of their respective owners. Your device, your rules.</p>
+    </div>
+  </footer>
+
+  <script src="js/main.js" defer></script>
+</body>
+</html>

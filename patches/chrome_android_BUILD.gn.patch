@@ -1,0 +1,61 @@
+diff --git a/chrome/android/BUILD.gn b/chrome/android/BUILD.gn
+index 2133a964d0..e317cd6b61 100644
+--- a/chrome/android/BUILD.gn
++++ b/chrome/android/BUILD.gn
+@@ -175,6 +175,30 @@ if (_is_default_toolchain) {
+     deps = [
+       ":chrome_base_module_resources",
+       ":ui_locale_string_resources",
++
++      # LemurX branding: resource_overlay target that replaces launcher icons,
++      # app_name and every Chrome-logo drawable by name. Must stay in the base
++      # module together with chrome_base_module_resources.
++      "//chrome/lemurx/brand:brand_resources",
++
++      # LemurX Discover: strings for the native news stream that replaces the
++      # xsurface-backed feed on the NTP (LemurXDiscoverStream.java).
++      "//chrome/lemurx/discover:discover_resources",
++
++      # LemurX new tab page: Lemur-style wordmark + search box (overlays of
++      # ic_google_logo / home_surface_search_box_background / fake_search_box
++      # dimens) and the favorites grid that replaces Most Visited tiles.
++      "//chrome/lemurx/ntp:ntp_resources",
++
++      # LemurX OpenMuse console shell: icons / pill / colours of the native
++      # bottom bar that floats over every page except the OpenMuse home page
++      # (LemurXConsoleShell.java).
++      "//chrome/lemurx/console:console_resources",
++
++      # LemurX native console pages (chrome-native://lemurx/...): icons and
++      # strings of the chat / activity / data pages and LemurX settings
++      # (chrome/android/.../lemurx/muse/*.java).
++      "//chrome/lemurx/muse:muse_resources",
+       "//chrome/android/webapk/libs/common:splash_resources",
+       "//chrome/app:java_strings_grd",
+       "//chrome/browser/actor/android:java_resources",
+@@ -324,6 +348,8 @@ if (_is_default_toolchain) {
+       ":usage_stats_proto_java",
+       ":xr_java",
+       "$google_play_services_package:google_play_services_auth_base_java",
++      # LemurX: Google Sign-In for the Lemur account (lemurx/muse/LemurXGoogleSignIn.java).
++      "$google_play_services_package:google_play_services_auth_java",
+       "$google_play_services_package:google_play_services_base_java",
+       "$google_play_services_package:google_play_services_basement_java",
+       "$google_play_services_package:google_play_services_cast_framework_java",
+@@ -1840,6 +1866,7 @@ if (_is_default_toolchain) {
+   java_group("chrome_public_non_pak_assets") {
+     deps = [
+       "//chrome/android/webapk/libs/runtime_library:runtime_library_assets",
++      "//chrome/lemurx:lemurx_assets",
+       "//components/privacy_sandbox/privacy_sandbox_attestations/preload:privacy_sandbox_attestations_assets",
+     ]
+   }
+@@ -2990,6 +3017,8 @@ if (_is_default_toolchain) {
+ 
+   generate_jni("chrome_jni_headers") {
+     sources = [
++      # LemurX: accessibility-tree snapshot used by the agent device bridge.
++      "java/src/org/chromium/chrome/browser/lemurx/agent/LemurXAx.java",
+       "../browser/share/android/java/src/org/chromium/chrome/browser/share/BitmapDownloadRequest.java",
+       "../browser/share/android/java/src/org/chromium/chrome/browser/share/link_to_text/LinkToTextBridge.java",
+       "../browser/share/android/java/src/org/chromium/chrome/browser/share/long_screenshots/bitmap_generation/LongScreenshotsTabService.java",

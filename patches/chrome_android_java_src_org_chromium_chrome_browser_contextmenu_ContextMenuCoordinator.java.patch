@@ -1,0 +1,67 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/contextmenu/ContextMenuCoordinator.java b/chrome/android/java/src/org/chromium/chrome/browser/contextmenu/ContextMenuCoordinator.java
+index a2cb65ecd9..d3a18851ab 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/contextmenu/ContextMenuCoordinator.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/contextmenu/ContextMenuCoordinator.java
+@@ -8,6 +8,7 @@ import static org.chromium.build.NullUtil.assertNonNull;
+ import static org.chromium.build.NullUtil.assumeNonNull;
+ import static org.chromium.ui.listmenu.ListMenuItemProperties.CLICK_LISTENER;
+ import static org.chromium.ui.listmenu.ListMenuItemProperties.MENU_ITEM_ID;
++import static org.chromium.ui.listmenu.ListMenuItemProperties.TITLE;
+ 
+ import android.app.Activity;
+ import android.graphics.Rect;
+@@ -254,9 +255,12 @@ public class ContextMenuCoordinator implements ContextMenuUi, FlyoutHandler<Cont
+                         contextMenuRect,
+                         /* onDismissCallback= */ null,
+                         /* flyoutExtraPaddingY= */ 0);
++        // LemurX: let the agent device bridge see and answer the menu.
++        sLemurXActive = this;
+         dialog.setOnShowListener(dialogInterface -> onMenuShown.run());
+         dialog.setOnDismissListener(
+                 (dialogInterface) -> {
++                    if (sLemurXActive == ContextMenuCoordinator.this) sLemurXActive = null;
+                     mOnMenuClosed.run();
+                     dismissDialogs();
+                 });
+@@ -512,6 +516,41 @@ public class ContextMenuCoordinator implements ContextMenuUi, FlyoutHandler<Cont
+                         activity, params, profile, webContents, nativeDelegate);
+     }
+ 
++    // LemurX ------------------------------------------------------------------------------
++    private static @Nullable ContextMenuCoordinator sLemurXActive;
++
++    /** LemurX: the context menu on screen, or null. */
++    public static @Nullable ContextMenuCoordinator getActiveForLemurX() {
++        return sLemurXActive;
++    }
++
++    /** LemurX: {id, title} of every clickable item currently listed. */
++    public List<String[]> describeItemsForLemurX() {
++        List<String[]> out = new ArrayList<>();
++        for (int i = 0; i < mListViews.size(); i++) {
++            for (int j = 0; j < getCount(i); j++) {
++                final ListItem item = getItem(i, j);
++                if (!item.model.getAllSetProperties().contains(MENU_ITEM_ID)) continue;
++                CharSequence title =
++                        item.model.getAllSetProperties().contains(TITLE)
++                                ? item.model.get(TITLE)
++                                : null;
++                out.add(new String[] {
++                        String.valueOf(item.model.get(MENU_ITEM_ID)),
++                        title == null ? "" : title.toString()});
++            }
++        }
++        return out;
++    }
++
++    /** LemurX: activate the item with {@code id}; false when it is not in the menu. */
++    public boolean clickItemForLemurX(int id) {
++        ListItem item = findItem(id);
++        if (item == null) return false;
++        item.model.get(CLICK_LISTENER).onClick(null);
++        return true;
++    }
++
+     public void clickListItemForTesting(int id) {
+         ListItem item = findItem(id);
+         assert item != null;

@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Copyright 2026 The LemurX Authors
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+
+Bottom sheet for adding a shortcut (Lemur FavoriteSelectorBottomSheetContent):
+Bookmarks / History / URL tabs over a list.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp">
+
+    <TextView
+        android:id="@+id/lemurx_fav_picker_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center"
+        android:text="@string/lemurx_fav_add"
+        android:textColor="@color/lemurx_ntp_text_primary"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:id="@+id/lemurx_fav_picker_tabs"
+        android:layout_width="match_parent"
+        android:layout_height="36dp"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/lemurx_fav_tab_bookmarks"
+            style="@style/LemurXFavPickerTab"
+            android:text="@string/lemurx_fav_tab_bookmarks" />
+
+        <TextView
+            android:id="@+id/lemurx_fav_tab_history"
+            style="@style/LemurXFavPickerTab"
+            android:text="@string/lemurx_fav_tab_history" />
+
+        <TextView
+            android:id="@+id/lemurx_fav_tab_url"
+            style="@style/LemurXFavPickerTab"
+            android:text="@string/lemurx_fav_tab_url" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/lemurx_fav_url_area"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="vertical"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <EditText
+            android:id="@+id/lemurx_fav_url_input"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:background="@drawable/lemurx_fav_edit_field_bg"
+            android:hint="@string/lemurx_fav_add_url_hint"
+            android:imeOptions="actionNext"
+            android:inputType="textUri"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:singleLine="true"
+            android:textColor="@color/lemurx_ntp_text_primary"
+            android:textColorHint="@color/lemurx_ntp_text_secondary"
+            android:textSize="14sp"
+            tools:ignore="Autofill,LabelFor" />
+
+        <EditText
+            android:id="@+id/lemurx_fav_url_title_input"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/lemurx_fav_edit_field_bg"
+            android:hint="@string/lemurx_fav_add_url_title_hint"
+            android:imeOptions="actionDone"
+            android:inputType="text"
+            android:maxLength="14"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:singleLine="true"
+            android:textColor="@color/lemurx_ntp_text_primary"
+            android:textColorHint="@color/lemurx_ntp_text_secondary"
+            android:textSize="14sp"
+            tools:ignore="Autofill,LabelFor" />
+
+        <TextView
+            android:id="@+id/lemurx_fav_url_add"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/lemurx_fav_edit_field_bg"
+            android:gravity="center"
+            android:text="@string/lemurx_fav_add"
+            android:textColor="@color/lemurx_ntp_text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/lemurx_fav_picker_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:gravity="center"
+        android:textColor="@color/lemurx_ntp_text_secondary"
+        android:textSize="14sp"
+        android:visibility="gone" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/lemurx_fav_picker_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="24dp" />
+</LinearLayout>

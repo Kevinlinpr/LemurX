@@ -1,0 +1,15 @@
+diff --git a/components/omnibox/common/omnibox_features.cc b/components/omnibox/common/omnibox_features.cc
+index 62a8eb06a2..8030ec7620 100644
+--- a/components/omnibox/common/omnibox_features.cc
++++ b/components/omnibox/common/omnibox_features.cc
+@@ -192,7 +192,9 @@ BASE_FEATURE(kHideAimEntrypointOnUserInput,
+ BASE_FEATURE(kHideAimEntrypointForUrlSuggestions, ENABLED);
+ 
+ // When enabled, the multimodal input button is shown in the Omnibox.
+-BASE_FEATURE(kOmniboxMultimodalInput, ENABLED);
++// LemurX: off. The "+" (AI Mode / fusebox) entry point is replaced by the
++// search-engine picker on the status icon; see LemurXSearchEnginePicker.
++BASE_FEATURE(kOmniboxMultimodalInput, DISABLED);
+ 
+ // An additional gate to the behavior of OmniboxMultimodalInput on desktop.
+ BASE_FEATURE(kAndroidDesktopAimGate, ENABLED);

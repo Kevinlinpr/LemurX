@@ -1,0 +1,72 @@
+diff --git a/tools/grit/grit/node/message.py b/tools/grit/grit/node/message.py
+index 74413e10aa..ef64b66f68 100644
+--- a/tools/grit/grit/node/message.py
++++ b/tools/grit/grit/node/message.py
+@@ -4,6 +4,7 @@
+ 
+ '''Handling of the <message> element.'''
+ 
++import os
+ import re
+ 
+ from grit.node import base
+@@ -23,6 +24,48 @@ _WHITESPACE = re.compile(
+   r'(?P<start>\s*)(?P<body>.+?)(?P<end>\s*)\Z', re.DOTALL | re.MULTILINE
+ )
+ 
++# LemurX: product-name rebranding, applied to every emitted message (source
++# language and all .xtb translations alike) when GRIT runs with
++# -E branding_path_component=lemurx (tools/grit/grit_args.gni forwards the GN
++# arg of the same name; grit.py exports -E pairs into os.environ).
++#
++# It runs on the *output* text in Translate(), never on the parsed message, so
++# message ids (which are hashes of the English source) and therefore the
++# translation lookup stay exactly as upstream. Only the capitalised product
++# names are touched: "Google Chrome", "Chrome" and "Chromium" as whole words.
++# Sibling brands and things that are not this browser are left alone:
++# ChromeOS / Chrome OS, Chromebook, Chromecast, ChromeVox, ChromeDriver,
++# Chrome Web Store, Chrome Remote Desktop, Chrome Enterprise, and anything in
++# lowercase such as chrome:// URLs.
++#
++# "Chromium" is replaced unconditionally: it is never a sibling product, and
++# nothing of that name may remain visible in Aero. Inflected forms in
++# translations keep their lowercase ending attached to the new brand
++# ("Chromiums" -> "Aeros", "Chromiumin" -> "Aeroin", "Chromiumia" ->
++# "Aeroia"), which is how those languages decline a foreign name anyway;
++# likewise short agglutinated prefixes ("iChromium" / "weChromium" in Zulu ->
++# "iAero" / "weAero").
++_LEMURX_BRAND = 'Aero'
++_LEMURX_BRAND_KEEP = (
++  r'(?!\s+(?:OS|Web\s+Store|Remote\s+Desktop|Enterprise|Browser\s+Cloud'
++  r'|Root\s+Program|Sync\s+Server)(?![A-Za-z]))'
++)
++_LEMURX_BRAND_RE = re.compile(
++  r'(?<![A-Za-z])(?:Google\s+)?Chrome(?![A-Za-z])' + _LEMURX_BRAND_KEEP
++  + r'|(?<![A-Za-z])(?:Google\s+)?(?P<prefix>[A-Za-z]{0,2})Chromium(?P<suffix>[a-z]*)'
++)
++
++
++def _LemurXRebrandMatch(match):
++  return ((match.group('prefix') or '') + _LEMURX_BRAND
++          + (match.group('suffix') or ''))
++
++
++def _LemurXRebrand(text):
++  if 'Chrom' not in text:
++    return text
++  return _LEMURX_BRAND_RE.sub(_LemurXRebrandMatch, text)
++
+ # <ph> placeholder elements should contain the special character formatters
+ # used to format <ph> element content.
+ # Android format.
+@@ -285,6 +328,10 @@ class MessageNode(base.ContentNode):
+     msg = self.clique.MessageForLanguageAndGender(
+       lang, gender, self.PseudoIsAllowed(), self.ShouldFallbackToEnglish()
+     ).GetRealContent()
++    # LemurX: rebrand the product name on the way out (see _LemurXRebrand).
++    # (Checked per call: grit's -E handling fills os.environ after import.)
++    if os.environ.get('branding_path_component') == 'lemurx':
++      msg = _LemurXRebrand(msg)
+     # Optimization: Avoid the overhead of regular expression substitution if the
+     # string clearly does not contain the target '...'.
+     if self._replace_ellipsis and '...' in msg:
