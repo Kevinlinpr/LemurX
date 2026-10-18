@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="docs/images/logo.png" alt="LemurX" width="120">
+  <img src="docs/images/logo.png" alt="Aero" width="120">
 </p>
 
-<h1 align="center">LemurX</h1>
+<h1 align="center">Aero</h1>
 
 <p align="center">
-  <strong>The browser that runs your code.</strong><br>
-  Official Chromium · Android · Lua 5.4 · no extension system
+  <strong>Personal Agent Browser.</strong><br>
+  Official Chromium · Android · one tab, one agent · no extension system
 </p>
 
 <p align="center">
@@ -14,151 +14,63 @@
   ·
   <a href="LICENSE">BSD-3-Clause</a>
   ·
-  <a href="src/chrome/lemurx/lua/docs/LUA_GUIDE.md">Lua guide</a>
-  ·
   <a href="CONTRIBUTING.md">Contributing</a>
   ·
   <a href="SECURITY.md">Security</a>
 </p>
 
-LemurX is an Android browser built on the official Chromium stable channel,
-with Lua 5.4 living *inside* the browser process, in every renderer, and in
-the native shell. There is no WebExtensions API. Drop a `.lua` file in
-`files/lua/`, restart, and the browser is yours.
+Aero is an Android browser built on the official Chromium stable channel
+whose primary surface is a conversation with a personal agent. Every tab is
+bound to one agent thread: a new tab is a new conversation, and the pages the
+agent opens, reads and operates are ordinary Chromium tabs on the same phone,
+visible to the user at all times.
 
-An extension is a guest. It sees what the host chooses to show it. A script
-here *is* the host: it can veto a navigation before it commits, rewrite every
-subresource request synchronously inside the renderer, hold real main-world
-DOM handles, register its own URL schemes, drive the full DevTools Protocol
-without a cable, and replace the native shell with a widget tree it draws
-itself.
+The agent itself (OpenMuse) runs on a server you control. Aero contributes
+the two things a server cannot have: a real browser with the user's sessions,
+and the user's eyes and hands on the result.
 
-<p align="center">
-  <img src="docs/images/custom.jpg" alt="The toolbar, the page, and the shell are all scriptable" width="720">
-</p>
+## What Aero adds to Chromium
 
-## Extensions ask permission. Scripts just do it.
+* **Console shell** (`LemurXConsoleShell`, `lemurx/muse/*`) — native
+  `chrome-native://lemurx/...` pages for chat, activity and personal data, a
+  bottom bar floating over every page, and the rule that the new tab page *is*
+  the agent conversation (`LemurXChromeHost.newTabUrlOverride`).
+* **Agent device bridge** (`lemurx/agent/*`) — turns this install into the
+  agent's browser worker. The phone long-polls `GET /lemurx/device/poll` on the
+  OpenMuse server, executes browser-worker REST commands locally
+  (`POST /sessions`, `navigate`, `read`, `elements`, `screenshot`, `input`, `close`) on
+  real tabs, and replies with `POST /lemurx/device/reply`. The page is never
+  injected into and no DevTools domain is attached: text and clickable
+  elements come from a one-shot accessibility-tree snapshot
+  (`lemurx_ax.cc` ↔ `LemurXAx` / `LemurXPage`), screenshots are a compositor
+  copy of the web viewport, and every click / scroll / pinch is a real
+  touchscreen `MotionEvent`. Native dialogs (`<select>`, date/time, JS
+  `alert`/`confirm`/`prompt`, the long-press menu) are reported on `read`
+  and answered through Chromium's own controllers (`LemurXDialogs`).
+* **Google sign-in for the Aero account** (`LemurXGoogleSignIn`), first-run
+  and startup-promo suppression, Aero branding, the Lemur Discover news
+  stream and the favorites grid on the new tab page.
 
-A Chrome extension lives in a sandbox on the far side of an API designed to
-keep it out. A LemurX script runs in the browser process, next to Chromium's
-own code.
-
-| Can you… | Chrome extension | LemurX script |
-|---|---|---|
-| Rewrite response bodies on the fly | Headers and redirects only | `net.addRule{ replaceBody = … }` |
-| Put a button on the real toolbar | Popups and side panels | `ui.render("toolbar.end", …)` |
-| Dump, restyle, or tear out any native View | — | `ui.dump()` · `ui.style()` · `ui.replace()` |
-| Full DevTools Protocol on a phone | Desktop, one domain at a time | `cdp.send(tab, "Any.method", …)` |
-| Fetch anything, no CORS, no host permissions | Declare every host up front | `http.fetch(url)` |
-| Read and write Chromium prefs, site permissions, feature flags | — | `prefs.set` · `perm.set` · `features.enabled` |
-| Run Lua inside every renderer, on real DOM handles | — | `page` · `dom_document` · `send-request` |
-| Drive other apps, not just the page | — | `system.tree` · `system.tap` · `agent.run` |
-| Share a script with strangers | Store review | Sandboxed UGC domain, its own `lua_State` |
-
-## Every layer, scriptable
-
-The full reference is [`src/chrome/lemurx/lua/docs/LUA_GUIDE.md`](src/chrome/lemurx/lua/docs/LUA_GUIDE.md).
-`lemurx.help()` prints the same catalog from the REPL.
-
-* **`lemurx.*`** — tabs, network rules, HTTP, files, storage, shell, declarative
-  native UI, native view surgery, input, cookies, history, prefs, the whole
-  Chrome DevTools Protocol. Local scripts get the full standard library:
-  `io`, `os`, `debug`, `require`.
-* **luakit, on a phone** — the C-level Lua API of
-  [luakit](https://luakit.github.io/) reimplemented on Chromium: `widget{}`
-  trees mapped to Android views, `webview` bound to a tab,
-  `luakit.register_scheme`, `sqlite3`, `regex`, `soup`, `stylesheet`, `timer`,
-  `download`, `ipc_channel`. The standard module set (`window`, `webview`,
-  `modes`, `binds`, `lousy.*`, `follow`, `adblock`, `formfiller`, `session`,
-  the `luakit://` pages) is a clean-room rewrite, so an `rc.lua` written for
-  luakit runs here.
-* **Lua in the renderer** — one `lua_State` per renderer with `page`,
-  `dom_document`, `dom_element` on real V8 handles, a synchronous
-  `send-request` hook on every subresource, and `luakit.register_function` to
-  expose Lua to page JavaScript.
-* **Two trust domains.** Scripts on your device run with full power. Scripts
-  from other people (`files/lua/ugc/`) get their own `lua_State`, a reduced
-  standard library, and no privileged APIs (`cookie`, `history`, `cdp`,
-  `prefs`, `system`, luakit natives). Text-only `load`, no bytecode. The
-  boundary is enforced at runtime, per state.
-
-```lua
--- files/lua/10_clean.lua — block a tracker, then strip leftovers in every frame.
-lemurx.net.addRule({
-  match  = "*://*.doubleclick.net/*",
-  action = "block",
-})
-
-lemurx.tabs.on("loaded", function(ev)
-  lemurx.tabs.inject(ev.id, [[
-    document.querySelectorAll('.ad, [id^="ad-"]').forEach(function (e) { e.remove(); })
-  ]], { world = "isolated", frames = "all" })
-end)
-```
-
-## Official scripts: the popular Chrome extensions, rewritten in Lua
-
-Exposing APIs is not the point; what people actually want is the extensions
-they already use. `src/chrome/lemurx/lua/official/` ships complete Lua
-re-implementations of the most-installed Chrome extensions, bundled in the apk
-and listed under **Lua scripts** in the menu, each with its own
-`lemurx://<id>/` settings page:
-
-| Script | Replaces |
-|---|---|
-| `adblock` | uBlock Origin · AdBlock · Adblock Plus · AdGuard — ABP-compatible engine, EasyList & friends, synchronous subresource blocking in the renderer, cosmetic filters |
-| `userscripts` | Tampermonkey — `==UserScript==` metadata, `@match`/`@require`/`@resource`, the `GM_*` API, one-tap install from Greasy Fork |
-| `darkmode` | Dark Reader — Chromium's native Force Dark driven from Lua, plus filter / static CSS engines |
-| `translate` | Google Translate · Immersive Translate — bilingual page translation, selection popup, Google / Microsoft / DeepL / OpenAI-compatible engines |
-| `privacy` | Privacy Badger · ClearURLs · DuckDuckGo Privacy Essentials — tracker learning, URL cleaning, GPC/DNT, HTTPS upgrade, site grade |
-| `tabs` | OneTab · Session Buddy · The Great Suspender |
-| `newtab` | Momentum · Todoist · Earth View — the stock NTP replaced by a Lua page |
-| `jsonviewer` | JSON Viewer |
-| `video` | Picture-in-Picture · Global Speed · Volume Master |
-| `ai` | Sider · Monica · HARPA · Grammarly · QuillBot · Wordtune · LanguageTool — any OpenAI-compatible endpoint, keys stay in the browser process |
-| `focus` | StayFocusd · Toggl Track |
-| `useragent` | User-Agent Switcher |
-| `wappalyzer` | Wappalyzer |
-| `screenshot` | FireShot — full-page capture over CDP, canvas annotation editor |
-| `octotree` | Octotree |
-| `clipper` | Google Keep · Save to Google Drive · Evernote Web Clipper — readability extraction to Markdown, share to any app |
-
-The full 50-extension coverage table, and the list of low-level capabilities
-that were added to Chromium/Java/C++ because a script needed them, is in
-`src/chrome/lemurx/lua/official/CATALOG.md`. The scripts share a small
-framework, `lx` (`official/lx/`), documented in chapter 8 of the Lua guide;
-local scripts can `require("lx")` too.
-
-Users see all of this in a native activity (**Lua scripts** in the menu):
-official, local and UGC scripts grouped, per-script switches, metadata parsed
-from the file header, source view, in-place editing for local/UGC scripts, and
-"copy to local" to fork an official script.
+There is no scripting runtime and no WebExtensions API. Everything above is
+plain Java/C++ on top of upstream Chromium, wired in through a handful of
+small patches.
 
 ## The user always wins
 
-Depth of customisation is only worth anything if it never costs the user
-control of the browser. Three guarantees back that:
-
-* **Stock when idle.** Every hook LemurX adds to Chromium (URL-loader
-  throttles, navigation throttles, certificate override, custom schemes, back
-  press, app menu, tab observers, renderer Lua) is gated on state that only a
-  script can create. With no script running, each hook is an early `return`
-  and the browser behaves like the official build it was compiled from.
-* **A native master switch.** The three-dot menu always ends with **Lua
-  scripts**: a plain Android activity (no Lua involved, scripts cannot hide or
-  intercept it) with an on/off switch for the runtime and a switch per
-  script — the official scripts, your local scripts, and `ugc/` scripts alike.
-  Applying a change tears down everything scripts did — net rules, attached
-  webviews, certificate whitelist, CDP sessions, schemes, timers, overlays,
-  widgets, skin, per-tab UA/headers — stops the Lua engine
-  (`LemurXEngine::Stop`), and recreates the activity so the shell is inflated
-  from stock resources. Turning it back on starts a fresh `lua_State` and
-  re-runs the scripts. The switch lives in its own preference file that no
-  Lua API can reach.
-* **Boot-loop protection.** If the process dies twice in a row within 20 s of
-  starting scripts, the runtime is disabled automatically and the browser
-  comes up stock with a notice; a script can never lock you out of the
-  browser you need to fix it.
+* **Visible, interruptible.** Pages the agent opens are foreground tabs by
+  default; a banner on the operated tab says so and has a **Stop** button that
+  cuts the bridge for the rest of the session. While the bridge is connected
+  an ongoing notification is shown.
+* **Only the web.** The bridge navigates `http(s)` URLs only; `chrome://`,
+  `chrome-native://`, `file://` and the console pages themselves are never
+  operated. Page text is data: it is handed to the server as-is, never
+  interpreted on the device.
+* **No secrets in the tree.** The device token lives in `assets/lemurx/device.json`
+  (empty in git, injected at packaging time) or in app preferences; it is never
+  logged and never reaches a page.
+* **Stock when idle.** Without a device token the bridge does nothing; without
+  the console shell enabled the browser behaves like the official build it was
+  compiled from.
 
 ## Layout
 
@@ -166,33 +78,31 @@ control of the browser. Three guarantees back that:
 CHROMIUM_VERSION   pinned official Chromium release
 chromium/          .gclient + fetch.sh; the checkout itself is not tracked
 src/               overlay — files that do not exist upstream, mirrored at the same paths
-  chrome/browser/lemurx/               browser-process Lua: net rules, throttle, cookies
-  chrome/browser/ui/android/lemurx/    Lua engine, lemurx.* API, CDP, luakit natives
-  chrome/renderer/lemurx/              renderer-embedded Lua (luakit web extension model)
-  chrome/common/lemurx_web.mojom       browser <-> renderer Lua IPC
-  chrome/android/java/.../lemurx/      Java hosts (shell, UI, widgets, moat)
-  chrome/lemurx/lua/                   init.lua, tutorial, examples, docs
-  chrome/lemurx/lua/official/          official scripts (Lua rewrites of Chrome extensions) + lx framework, CATALOG.md
-  chrome/lemurx/luakit/                luakit-compatible runtime: kernel/, lib/, lousy/, config/
+  chrome/browser/ui/android/lemurx/    AX-tree snapshot + compositor screenshot (lemurx_ax)
+  chrome/android/java/.../lemurx/      console shell, Chromium hooks, Discover stream
+  chrome/android/java/.../lemurx/agent/  agent device bridge (LemurXDeviceBridge / LemurXAx / LemurXPage / LemurXDialogs / human input)
+  chrome/android/java/.../lemurx/muse/   native console pages: chat, activity, data, settings, sign-in
+  chrome/android/java/.../lemurx/favorites/  new tab page favorites grid
+  chrome/lemurx/agent/device.json      bridge config asset (server, empty token)
+  chrome/lemurx/console/ muse/ search/ resources of the console shell and native pages
   chrome/lemurx/brand/                 Android branding: launcher icons, app_name, logo drawables
   chrome/lemurx/discover/              strings for the NTP Discover news stream
-  chrome/lemurx/ntp/                   NTP overlay: LemurX wordmark, Lemur search box, favorites UI
+  chrome/lemurx/ntp/                   NTP overlay: Aero wordmark, Lemur search box, favorites UI
   chrome/app/theme/lemurx/             BRANDING + product logos (branding_path_component)
   components/resources/*/lemurx/       chrome://version logo
   components/vector_icons/lemurx/      product.icon (QR code centre, etc.)
-  third_party/lua/                     Lua 5.4.7
 patches/           unified diffs for the handful of upstream files we hook into
 tools/apply.py     lays src/ + patches/ over chromium/src
 tools/args.gn      default GN args (arm64, official, enable_extensions=false)
 tools/brand/       master logo + gen_brand_assets.py (regenerates everything above)
 ```
 
-Everything LemurX adds lives in `src/` and `patches/`; the Chromium tree is
+Everything Aero adds lives in `src/` and `patches/`; the Chromium tree is
 pristine upstream at the pinned tag. There is no fork.
 
 ### Branding
 
-The shipped app is branded LemurX end to end without editing any upstream
+The shipped app is branded Aero end to end without editing any upstream
 resource file:
 
 - `branding_path_component = "lemurx"` (in `tools/args.gn`) points Chromium's
@@ -205,13 +115,13 @@ resource file:
   `chrome_sync_logo`, `chromelogo16`, `chrome_logo_blue`, promo illustrations, …)
   instead of the upstream resources of the same name.
 - `patches/tools_grit_grit_node_message.py.patch` rewrites "Chromium" /
-  "Chrome" / "Google Chrome" to "LemurX" in every emitted UI string, in every
+  "Chrome" / "Google Chrome" to "Aero" in every emitted UI string, in every
   language, at grit output time. Message ids are untouched so translations keep
   matching; ChromeOS, Chromebook, Chromecast, Chrome Web Store, Chrome
   Enterprise and lowercase `chrome://` URLs are left alone. The user agent is
   unaffected (it is not a grit string).
-- Code identifiers (`org.chromium.*`, `chrome/` paths, `lemurx.chrome.*` Lua API)
-  keep their names; they are not user-visible.
+- Code identifiers (`org.chromium.*`, `chrome/` paths) keep their names; they
+  are not user-visible.
 
 Regenerate all assets from the master logo with
 `python3 tools/brand/gen_brand_assets.py` (needs Pillow), then `tools/apply.py`.
@@ -220,7 +130,7 @@ Regenerate all assets from the master logo with
 
 Chromium's Discover feed renders through the proprietary xsurface library,
 which is only a stub in public builds, so upstream can never show anything but
-"can't refresh". LemurX keeps the whole upstream surface — the "Discover"
+"can't refresh". Aero keeps the whole upstream surface — the "Discover"
 header, its on/off switch, the `ARTICLES_LIST_VISIBLE` pref — and swaps only the
 content stream: `FeedSurfaceCoordinator.createFeedStream()` returns
 `LemurXDiscoverStream` (`src/chrome/android/java/.../lemurx/`) instead of
@@ -238,9 +148,8 @@ content stream: `FeedSurfaceCoordinator.createFeedStream()` returns
   `discover.base_url` > `https://api.lemurbrowser.com/`.
   `discover.enabled=false` in `lemurx_settings` restores the upstream
   `FeedStream`.
-- Independent of Lua: the stream does not go through the Lua runtime, so it is
-  unaffected by the master switch; scripts that want to own the home page do so
-  with `lemurx.skin` / `lemurx.ui` as before.
+- Independent of the agent service: the stream works even when the OpenMuse
+  server is unreachable.
 
 ### New tab page: logo, search box, favorites
 
@@ -249,7 +158,7 @@ The NTP keeps upstream's structure (`NewTabPageLayout`, `LogoCoordinator`,
 each slot is Lemur's.
 
 - Logo: `//chrome/lemurx/ntp:ntp_resources` (`resource_overlay = true`) replaces
-  `ic_google_logo` with the LemurX wordmark (`tools/brand/gen_ntp_logo.py`,
+  `ic_google_logo` with the Aero wordmark (`tools/brand/gen_ntp_logo.py`,
   tinted to the text colour, 42dp tall). `LogoMediator` /
   `NtpCustomizationUtils` are patched to always show the logo and never fetch a
   doodle, whatever the default search engine.
@@ -268,35 +177,45 @@ each slot is Lemur's.
   Bookmarks and History shortcuts. Favicons come from `LargeIconBridge` with a
   Lemur-style letter fallback.
 
-### Automation base for AI agents
+### Agent device bridge
 
-A GUI agent loops observe → decide → act. Deciding is the model's job (a
-script talks to whatever LLM it likes over `lemurx.http`); LemurX provides the
-other two steps as three layers, all exposed to Lua and all inert until a
-script calls them (`src/chrome/lemurx/lua/scripts/agent.lua`,
-`LemurXSystemHost.java`, `LemurXAccessibilityService.java`):
+OpenMuse's `BrowserService` only speaks the browser-worker REST contract. The
+phone is behind NAT and can only dial out, so the server keeps a small queue
+(`apps/server/src/lemurx-bridge.ts`): worker calls are turned into commands,
+the device fetches them with a 25 s long poll and posts the result back.
 
-| Layer | Observe | Locate | Act | Needs |
-|---|---|---|---|---|
-| Web page | `tabs.screenshot` | `agent.mark` (set-of-marks via JS), CDP | `input.tap/type`, JS | nothing |
-| Browser shell | `ui.screenshot` (whole window) | `ui.dump/find` (stable `ref` per view) | `ui.click/setText/tap/swipe` | nothing |
-| Other apps | `system.screenshot` | `system.tree/find` | `system.click/tap/swipe/global` | user enables the accessibility service once |
+| Worker call | On the device |
+|---|---|
+| `POST /sessions {id,url}` / `…/navigate` | open or reuse the session's tab, load the URL (foreground by default) |
+| `GET …/read` | accessibility-tree snapshot → `{url,title,text,truncated,elementCount,focus,pageScale,dialog?}` |
+| `GET …/elements` | the same snapshot's interactive nodes, rectangles in the 1280×800 console canvas |
+| `GET …/screenshot` | compositor copy of the web viewport, JPEG q70 (no agent overlay) |
+| `POST …/input` | `click` / `text` accept a `target` (element id or visible text): the device re-snapshots, scrolls the node into view, pinches in if it is smaller than 18 dp, then taps the live rectangle. Raw `x,y` still works. `scroll` is a Bézier swipe (1/4 of the time it overshoots and corrects). `pinch {scale}` is a two-finger pinch. `text` is typed through the IME connection; `key` is a soft-keyboard `KeyEvent`. `type:"dialog"` answers the native dialog reported by `read`. |
+| `POST …/close` | close the tab, mark the session closed |
 
-- `lemurx.agent.observe()` merges the layers into one observation with every
-  element in **screen pixels** (web CSS coordinates are mapped through
-  `lemurx.tabs.viewport()`); `agent.describe(obs)` renders it as compact text
-  with a `ref` per element (`w7` web, `n12` native, `s5` system);
-  `agent.act{type="tap", ref="w7"}` executes by ref and picks the most reliable
-  path for that layer. `agent.run(policy, opts)` is the loop.
-- `lemurx.system.*` is an `AccessibilityService` — the sanctioned, no-root
-  equivalent of `adb shell uiautomator dump` / `input tap` / `screencap`
-  (`dispatchGesture`, `performGlobalAction`, `takeScreenshot`). It is declared
-  in the manifest (`patches/…AndroidManifest.xml.patch`, resources in
-  `src/chrome/lemurx/agent/`), off until the user turns it on in
-  Settings › Accessibility, privileged-only in Lua, and it stops answering when
-  the Lua master switch is off.
+Sessions survive restarts (`lemurx_agent` preferences); a tab the user closed
+is reopened at its last URL. Config comes from app preferences, then
+`assets/lemurx/device.json`, then `MuseApi.apiUrl()` for the server address.
 
-See `LUA_GUIDE.md` §4.17 for the full API.
+Foreground only, user first. Every touch is drawn on screen
+(`LemurXTouchOverlay`: aim ring before the finger lands, pressed dot, ripple on
+lift, swipe trail) and the operated tab carries a banner with **Stop**. Typing
+is visible too: the system IME is another process's window that nothing can
+draw over, so while the agent types it is dismissed and `LemurXAgentKeyboard`
+— an in-app soft keyboard (letters / symbols layers, Shift, a candidate chip
+for CJK and anything else not on a key) — is shown instead, with the agent's
+finger pressing each key and the text echoed in its strip; the characters
+themselves still go through Chromium's InputConnection exactly as before. A
+real finger on the screen (`ChromeTabbedActivity.dispatchTouchEvent`) cancels
+the gesture in flight and answers `USER_ACTIVE` for the next 2.5 s. When the
+window is not resumed the device answers `DEVICE_BACKGROUND`; the poll carries
+`fg=0|1`, and the server (`lemurx-bridge.ts`, `LEMURX_FALLBACK_WORKER_URL`)
+routes new sessions and navigations to the cloud worker until Aero is back on
+screen. There is no DevTools session at all: the accessibility tree and the
+compositor are the only readers, so the page cannot observe a debugger, a
+`Runtime.enable`, or injected script. Inputs are paced (300–900 ms between
+commands, a reading pause after `read` proportional to the text) so the
+device, not the agent, looks like a person.
 
 ## Build
 
@@ -311,7 +230,7 @@ autoninja -C out/lemurx chrome_public_apk
 ```
 
 Default GN args are a **local** arm64 release with the royalty-free Chromium
-codec set. The app is still branded LemurX (`branding_path_component`).
+codec set. The app is still branded Aero (`branding_path_component`).
 `ffmpeg_branding` in Chromium names the *codec bundle*, not the product:
 
 | GN | Meaning |
@@ -360,10 +279,8 @@ for community expectations.
 
 ## License
 
-Everything in this repository is BSD-3-Clause (`LICENSE`), including the
-luakit-compatible Lua runtime, which is an independent re-implementation of
-luakit's public API and contains no luakit code. Third-party notices (Chromium,
-Lua, markdown.lua) are in `NOTICE`.
+Everything in this repository is BSD-3-Clause (`LICENSE`). Third-party notices
+(Chromium) are in `NOTICE`.
 
 This overlay does not grant a license to Google Chrome trademarks, to
 third-party extension names used as comparators in docs, or to patent rights

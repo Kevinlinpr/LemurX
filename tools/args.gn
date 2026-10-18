@@ -14,7 +14,7 @@ use_remoteexec = false
 use_siso = true
 use_reclient = false
 
-# LemurX: no extension system. Lua is the only extension surface.
+# LemurX: no extension system. The agent (OpenMuse) is the only automation surface.
 enable_extensions = false
 
 # Codec *bundle*, not the app name. "Chromium" is the royalty-free set
@@ -30,7 +30,7 @@ enable_widevine = false
 enable_remoting = false
 chrome_pgo_phase = 0
 android_channel = "stable"
-chrome_public_manifest_package = "org.lemurx.browser"
+chrome_public_manifest_package = "com.osmangroupx.aero"
 android_override_version_name = "0.1.0"
 android_override_version_code = "1"
 

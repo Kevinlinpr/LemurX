@@ -2,10 +2,10 @@
 # Copyright 2026 The LemurX Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-"""Renders the "LemurX" wordmark shown above the new-tab-page search box.
+"""Renders the "Aero" wordmark shown above the new-tab-page search box.
 
 Mirrors Lemur's `lemur_ic_ntp_logo.png` treatment (a black rounded-bold
-wordmark, 42dp tall, white in dark mode) but with the LemurX name. The PNG is
+wordmark, 42dp tall, white in dark mode) but with the Aero name. The PNG is
 pure black on transparent so Chromium's existing night-mode tint
 (`setTint(Color.WHITE)` in NtpCustomizationUtils) turns it white without a
 separate dark asset.
@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw, ImageFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_ROOT = os.path.join(HERE, "..", "..", "src", "chrome", "lemurx", "ntp", "res")
 
-TEXT = "LemurX"
+TEXT = "Aero"
 FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/lato/Lato-Black.ttf",
     "/usr/share/fonts/truetype/lato/Lato-Heavy.ttf",

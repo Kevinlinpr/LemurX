@@ -15,6 +15,7 @@ __pycache__/
 *.keystore
 *.jks
 *.pem
+.play/
 .env
 .env.*
 local_args.gn

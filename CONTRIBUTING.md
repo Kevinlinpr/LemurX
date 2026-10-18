@@ -12,8 +12,9 @@ Chromium tag, not a Chromium fork. Please keep it that way.
   APKs, or spreadsheets. See `.gitignore`.
 - Match the surrounding comment language (many LemurX sources are commented
   in Chinese). Do not delete existing comments.
-- Lua scripts that ship in the APK go under `src/chrome/lemurx/lua/`. Official
-  rewrites of popular extension *capabilities* live in `lua/official/`.
+- Agent-facing code goes under `src/chrome/android/java/.../lemurx/agent/`;
+  keep the browser-worker REST semantics in sync with OpenMuse's
+  `lemurx-bridge.ts`.
 
 ## Build from a clone
 
@@ -34,11 +35,10 @@ with `DEPOT_TOOLS=/path/to/depot_tools`.
 
 | Kind of change | Put it in |
 |---|---|
-| New C++/Java/Lua/resources that Chromium does not have | `src/` at the same path they should appear under `chromium/src` |
+| New C++/Java/resources that Chromium does not have | `src/` at the same path they should appear under `chromium/src` |
 | A hook into an existing Chromium file | a new or updated file in `patches/` |
 | Default GN flags | `tools/args.gn` (keep remote exec and proprietary codecs **off**) |
 | Branding assets | `tools/brand/`, then `python3 tools/brand/gen_brand_assets.py` |
-| Lua API docs | `src/chrome/lemurx/lua/docs/LUA_GUIDE.md` |
 
 After editing overlay files, re-run `tools/apply.py` on an already-fetched
 tree (it replaces links). After editing patches, `--revert` then apply again,
@@ -61,10 +61,9 @@ When Chromium is upgraded (`CHROMIUM_VERSION` + `chromium/.gclient`):
 
 1. One concern per PR when you can.
 2. Describe *why*, not only what changed.
-3. If you touch Lua APIs, update `LUA_GUIDE.md` in the same PR.
-4. If you add a privileged API, say how UGC scripts (`files/lua/ugc/`) are
-   kept away from it, and how the native master switch tears it down.
-5. Do not enable `use_remoteexec`, `ffmpeg_branding = "Chrome"`, or
+3. If you change what the agent can do on the device, say how the user stays
+   in control (visible, interruptible, http(s) only).
+4. Do not enable `use_remoteexec`, `ffmpeg_branding = "Chrome"`, or
    `proprietary_codecs` in the default `tools/args.gn`.
 
 ## Code of conduct

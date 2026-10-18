@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Generate every LemurX brand asset from the master logo.
+"""Generate every Aero brand asset from the master logo.
 
     tools/brand/gen_brand_assets.py
 
-Master: tools/brand/lemurx_logo_1024.png (the logo from the LemurX website,
-lemur-website/assets/logo.png). Everything Chromium ships as "product logo"
-is regenerated from it and written into the overlay (src/) so that
-tools/apply.py lays it over the pristine checkout:
+Master: tools/brand/lemurx_logo_1024.png (the Aero @ mark, white punched out).
+Everything Chromium ships as "product logo" is regenerated from it and written
+into the overlay (src/) so that tools/apply.py lays it over the pristine checkout:
 
   src/chrome/lemurx/brand/res/        Android resources: launcher icons, app_name,
                                       and every drawable upstream draws the Chrome
@@ -23,8 +22,8 @@ tools/apply.py lays it over the pristine checkout:
   src/components/vector_icons/lemurx/ product.icon / product_refresh.icon
 
 Raster assets are plain PIL resizes. Vector assets (VectorDrawable pathData,
-Skia .icon, SVG) come from a small built-in tracer: the logo is quantised to
-four flat colours (sky, fur, mask, eye), each colour mask is contour-traced and
+Skia .icon, SVG) come from a small built-in tracer: the @ is treated as one
+mark class against a transparent/white background, contour-traced and
 simplified, and the polygons are emitted in the three formats.
 
 Only PIL is required.
@@ -35,7 +34,7 @@ import os
 import shutil
 import sys
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -49,12 +48,12 @@ CORNER = 0.17
 # Vertical gradient of the tile background (sampled from the master).
 SKY_TOP = (0x14, 0xD5, 0xE6)
 SKY_BOTTOM = (0x01, 0x8F, 0xE3)
-# Flat palette used by the tracer.
+# Product name shown next to the mark (chrome://version, wordmarks).
+NAME = "Aero"
+# Flat palette used by the tracer. The @ is one class; white is background.
 PALETTE = {
-    "sky": (0x12, 0xB8, 0xE4),
-    "fur": (0xF4, 0xF4, 0xF8),
-    "mask": (0x2B, 0x2B, 0x33),
-    "eye": (0xF6, 0xA6, 0x23),
+    "sky": (0xFF, 0xFF, 0xFF),
+    "mark": (0x0F, 0xA9, 0xE4),
 }
 DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
 FONT_CANDIDATES = [
@@ -89,7 +88,7 @@ _master = None
 def master():
     global _master
     if _master is None:
-        _master = Image.open(MASTER).convert("RGB")
+        _master = Image.open(MASTER).convert("RGBA")
     return _master
 
 
@@ -104,12 +103,39 @@ def rounded_mask(size, radius_frac=CORNER, inset=0.0):
     return big.resize((size, size), Image.LANCZOS)
 
 
+_mark = None
+
+
+def mark():
+    """The @ with white already punched out (RGBA)."""
+    global _mark
+    if _mark is None:
+        img = master().convert("RGBA")
+        px = img.load()
+        w, h = img.size
+        for y in range(h):
+            for x in range(w):
+                r, g, b, a = px[x, y]
+                mn = min(r, g, b)
+                if mn > 248:
+                    px[x, y] = (255, 255, 255, 0)
+                elif mn > 232:
+                    px[x, y] = (r, g, b, int(255 * (248 - mn) / 16.0))
+        _mark = img
+    return _mark
+
+
 def tile(size):
-    """The logo as an RGBA tile with transparent rounded corners."""
-    img = master().resize((size, size), Image.LANCZOS).convert("RGBA")
-    # Inset a hair so the black JPEG corners never bleed through the edge AA.
-    img.putalpha(rounded_mask(size, inset=max(0.6, size / 400.0)))
-    return img
+    """White rounded tile with the @ centred on it."""
+    canvas = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+    inner = int(round(size * 0.88))
+    m = mark().resize((inner, inner), Image.LANCZOS)
+    off = (size - inner) // 2
+    canvas.alpha_composite(m, (off, off))
+    # Inset a hair so the corners never bleed through the edge AA.
+    a = rounded_mask(size, inset=max(0.6, size / 400.0))
+    canvas.putalpha(ImageChops.multiply(canvas.split()[3], a))
+    return canvas
 
 
 def sky(size):
@@ -119,15 +145,6 @@ def sky(size):
         t = y / max(1, size - 1)
         img.putpixel((0, y), tuple(int(round(a + (b - a) * t)) for a, b in zip(SKY_TOP, SKY_BOTTOM)))
     return img.resize((size, size), Image.NEAREST).convert("RGBA")
-
-
-def tile_on_sky(size, tile_frac):
-    """Full-bleed adaptive-icon layer: gradient + centred tile."""
-    img = sky(size)
-    t = tile(int(round(size * tile_frac)))
-    off = (size - t.size[0]) // 2
-    img.alpha_composite(t, (off, off))
-    return img
 
 
 def silhouette(size, color=(255, 255, 255, 255)):
@@ -150,10 +167,10 @@ def font(px):
 
 
 def logo_with_name(height, color, gap_frac=0.35):
-    """Tile + "LemurX" wordmark, `height` px tall, transparent background."""
+    """Tile + product wordmark, `height` px tall, transparent background."""
     t = tile(height)
     f = font(int(height * 0.78))
-    text = "LemurX"
+    text = NAME
     bbox = f.getbbox(text)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     gap = int(height * gap_frac)
@@ -175,31 +192,26 @@ def classify(size):
     """Quantise the master to PALETTE keys; returns rows of class names."""
     if size in _classified:
         return _classified[size]
-    img = master().resize((size, size), Image.LANCZOS).filter(ImageFilter.MedianFilter(3))
+    img = master().resize((size, size), Image.LANCZOS).convert("RGBA")
     px = img.load()
     rows = []
     for y in range(size):
         row = []
         for x in range(size):
-            r, g, b = px[x, y]
-            h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
-            h *= 360
-            if v < 0.38:
-                c = "mask"
-            elif 20 <= h <= 50 and s > 0.45 and v > 0.6:
-                c = "eye"
-            elif 160 <= h <= 230 and s > 0.45:
+            r, g, b, a = px[x, y]
+            if a < 40:
                 c = "sky"
             else:
-                c = "fur"
+                h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+                # White (and near-white anti-alias) is background; everything else is the @.
+                if v > 0.92 and s < 0.12:
+                    c = "sky"
+                elif s < 0.08 and v > 0.85:
+                    c = "sky"
+                else:
+                    c = "mark"
             row.append(c)
         rows.append(row)
-    # Outside the rounded tile is sky as well (the JPEG corners are black).
-    m = rounded_mask(size).load()
-    for y in range(size):
-        for x in range(size):
-            if m[x, y] < 128:
-                rows[y][x] = "sky"
     _classified[size] = rows
     return rows
 
@@ -306,38 +318,35 @@ def signed_area(loop):
 
 
 def vectorize(res=192, tol=1.3, min_area=6.0):
-    """Trace the master into flat-colour polygons.
+    """Trace the @ into mark polygons (outers first, then holes).
 
-    Returns [(class, loop), ...] where each loop is an *outer* boundary
-    (holes are dropped) with coordinates in 0..1, sorted by decreasing area.
-    Because the four classes partition the tile, painting the polygons in that
-    order reproduces the picture: whatever sits inside a hole is a smaller
-    component of another class and gets painted later, on top. The outermost
-    sky component (the tile background itself) is left out; callers draw the
-    gradient rounded rect instead.
+    Returns [(class, loop), ...] with coordinates in 0..1. White/transparent
+    is skipped. Hole loops (negative winding) are kept so even-odd fill
+    punches the eye of the @ instead of painting it as a blob.
     """
     cls = classify(res)
     items = []
+    holes = []
     for name in PALETTE:
+        if name == "sky":
+            continue
         mask = clean([[c == name for c in row] for row in cls], res)
         for loop in trace(mask, res):
             sp = simplify(smooth(loop), tol)
             if not sp:
                 continue
             a = signed_area(sp)
-            if a <= 0 or a < min_area:  # holes wind the other way
+            if abs(a) < min_area:
                 continue
-            items.append((a, name, [(x / res, y / res) for x, y in sp]))
+            loop_n = [(x / res, y / res) for x, y in sp]
+            if a > 0:
+                items.append((a, name, loop_n))
+            else:
+                holes.append((abs(a), name, loop_n))
     items.sort(key=lambda t: -t[0])
-    # The first sky loop is the background; the gradient takes care of it.
-    out = []
-    dropped_bg = False
-    for a, name, loop in items:
-        if name == "sky" and not dropped_bg:
-            dropped_bg = True
-            continue
-        out.append((name, loop))
-    return out
+    return [(name, loop) for _, name, loop in items] + [
+        (name, loop) for _, name, loop in holes
+    ]
 
 
 def fmt(v, scale, off=0.0, nd=2):
@@ -366,7 +375,7 @@ def vector_drawable(shapes, size_dp, viewport, scale, off=0.0, corner=True, extr
     x0, x1 = off, off + scale
     lines = [
         '<?xml version="1.0" encoding="utf-8"?>',
-        "<!-- LemurX brand mark, generated by tools/brand/gen_brand_assets.py. -->",
+        "<!-- Aero brand mark, generated by tools/brand/gen_brand_assets.py. -->",
         '<vector xmlns:android="http://schemas.android.com/apk/res/android"',
         '    xmlns:aapt="http://schemas.android.com/aapt"',
         f'    android:width="{size_dp}dp"',
@@ -392,7 +401,25 @@ def vector_drawable(shapes, size_dp, viewport, scale, off=0.0, corner=True, extr
             "        </aapt:attr>",
             "    </path>",
         ]
+    mark_loops = [loop for name, loop in shapes if name == "mark"]
+    if mark_loops:
+        # One even-odd path so the eye of the @ stays a hole.
+        lines += [
+            f'    <path android:fillType="evenOdd"',
+            f'        android:pathData="{path_data(mark_loops, scale, off)}">',
+            '        <aapt:attr name="android:fillColor">',
+            f'            <gradient android:startX="{fmt(off, 1)}" android:startY="{fmt(off, 1)}"',
+            f'                android:endX="{fmt(off + scale, 1)}" android:endY="{fmt(off + scale, 1)}"',
+            '                android:type="linear">',
+            f'                <item android:offset="0" android:color="{hexrgb(SKY_TOP)}"/>',
+            f'                <item android:offset="1" android:color="{hexrgb(SKY_BOTTOM)}"/>',
+            "            </gradient>",
+            "        </aapt:attr>",
+            "    </path>",
+        ]
     for name, loop in shapes:
+        if name == "mark":
+            continue
         lines.append(f'    <path android:fillColor="{hexrgb(PALETTE[name])}"')
         lines.append(f'        android:pathData="{path_data([loop], scale, off)}"/>')
     lines.append("</vector>")
@@ -404,13 +431,13 @@ def mono_vector_drawable(shapes, size_dp, viewport, scale, off):
     loops = mono_loops(shapes)
     return "\n".join([
         '<?xml version="1.0" encoding="utf-8"?>',
-        "<!-- LemurX monochrome launcher mark, generated by tools/brand/gen_brand_assets.py. -->",
+        "<!-- Aero monochrome launcher mark, generated by tools/brand/gen_brand_assets.py. -->",
         '<vector xmlns:android="http://schemas.android.com/apk/res/android"',
         f'    android:width="{size_dp}dp"',
         f'    android:height="{size_dp}dp"',
         f'    android:viewportWidth="{viewport}"',
         f'    android:viewportHeight="{viewport}">',
-        '    <path android:fillColor="#000000" android:fillType="nonZero"',
+        '    <path android:fillColor="#000000" android:fillType="evenOdd"',
         f'        android:pathData="{path_data(loops, scale, off)}"/>',
         "</vector>",
     ]) + "\n"
@@ -418,34 +445,18 @@ def mono_vector_drawable(shapes, size_dp, viewport, scale, off):
 
 def skia_icon(shapes, canvas=24, mono=False):
     """Skia vector icon (components/vector_icons/*.icon)."""
-    r = CORNER * canvas
     out = [
         "// Copyright 2026 The LemurX Authors",
         "// Use of this source code is governed by a BSD-style license that can be",
         "// found in the LICENSE file.",
         "//",
-        "// LemurX brand mark, generated by tools/brand/gen_brand_assets.py.",
+        "// Aero brand mark, generated by tools/brand/gen_brand_assets.py.",
         "",
         f"CANVAS_DIMENSIONS, {canvas},",
     ]
-    if not mono:
-        out += [
-            "FILL_RULE_NONZERO,",
-            "PATH_COLOR_ARGB, 0xFF, 0x%02X, 0x%02X, 0x%02X," % PALETTE["sky"],
-            f"ROUND_RECT, 0, 0, {canvas}, {canvas}, {fmt(r, 1)},",
-        ]
-    if mono:
-        out.append("FILL_RULE_NONZERO,")
-        for loop in mono_loops(shapes):
-            out.append(f"MOVE_TO, {fmt(loop[0][0], canvas)}, {fmt(loop[0][1], canvas)},")
-            for x, y in loop[1:]:
-                out.append(f"LINE_TO, {fmt(x, canvas)}, {fmt(y, canvas)},")
-            out.append("CLOSE,")
-        return "\n".join(out) + "\n"
-    for name, loop in shapes:
-        out.append("NEW_PATH,")
-        out.append("FILL_RULE_NONZERO,")
-        out.append("PATH_COLOR_ARGB, 0xFF, 0x%02X, 0x%02X, 0x%02X," % PALETTE[name])
+    out.append("FILL_RULE_NONZERO,")
+    out.append("PATH_COLOR_ARGB, 0xFF, 0x%02X, 0x%02X, 0x%02X," % PALETTE["mark"])
+    for loop in mono_loops(shapes):
         out.append(f"MOVE_TO, {fmt(loop[0][0], canvas)}, {fmt(loop[0][1], canvas)},")
         for x, y in loop[1:]:
             out.append(f"LINE_TO, {fmt(x, canvas)}, {fmt(y, canvas)},")
@@ -457,7 +468,7 @@ def svg(shapes, size=256):
     r = CORNER * size
     body = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}">',
-        "  <!-- LemurX brand mark, generated by tools/brand/gen_brand_assets.py. -->",
+        "  <!-- Aero brand mark, generated by tools/brand/gen_brand_assets.py. -->",
         "  <defs>",
         '    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">',
         f'      <stop offset="0" stop-color="{hexrgb(SKY_TOP)}"/>',
@@ -466,8 +477,11 @@ def svg(shapes, size=256):
         "  </defs>",
         f'  <rect width="{size}" height="{size}" rx="{fmt(r, 1)}" fill="url(#sky)"/>',
     ]
-    for name, loop in shapes:
-        body.append(f'  <path fill="{hexrgb(PALETTE[name])}" d="{path_data([loop], size)}"/>')
+    mark_loops = [loop for name, loop in shapes if name == "mark"]
+    if mark_loops:
+        body.append(
+            f'  <path fill="url(#sky)" fill-rule="evenodd" d="{path_data(mark_loops, size)}"/>'
+        )
     body.append("</svg>")
     return "\n".join(body) + "\n"
 
@@ -490,9 +504,17 @@ def gen_launcher(shapes):
     for name, d in DENSITIES.items():
         save(tile(dp(48, d)), f"{RES}/mipmap-{name}/app_icon.png")
         # Adaptive layers are 108dp; the launcher shows the centre 72dp.
-        layer = tile_on_sky(dp(108, d), 84 / 108.0)
-        save(layer, f"{RES}/mipmap-{name}/layered_app_icon.png")
-        save(layer, f"{RES}/mipmap-{name}/layered_app_icon_background.png")
+        # Background is white so the app list matches the in-app white tile.
+        size = dp(108, d)
+        bg = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+        fg = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        # 72dp is what the launcher actually shows; 56dp leaves white around the @.
+        inner = int(round(size * (56 / 108.0)))
+        t = mark().resize((inner, inner), Image.LANCZOS)
+        off = (size - inner) // 2
+        fg.alpha_composite(t, (off, off))
+        save(fg, f"{RES}/mipmap-{name}/layered_app_icon.png")
+        save(bg, f"{RES}/mipmap-{name}/layered_app_icon_background.png")
     # Monochrome themed icon: 90dp canvas, mark inside the centre 36dp box.
     write_text(f"{RES}/drawable/themed_app_icon.xml",
                mono_vector_drawable(shapes, 90, 90, 36 * 0.92, 27 + 36 * 0.04))
@@ -538,13 +560,15 @@ def gen_android_drawables(shapes):
         # Default favicon for chrome:// pages, tab grid and page info.
         save(tile(dp(16, d)), f"{RES}/drawable-{name}/chromelogo16.png")
     # Bookmark / history toolbars, sign-in sheets, survey and educational tips.
-    write_text(f"{RES}/drawable/chrome_logo_24dp.xml", vector_drawable(shapes, 24, 24, 24))
-    write_text(f"{RES}/drawable/chrome_sync_logo.xml", vector_drawable(shapes, 24, 24, 24))
+    write_text(f"{RES}/drawable/chrome_logo_24dp.xml",
+               vector_drawable(shapes, 24, 24, 24, corner=False))
+    write_text(f"{RES}/drawable/chrome_sync_logo.xml",
+               vector_drawable(shapes, 24, 24, 24, corner=False))
     # 31dp white disc with the mark in the middle (AppInstallMenuHandler).
     disc = ('    <path android:fillColor="@android:color/white"\n'
             '        android:pathData="M15.5,0.5 A15,15 0 1 1 15.5,30.5 A15,15 0 1 1 15.5,0.5 Z"/>')
     write_text(f"{RES}/drawable/chrome_logo_on_circular_background.xml",
-               vector_drawable(shapes, 31, 31, 20, 5.5, extra_head=disc))
+               vector_drawable(shapes, 31, 31, 20, 5.5, corner=False, extra_head=disc))
     # Promo illustrations built around the Chrome logo: centred mark, same
     # intrinsic size as upstream so the layouts do not move.
     for fname, w, h, vw, vh in (
@@ -578,10 +602,10 @@ def gen_strings():
         "",
         '<resources xmlns:android="http://schemas.android.com/apk/res/android">',
         "    <!-- The application name displayed to the user. -->",
-        '    <string name="app_name" translatable="false">LemurX</string>',
-        '    <string name="bookmark_widget_title" translatable="false">LemurX bookmarks</string>',
-        '    <string name="search_widget_title" translatable="false">LemurX search</string>',
-        '    <string name="quick_action_search_widget_title" translatable="false">LemurX quick action search</string>',
+        '    <string name="app_name" translatable="false">Aero</string>',
+        '    <string name="bookmark_widget_title" translatable="false">Aero bookmarks</string>',
+        '    <string name="search_widget_title" translatable="false">Aero search</string>',
+        '    <string name="quick_action_search_widget_title" translatable="false">Aero quick action search</string>',
         "</resources>",
     ]) + "\n")
 

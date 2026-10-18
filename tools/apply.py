@@ -6,10 +6,10 @@
     tools/apply.py --revert   # remove links and reverse the patches
 
 Layout:
-    src/         files that do not exist upstream (new dirs, third_party/lua, ...)
+    src/         files that do not exist upstream (new dirs, chrome/lemurx/, ...)
                  -> symlinked into chromium/src at the same relative path
     patches/     unified diffs against upstream files that already exist
-                 (chrome_content_browser_client.cc, BUILD.gn hooks, ...)
+                 (ChromeTabbedActivity.java, BUILD.gn hooks, ...)
                  -> applied with `git apply` inside chromium/src
 
 Chromium version is pinned in CHROMIUM_VERSION and chromium/.gclient. Upgrading
@@ -63,12 +63,11 @@ def _link_one(src, dst, copy):
 def link(copy: bool):
     """Link the overlay into the checkout.
 
-    Directories that do not exist upstream (chrome/lemurx/, chrome/browser/lemurx/,
-    third_party/lua/, ...) are linked as a whole. Files that land inside an
-    existing upstream directory (chrome/common/lemurx_web.mojom, ...) are linked
-    one by one. Whole-directory links matter for android_assets: Chromium's zip
+    Directories that do not exist upstream (chrome/lemurx/,
+    chrome/browser/ui/android/lemurx/, ...) are linked as a whole. Files that land
+    inside an existing upstream directory are linked one by one. Whole-directory links matter for android_assets: Chromium's zip
     helper preserves symlinks *as symlinks*, so a per-file link would end up in
-    the APK as 70 bytes of link text instead of the Lua source.
+    the APK as 70 bytes of link text instead of the asset.
     """
     unlink(quiet=True)  # drop stale links from an earlier layout
     n_dirs = n_files = 0
