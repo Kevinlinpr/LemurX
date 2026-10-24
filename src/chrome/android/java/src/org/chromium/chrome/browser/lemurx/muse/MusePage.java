@@ -4,7 +4,9 @@
 
 package org.chromium.chrome.browser.lemurx.muse;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.Outline;
@@ -19,21 +21,23 @@ import android.view.WindowInsets;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.chromium.base.Log;
+import org.chromium.base.ThreadUtils;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.lemurx.LemurXConsoleShell;
 import org.chromium.chrome.browser.lemurx.LemurXHaptics;
-import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.ui.native_page.BasicSmoothTransitionDelegate;
 import org.chromium.chrome.browser.ui.native_page.NativePage;
 import org.chromium.chrome.browser.ui.native_page.NativePageHost;
 import org.chromium.content_public.browser.LoadUrlParams;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -60,6 +64,93 @@ public class MusePage implements NativePage {
     static final int COLOR_LINE = 0xFFE6E8EA;
     static final int COLOR_ACCENT = 0xFF132631;
 
+    /**
+     * 跟 Chrome 的夜间模式走。主题切换会重建 Activity，页面在构造时按当前配置上色即可。
+     */
+    public static boolean night(Context context) {
+        return (context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                == Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    public static int text(Context context) {
+        return night(context) ? 0xFFE7EEF2 : COLOR_TEXT;
+    }
+
+    public static int muted(Context context) {
+        return night(context) ? 0xFF9AA6B0 : COLOR_MUTED;
+    }
+
+    public static int surface(Context context) {
+        return night(context) ? 0xFF1C262C : COLOR_SURFACE;
+    }
+
+    public static int bg(Context context) {
+        return night(context) ? 0xFF10181C : COLOR_BG;
+    }
+
+    public static int line(Context context) {
+        return night(context) ? 0xFF2C3A42 : COLOR_LINE;
+    }
+
+    public static int accent(Context context) {
+        return night(context) ? 0xFFE7EEF2 : COLOR_ACCENT;
+    }
+
+    /** 压在 {@link #accent} 上的文字和图标。 */
+    public static int onAccent(Context context) {
+        return night(context) ? COLOR_TEXT : 0xFFFFFFFF;
+    }
+
+    public static int link(Context context) {
+        return night(context) ? 0xFF8AB4F8 : 0xFF1A73E8;
+    }
+
+    public static int error(Context context) {
+        return night(context) ? 0xFFFFB4AB : 0xFFB3261E;
+    }
+
+    public static int warn(Context context) {
+        return night(context) ? 0xFFFFC56A : 0xFFB26A00;
+    }
+
+    public static int ok(Context context) {
+        return night(context) ? 0xFF7DCEA0 : 0xFF1E7B34;
+    }
+
+    public static int outline(Context context) {
+        return night(context) ? 0xFF3A4A52 : 0xFFC9CED3;
+    }
+
+    public static int track(Context context) {
+        return night(context) ? 0xFF2C3A42 : 0xFFD5DADF;
+    }
+
+    public static int chipBg(Context context) {
+        return night(context) ? 0xFF14332F : 0xFFD9F8F4;
+    }
+
+    public static int chipText(Context context) {
+        return night(context) ? 0xFF7EEAE0 : 0xFF0C6E66;
+    }
+
+    /** 进行中、不可再点的按钮。 */
+    public static int disabled(Context context) {
+        return night(context) ? 0xFF3A4A52 : 0xFF5C6B76;
+    }
+
+    public static int onDisabled(Context context) {
+        return night(context) ? 0xFF9AA6B0 : 0xFFFFFFFF;
+    }
+
+    /** 登录底栏：比页面再抬一层。亮色保持原来的灰卡片。 */
+    public static int sheet(Context context) {
+        return night(context) ? 0xFF1C262C : 0xFFEBEBEB;
+    }
+
+    public static int handle(Context context) {
+        return night(context) ? 0xFF3A4A52 : 0xFFC8C8C8;
+    }
+
     /** 页面之外的事：在新标签页里打开链接。原生页面模式走 NativePageHost，覆盖层模式由外壳提供。 */
     public interface Links {
         void openInNewTab(String url);
@@ -75,6 +166,7 @@ public class MusePage implements NativePage {
     private final FrameLayout mContent;
     private final TextView mHeading;
     private final View mNewChat;
+    private final MuseDrawer mDrawer;
 
     /**
      * 标签页 id → 这个标签页的对话视图。原生页面在标签页离开 chrome-native:// 时就会被销毁、
@@ -86,7 +178,8 @@ public class MusePage implements NativePage {
     private static final Map<Integer, MuseChatView> sChats = new HashMap<>();
 
     private @Nullable MuseChatView mChat;
-    private @Nullable MuseTasksView mTasks;
+    private @Nullable MuseCommunityView mCommunity;
+    private @Nullable ScrollView mFiles;
 
     private String mUrl = "";
     private String mSection = MuseUrls.SECTION_CHAT;
@@ -129,7 +222,7 @@ public class MusePage implements NativePage {
                         updateStatusInset();
                     }
                 };
-        mRoot.setBackgroundColor(COLOR_BG);
+        mRoot.setBackgroundColor(bg(context));
         mRoot.setClickable(true); // 不让触摸漏到下面的 WebContents
 
         LinearLayout column = new LinearLayout(context);
@@ -164,16 +257,20 @@ public class MusePage implements NativePage {
         header.addView(logo, logoLp);
 
         mHeading = new TextView(context);
-        mHeading.setTextColor(COLOR_TEXT);
+        mHeading.setTextColor(text(context));
         mHeading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         mHeading.setTypeface(Typeface.DEFAULT_BOLD);
         mHeading.setText(R.string.lemurx_muse_brand);
         header.addView(mHeading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        mNewChat = iconButton(context, R.drawable.lemurx_muse_ic_plus, R.string.lemurx_muse_new_chat);
+        mNewChat = iconButton(context, R.drawable.lemurx_muse_ic_new_chat, R.string.lemurx_muse_new_chat);
         mNewChat.setOnClickListener(
                 v -> {
                     LemurXHaptics.tick(v);
+                    if (MuseUrls.SECTION_COMMUNITY.equals(mSection) && mCommunity != null) {
+                        mCommunity.openCompose();
+                        return;
+                    }
                     newChat();
                 });
         header.addView(mNewChat);
@@ -196,6 +293,8 @@ public class MusePage implements NativePage {
         mNavPadding = LemurXConsoleShell.navHeightPx();
         applyPadding();
         LemurXConsoleShell.addNavListener(mNavListener);
+        mDrawer = new MuseDrawer(mRoot);
+        mDrawer.setFilesAction(this::showFiles);
         updateForUrl(url);
     }
 
@@ -234,7 +333,7 @@ public class MusePage implements NativePage {
 
     @Override
     public int getBackgroundColor() {
-        return COLOR_BG;
+        return bg(mRoot.getContext());
     }
 
     @Override
@@ -267,17 +366,19 @@ public class MusePage implements NativePage {
     private void show(String section) {
         mSection = section;
         if (mChat != null) mChat.setVisibility(View.GONE);
-        if (mTasks != null) mTasks.setVisibility(View.GONE);
+        if (mCommunity != null) mCommunity.setVisibility(View.GONE);
+        if (mFiles != null) mFiles.setVisibility(View.GONE);
         Context context = mRoot.getContext();
-        if (MuseUrls.SECTION_TASKS.equals(section)) {
-            if (mTasks == null) {
-                mTasks = new MuseTasksView(context, this);
-                mContent.addView(mTasks, fill());
+        if (MuseUrls.SECTION_COMMUNITY.equals(section)) {
+            if (mCommunity == null) {
+                mCommunity = new MuseCommunityView(context, mLinks);
+                mContent.addView(mCommunity, fill());
             }
-            mTasks.setVisibility(View.VISIBLE);
-            mTasks.refreshNow();
-            mHeading.setText(R.string.lemurx_muse_tasks);
-            mNewChat.setVisibility(View.INVISIBLE);
+            mCommunity.setVisibility(View.VISIBLE);
+            mCommunity.refreshNow();
+            mHeading.setText(R.string.lemurx_muse_community);
+            mNewChat.setContentDescription(context.getString(R.string.lemurx_muse_community_write));
+            mNewChat.setVisibility(View.VISIBLE);
         } else {
             if (mChat == null) {
                 mChat = obtainChat(context);
@@ -286,6 +387,7 @@ public class MusePage implements NativePage {
             mChat.setVisibility(View.VISIBLE);
             if (mThreadId != null) mChat.load(mThreadId);
             mHeading.setText(R.string.lemurx_muse_brand);
+            mNewChat.setContentDescription(context.getString(R.string.lemurx_muse_new_chat));
             mNewChat.setVisibility(View.VISIBLE);
         }
         try {
@@ -322,6 +424,24 @@ public class MusePage implements NativePage {
         if (chat != null) chat.destroy();
     }
 
+    /** 有对话正在回复。画中画用它判断按 Home 时要不要收成小窗。 */
+    public static boolean hasLiveWork() {
+        return MuseChatView.hasLiveWork();
+    }
+
+    /** 画中画静画面上的那一句。没有正在进行的回复时是 null。 */
+    public static @Nullable String pipStatus() {
+        return MuseChatView.anyLiveStatus();
+    }
+
+    /** 窗口离开前台：正在操作或回复的对话挂起，等用户点继续。 */
+    public static void suspendIfRunning() {
+        ThreadUtils.assertOnUiThread();
+        for (MuseChatView chat : new ArrayList<>(sChats.values())) {
+            chat.suspendForBackground();
+        }
+    }
+
     /** 活动页销毁：清掉所有缓存的对话视图。 */
     public static void destroyAll() {
         for (MuseChatView chat : sChats.values()) chat.destroy();
@@ -336,7 +456,7 @@ public class MusePage implements NativePage {
     @Override
     public String getTitle() {
         Resources res = mRoot.getResources();
-        if (MuseUrls.SECTION_TASKS.equals(mSection)) return res.getString(R.string.lemurx_muse_tasks);
+        if (MuseUrls.SECTION_COMMUNITY.equals(mSection)) return res.getString(R.string.lemurx_muse_community);
         String title = mChat != null ? mChat.title() : null;
         return title != null ? title : res.getString(R.string.lemurx_muse_brand);
     }
@@ -348,6 +468,7 @@ public class MusePage implements NativePage {
 
     @Override
     public void destroy() {
+        mDrawer.dismiss();
         LemurXConsoleShell.removeNavListener(mNavListener);
         // 对话视图不销毁：从页面上摘下来留给这个标签页下一次的 MusePage，见 sChats。
         if (mChat != null) {
@@ -355,7 +476,6 @@ public class MusePage implements NativePage {
             mChat.detachPage(this);
             mChat = null;
         }
-        if (mTasks != null) mTasks.destroy();
     }
 
     // ---------------------------------------------------------------- 给分区视图 / 外壳用
@@ -402,25 +522,212 @@ public class MusePage implements NativePage {
         }
     }
 
-    /** 顶栏「新对话」：本标签页里开一轮新会话（新历史条目，返回能回到上一轮）。 */
+    /** 顶栏「新会话」：新开一个标签页，里面是一轮新的网页会话。当前这页留着。 */
     private void newChat() {
-        String url = MuseUrls.newChatUrl();
-        if (url.equals(mUrl)) return;
-        if (mHost == null) {
-            // 覆盖层：换会话只换自己的内容，网页不动。
-            updateForUrl(url);
-            return;
-        }
-        mHost.loadUrl(new LoadUrlParams(url), /* incognito= */ false);
+        LemurXConsoleShell.openNewSession();
     }
 
+    /** 顶栏 ☰：从左侧滑出设置，不另开一页。 */
     private void openSettings() {
-        try {
-            SettingsNavigationFactory.createSettingsNavigation()
-                    .startSettings(mRoot.getContext(), LemurXSettingsFragment.class);
-        } catch (Exception e) {
-            Log.i(TAG, "settings: %s", e.getMessage());
+        mDrawer.open();
+    }
+
+    /** 文件架盖在当前分区上。返回键先收它，再收抽屉。 */
+    private void showFiles() {
+        Context context = mRoot.getContext();
+        if (mFiles != null) mContent.removeView(mFiles);
+        mFiles = buildFiles(context);
+        mContent.addView(mFiles, fill());
+        sFilesPage = this;
+        if (mChat != null) mChat.setVisibility(View.GONE);
+        if (mCommunity != null) mCommunity.setVisibility(View.GONE);
+        mHeading.setText(R.string.lemurx_muse_files);
+        mNewChat.setVisibility(View.INVISIBLE);
+    }
+
+    private ScrollView buildFiles(Context context) {
+        ScrollView scroll = new ScrollView(context);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout column = new LinearLayout(context);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setPadding(dp(16), dp(8), dp(16), dp(24));
+        java.util.List<LemurXFiles.Entry> entries = LemurXFiles.load(context);
+        if (entries.isEmpty()) {
+            TextView empty = new TextView(context);
+            empty.setText(R.string.lemurx_muse_files_empty);
+            empty.setTextColor(muted(context));
+            empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            column.addView(empty);
         }
+        for (LemurXFiles.Entry entry : entries) {
+            column.addView(fileRow(context, entry));
+        }
+        scroll.addView(column, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return scroll;
+    }
+
+    private View fileRow(Context context, LemurXFiles.Entry entry) {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(12), dp(12), dp(12));
+        row.setBackground(rounded(surface(context), 16, context));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(8);
+        row.setLayoutParams(lp);
+        ImageView icon = new ImageView(context);
+        int kindIcon = "pdf".equals(entry.kind)
+                ? R.drawable.lemurx_muse_ic_file_pdf
+                : "doc".equals(entry.kind)
+                        ? R.drawable.lemurx_muse_ic_file_doc
+                        : "image".equals(entry.kind)
+                                ? R.drawable.lemurx_muse_ic_file_image
+                                : R.drawable.lemurx_muse_ic_file_text;
+        icon.setImageResource(kindIcon);
+        icon.setColorFilter(text(context), android.graphics.PorterDuff.Mode.SRC_IN);
+        row.addView(icon, new LinearLayout.LayoutParams(dp(22), dp(22)));
+        LinearLayout texts = new LinearLayout(context);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        TextView name = new TextView(context);
+        name.setText(entry.name);
+        name.setTextColor(text(context));
+        name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        name.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        name.setMaxLines(1);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        TextView kind = new TextView(context);
+        int kindLabel = "pdf".equals(entry.kind)
+                ? R.string.lemurx_muse_file_pdf
+                : "doc".equals(entry.kind)
+                        ? R.string.lemurx_muse_file_word
+                        : "image".equals(entry.kind)
+                                ? R.string.lemurx_muse_file_image
+                                : R.string.lemurx_muse_file_note;
+        kind.setText(kindLabel);
+        kind.setTextColor(muted(context));
+        kind.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        texts.addView(name);
+        texts.addView(kind);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        tlp.setMarginStart(dp(12));
+        row.addView(texts, tlp);
+        row.setOnClickListener(v -> openStoredFile(context, entry));
+        return row;
+    }
+
+    private void openStoredFile(Context context, LemurXFiles.Entry entry) {
+        LemurXFiles.open(context, entry.name, entry.kind, entry.text);
+    }
+
+    private static @Nullable MusePage sFilesPage;
+
+    /** 发帖页正盖着广场。返回键先收它。 */
+    public static boolean closeCommunityCompose() {
+        return MuseCommunityView.closeCompose();
+    }
+
+    private static @Nullable FrameLayout sPlaza;
+    private static @Nullable MuseCommunityView sPlazaView;
+
+    /** 社区是独立的一层，不写进任何标签页。 */
+    public static void showCommunity(Context context) {
+        Activity activity = LemurXConsoleShell.activity();
+        if (activity == null) return;
+        ViewGroup content = activity.findViewById(android.R.id.content);
+        if (content == null) return;
+        if (sPlaza == null || sPlaza.getParent() != content) {
+            if (sPlaza != null && sPlaza.getParent() instanceof ViewGroup) {
+                ((ViewGroup) sPlaza.getParent()).removeView(sPlaza);
+            }
+            sPlaza = new FrameLayout(activity);
+            sPlaza.setBackgroundColor(bg(activity));
+            sPlaza.setClickable(true);
+            LinearLayout column = new LinearLayout(activity);
+            column.setOrientation(LinearLayout.VERTICAL);
+            column.setPadding(dp(activity, 16), LemurXConsoleShell.statusInsetPx() + dp(activity, 8),
+                    dp(activity, 12), dp(activity, 72));
+            LinearLayout bar = new LinearLayout(activity);
+            bar.setGravity(Gravity.CENTER_VERTICAL);
+            TextView title = new TextView(activity);
+            title.setText(R.string.lemurx_muse_community);
+            title.setTextColor(text(activity));
+            title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            TextView write = new TextView(activity);
+            write.setText(R.string.lemurx_muse_community_write);
+            write.setTextColor(onAccent(activity));
+            write.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            write.setTypeface(Typeface.DEFAULT_BOLD);
+            write.setBackground(rounded(accent(activity), 18, activity));
+            write.setPadding(dp(activity, 16), dp(activity, 8), dp(activity, 16), dp(activity, 8));
+            write.setOnClickListener(v -> {
+                if (sPlazaView != null) sPlazaView.openCompose();
+            });
+            bar.addView(write);
+            column.addView(bar);
+            sPlazaView = new MuseCommunityView(activity, LemurXConsoleShell::openInNewTab);
+            column.addView(sPlazaView, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            sPlaza.addView(column, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            content.addView(sPlaza, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        sPlaza.setVisibility(View.VISIBLE);
+        sPlaza.bringToFront();
+        if (sPlazaView != null) sPlazaView.refreshNow();
+    }
+
+    public static boolean communityOpen() {
+        return sPlaza != null && sPlaza.getVisibility() == View.VISIBLE;
+    }
+
+    /** 收起社区这一层。没开着时返回 false。 */
+    public static boolean closeCommunity() {
+        if (!communityOpen() || sPlaza == null) return false;
+        sPlaza.setVisibility(View.GONE);
+        return true;
+    }
+
+    /** 文件架正盖着。 */
+    public static boolean filesOpen() {
+        MusePage page = sFilesPage;
+        return page != null && page.mFiles != null && page.mFiles.getVisibility() == View.VISIBLE;
+    }
+
+    /** 收起文件架，回到打开它之前的分区。没开着时返回 false。 */
+    public static boolean closeFiles() {
+        MusePage page = sFilesPage;
+        if (page == null || page.mFiles == null) return false;
+        page.mContent.removeView(page.mFiles);
+        page.mFiles = null;
+        sFilesPage = null;
+        page.show(page.mSection);
+        return true;
+    }
+
+    /** 抽屉正开着。外壳的返回键先问这个。 */
+    public static boolean drawerOpen() {
+        return MuseDrawer.isOpen();
+    }
+
+    /** 收起抽屉。没开着时返回 false。 */
+    public static boolean closeDrawer() {
+        return MuseDrawer.closeIfOpen();
+    }
+
+    /** 附件预览正开着。外壳的返回键先问这个。 */
+    public static boolean previewOpen() {
+        return MuseChatView.previewOpen();
+    }
+
+    /** 收起附件预览。没开着时返回 false。 */
+    public static boolean closePreview() {
+        return MuseChatView.closePreview();
     }
 
     // ---------------------------------------------------------------- 内边距

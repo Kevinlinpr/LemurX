@@ -1,5 +1,5 @@
 {
-  "server": "",
+  "server": "http://192.168.1.111:8787",
   "token": "",
   "access_key": "",
   "device_name": "Aero",

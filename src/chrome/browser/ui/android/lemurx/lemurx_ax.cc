@@ -200,6 +200,10 @@ void Walk(const ui::AXTree& tree,
     }
     // 控件的可读文字：名字（和值）也进正文，agent 读到的和看到的一致。名字来自子节点内容
     // （按钮、链接的文字）或页面上可见的 <label> 时不重复追加——那段文字自己会被走到。
+    // 密码框的值除外，密码留在本机，截图里本来也只是圆点。
+    bool password_field =
+        data.GetStringAttribute(ax::mojom::StringAttribute::kInputType) ==
+        "password";
     ax::mojom::NameFrom name_from = data.GetNameFrom();
     bool name_visible_elsewhere =
         name_from == ax::mojom::NameFrom::kContents ||
@@ -212,7 +216,7 @@ void Walk(const ui::AXTree& tree,
           (!name_visible_elsewhere || (leaf && !ui::IsTextField(role)))) {
         AppendText(text, base::UTF8ToUTF16(name));
       }
-      if (!value.empty() && value != name) {
+      if (!value.empty() && value != name && !password_field) {
         AppendText(text, base::UTF8ToUTF16("[" + value + "]"));
       } else if (value.empty() && ui::IsTextField(role)) {
         std::string placeholder =

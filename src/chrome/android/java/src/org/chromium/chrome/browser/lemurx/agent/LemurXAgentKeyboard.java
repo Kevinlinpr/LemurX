@@ -16,6 +16,7 @@ import android.view.View;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.lemurx.muse.MusePage;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -85,6 +86,7 @@ final class LemurXAgentKeyboard extends View implements LemurXHumanInput.Keys {
     private final Paint mChip = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final float mDensity;
     private final int mBottomInset;
+    private final int mInk;
     private final List<Key> mKeys = new ArrayList<>();
     private final RectF mChipRect = new RectF();
 
@@ -99,22 +101,24 @@ final class LemurXAgentKeyboard extends View implements LemurXHumanInput.Keys {
         super(context);
         mDensity = context.getResources().getDisplayMetrics().density;
         mBottomInset = bottomInset;
-        mBg.setColor(0xFFECEFF1);
-        mCap.setColor(0xFFFFFFFF);
-        mCapSpecial.setColor(0xFFCFD5DA);
+        boolean night = MusePage.night(context);
+        mInk = night ? 0xFFE7EEF2 : 0xFF1F1F1F;
+        mBg.setColor(night ? 0xFF10181C : 0xFFECEFF1);
+        mCap.setColor(night ? 0xFF243038 : 0xFFFFFFFF);
+        mCapSpecial.setColor(night ? 0xFF1A242A : 0xFFCFD5DA);
         mCapPressed.setColor(ACCENT);
-        mLabel.setColor(0xFF1F1F1F);
+        mLabel.setColor(mInk);
         mLabel.setTextSize(22 * mDensity);
         mLabel.setTextAlign(Paint.Align.CENTER);
-        mLabelSmall.setColor(0xFF1F1F1F);
+        mLabelSmall.setColor(mInk);
         mLabelSmall.setTextSize(14 * mDensity);
         mLabelSmall.setTextAlign(Paint.Align.CENTER);
         mLabelSmall.setTypeface(Typeface.DEFAULT_BOLD);
-        mPreview.setColor(0xFF1F1F1F);
+        mPreview.setColor(mInk);
         mPreview.setTextSize(30 * mDensity);
         mPreview.setTextAlign(Paint.Align.CENTER);
         mPreview.setTypeface(Typeface.DEFAULT_BOLD);
-        mStrip.setColor(0xFF5F6368);
+        mStrip.setColor(night ? 0xFF9AA6B0 : 0xFF5F6368);
         mStrip.setTextSize(15 * mDensity);
         mChip.setColor(ACCENT);
         mChip.setStyle(Paint.Style.STROKE);
@@ -390,7 +394,7 @@ final class LemurXAgentKeyboard extends View implements LemurXHumanInput.Keys {
                 canvas.drawRoundRect(mChipRect, dp(16), dp(16), mCapPressed);
             }
             canvas.drawRoundRect(mChipRect, dp(16), dp(16), mChip);
-            mLabelSmall.setColor(pressed ? 0xFFFFFFFF : 0xFF1F1F1F);
+            mLabelSmall.setColor(pressed ? 0xFFFFFFFF : mInk);
             float base = mChipRect.centerY() - (mLabelSmall.descent() + mLabelSmall.ascent()) / 2;
             canvas.drawText(cand, mChipRect.centerX(), base, mLabelSmall);
         }
@@ -405,7 +409,7 @@ final class LemurXAgentKeyboard extends View implements LemurXHumanInput.Keys {
             String text = k.label.equals(SPACE) ? "" : k.label;
             if (!k.special() && mShift && !mSymbols) text = text.toUpperCase();
             Paint lp = k.special() ? mLabelSmall : mLabel;
-            lp.setColor(lit ? 0xFFFFFFFF : 0xFF1F1F1F);
+            lp.setColor(lit ? 0xFFFFFFFF : mInk);
             float base = k.rect.centerY() - (lp.descent() + lp.ascent()) / 2;
             canvas.drawText(text, k.rect.centerX(), base, lp);
             if (pressed) pressedKey = k;

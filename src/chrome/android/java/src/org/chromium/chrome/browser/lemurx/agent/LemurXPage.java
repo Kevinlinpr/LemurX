@@ -78,7 +78,10 @@ final class LemurXPage {
                 o.put("id", id);
                 o.put("role", role);
                 if (!name.isEmpty()) o.put("name", name);
-                if (!value.isEmpty()) o.put("value", value);
+                // 密码框的内容留在本机，不跟元素清单回服务端。
+                if (!value.isEmpty() && !"password".equalsIgnoreCase(inputType)) {
+                    o.put("value", value);
+                }
                 if (!placeholder.isEmpty()) o.put("placeholder", placeholder);
                 if (!url.isEmpty()) o.put("url", url);
                 if (!tag.isEmpty()) o.put("tag", tag);

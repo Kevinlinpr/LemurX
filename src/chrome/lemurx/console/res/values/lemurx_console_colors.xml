@@ -7,4 +7,7 @@
     <color name="lemurx_console_cell_pressed">#FFF0F1F2</color>
     <color name="lemurx_console_cell_active">#FFF0F1F2</color>
     <color name="lemurx_console_shadow">#FF132631</color>
+    <!-- 标签数底板固定白底深字，盖住右下角方块；夜间也不跟着药丸变暗。 -->
+    <color name="lemurx_console_tab_count">#FF132631</color>
+    <color name="lemurx_console_tab_count_bg">#FFFFFFFF</color>
 </resources>

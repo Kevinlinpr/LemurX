@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.lemurx.muse;
 
 import android.app.AlertDialog;
 import android.content.Context;
+import android.graphics.PorterDuff;
 import android.graphics.Typeface;
 import android.text.InputType;
 import android.util.TypedValue;
@@ -38,8 +39,8 @@ import org.json.JSONObject;
  * 一页（{@link LemurXDataFragment} 把它包成 SettingsActivity 里的 Fragment）。
  *
  * <ul>
- *   <li>「浏览器保管」：密码、支付方式、地址——都是 Chromium 原生的密码管理 / 自动填充界面，
- *       数据留在设备上的加密存储里，这页只是入口，智能体不读它们。
+ *   <li>「浏览器保管」：密码、支付方式、地址。密码和 Chrome 同一套加密存储，Aero 可以在页面上
+ *       填入已保存的登录，密码不离开这台手机。支付方式和地址只在设置里看，智能体读不到。
  *   <li>「给 LemurX 的资料」：服务端的 memories（{@code /api/agent/memories}），每次对话都会
  *       提供给智能体，用来放偏好、常用信息、工作背景这类方便它办事的内容。可增删改。
  * </ul>
@@ -97,15 +98,15 @@ class MuseDataView extends FrameLayout {
         add.setText(R.string.lemurx_muse_data_add);
         add.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         add.setTypeface(Typeface.DEFAULT_BOLD);
-        add.setTextColor(0xFFFFFFFF);
-        add.setBackground(MusePage.rounded(MusePage.COLOR_ACCENT, 16, context));
+        add.setTextColor(MusePage.onAccent(context));
+        add.setBackground(MusePage.rounded(MusePage.accent(getContext()), 16, context));
         add.setPadding(dp(14), dp(7), dp(14), dp(7));
         add.setOnClickListener(v -> edit(null));
         head.addView(add);
         column.addView(head);
 
         mError = new TextView(context);
-        mError.setTextColor(0xFFB3261E);
+        mError.setTextColor(MusePage.error(context));
         mError.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         mError.setPadding(0, 0, 0, dp(8));
         mError.setVisibility(View.GONE);
@@ -137,12 +138,12 @@ class MuseDataView extends FrameLayout {
         t.setText(title);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setTextColor(MusePage.COLOR_TEXT);
+        t.setTextColor(MusePage.text(getContext()));
         box.addView(t);
         TextView h = new TextView(context);
         h.setText(hint);
         h.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        h.setTextColor(MusePage.COLOR_MUTED);
+        h.setTextColor(MusePage.muted(getContext()));
         h.setLineSpacing(0, 1.25f);
         h.setPadding(0, dp(2), 0, 0);
         box.addView(h);
@@ -152,7 +153,7 @@ class MuseDataView extends FrameLayout {
     private LinearLayout group() {
         LinearLayout group = new LinearLayout(getContext());
         group.setOrientation(LinearLayout.VERTICAL);
-        group.setBackground(MusePage.rounded(MusePage.COLOR_SURFACE, 18, getContext()));
+        group.setBackground(MusePage.rounded(MusePage.surface(getContext()), 18, getContext()));
         return group;
     }
 
@@ -165,7 +166,7 @@ class MuseDataView extends FrameLayout {
 
     private View divider() {
         View line = new View(getContext());
-        line.setBackgroundColor(MusePage.COLOR_LINE);
+        line.setBackgroundColor(MusePage.line(getContext()));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
         lp.setMarginStart(dp(56));
@@ -193,16 +194,17 @@ class MuseDataView extends FrameLayout {
         TextView t = new TextView(context);
         t.setText(title);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        t.setTextColor(MusePage.COLOR_TEXT);
+        t.setTextColor(MusePage.text(getContext()));
         texts.addView(t);
         TextView h = new TextView(context);
         h.setText(hint);
         h.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        h.setTextColor(MusePage.COLOR_MUTED);
+        h.setTextColor(MusePage.muted(getContext()));
         texts.addView(h);
         row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         ImageView chevron = new ImageView(context);
         chevron.setImageResource(R.drawable.lemurx_muse_ic_chevron);
+        chevron.setColorFilter(MusePage.muted(context), PorterDuff.Mode.SRC_IN);
         row.addView(chevron, new LinearLayout.LayoutParams(dp(20), dp(20)));
         return row;
     }
@@ -267,7 +269,7 @@ class MuseDataView extends FrameLayout {
         if (items == null || items.length() == 0) {
             TextView empty = new TextView(context);
             empty.setText(items == null ? R.string.lemurx_muse_data_loading : R.string.lemurx_muse_data_empty);
-            empty.setTextColor(MusePage.COLOR_MUTED);
+            empty.setTextColor(MusePage.muted(getContext()));
             empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
             empty.setPadding(dp(4), dp(8), dp(4), dp(8));
             mMemories.addView(empty);
@@ -305,7 +307,7 @@ class MuseDataView extends FrameLayout {
         TextView t = new TextView(context);
         t.setText(text);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        t.setTextColor(MusePage.COLOR_TEXT);
+        t.setTextColor(MusePage.text(getContext()));
         t.setLineSpacing(0, 1.25f);
         head.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         row.addView(head);
@@ -313,7 +315,7 @@ class MuseDataView extends FrameLayout {
             TextView s = new TextView(context);
             s.setText(context.getString(R.string.lemurx_muse_data_source, source));
             s.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            s.setTextColor(MusePage.COLOR_MUTED);
+            s.setTextColor(MusePage.muted(getContext()));
             s.setPadding(0, dp(2), 0, 0);
             row.addView(s);
         }

@@ -110,6 +110,24 @@ p { margin: 0; }
   border-top: 1px solid var(--line);
 }
 .footer__inner { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.footer__links { display: flex; gap: 16px; }
+.footer__links a:hover { color: var(--ink); }
+.hero__actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 12px 18px; border-radius: 999px; background: var(--ink); color: #fff;
+  font-weight: 680;
+}
+.btn--ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.test { padding: 8px 0 72px; display: grid; gap: 14px; justify-items: start; }
+.test h2 { font-size: clamp(1.8rem, 4vw, 2.4rem); }
+.steps { margin: 0; padding-left: 1.2rem; color: var(--mute); display: grid; gap: 8px; }
+.legal { padding: 28px 0 72px; display: grid; gap: 18px; }
+.legal h1 { font-size: clamp(2rem, 5vw, 3rem); }
+.legal h2 { font-size: 1.25rem; margin-top: 8px; }
+.legal p, .legal li { color: var(--mute); }
+.legal ul { margin: 0; padding-left: 1.2rem; display: grid; gap: 8px; }
+.legal a { color: var(--blue); }
 
 @media (max-width: 720px) {
   .nav__links { display: none; }

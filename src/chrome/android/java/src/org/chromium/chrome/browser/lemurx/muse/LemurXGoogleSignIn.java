@@ -18,11 +18,14 @@ import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes;
 import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.common.api.CommonStatusCodes;
 import com.google.android.gms.tasks.Task;
+import com.google.android.gms.tasks.Tasks;
 
 import org.chromium.base.Log;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
+
+import java.util.concurrent.TimeUnit;
 
 /**
  * Google 登录（Play 服务）：拿到 id token 交给 {@link LemurXAccount#signInWithGoogle}。从
@@ -121,25 +124,44 @@ public final class LemurXGoogleSignIn {
                         });
     }
 
+    /**
+     * 静默拿一张新的 id token。没有缓存账号、或需要用户重新点选时返回 null。
+     * 会阻塞调用线程，不要在界面线程上用。
+     */
+    public static @Nullable Account silentAccount(Activity activity) {
+        try {
+            GoogleSignInAccount account =
+                    Tasks.await(client(activity).silentSignIn(), 20, TimeUnit.SECONDS);
+            Account parsed = accountFrom(account);
+            if (parsed == null) Log.i(TAG, "silent sign-in: empty id token");
+            return parsed;
+        } catch (Exception e) {
+            int code = -1;
+            Throwable cause = e.getCause();
+            if (e instanceof ApiException) {
+                code = ((ApiException) e).getStatusCode();
+            } else if (cause instanceof ApiException) {
+                code = ((ApiException) cause).getStatusCode();
+            }
+            Log.i(TAG, "silent sign-in: %s %d", e.getClass().getSimpleName(), code);
+            return null;
+        }
+    }
+
     /** 账号选择页回来：解出账号或错误。 */
     public static void handleResult(Context context, @Nullable Intent data, Callback callback) {
         Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
         try {
             GoogleSignInAccount account = task.getResult(ApiException.class);
-            String token = account != null ? account.getIdToken() : null;
-            if (account == null || TextUtils.isEmpty(token)) {
+            Account parsed = accountFrom(account);
+            if (parsed == null) {
                 Log.i(TAG, "empty id token");
                 callback.onError(
                         CommonStatusCodes.ERROR,
                         context.getString(R.string.lemurx_login_google_failed));
                 return;
             }
-            String name = account.getDisplayName();
-            if (TextUtils.isEmpty(name)) name = account.getGivenName();
-            Uri photo = account.getPhotoUrl();
-            callback.onAccount(
-                    new Account(token, name, photo == null ? null : photo.toString(),
-                            account.getEmail()));
+            callback.onAccount(parsed);
         } catch (ApiException e) {
             int code = e.getStatusCode();
             Log.i(TAG, "sign-in status %d (%s)", code, statusName(code));
@@ -149,6 +171,16 @@ public final class LemurXGoogleSignIn {
             callback.onError(
                     CommonStatusCodes.ERROR, context.getString(R.string.lemurx_login_google_failed));
         }
+    }
+
+    private static @Nullable Account accountFrom(@Nullable GoogleSignInAccount account) {
+        String token = account != null ? account.getIdToken() : null;
+        if (account == null || TextUtils.isEmpty(token)) return null;
+        String name = account.getDisplayName();
+        if (TextUtils.isEmpty(name)) name = account.getGivenName();
+        Uri photo = account.getPhotoUrl();
+        return new Account(
+                token, name, photo == null ? null : photo.toString(), account.getEmail());
     }
 
     /** 让 Google SDK 也忘掉账号（业务登出时一起调）。 */

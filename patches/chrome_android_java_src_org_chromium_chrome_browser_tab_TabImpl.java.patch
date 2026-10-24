@@ -10,7 +10,7 @@ index 53be725c22..357d2349f6 100644
 +            // typed chrome://newtab, ...) becomes this tab's agent conversation instead.
 +            String lemurxChat =
 +                    org.chromium.chrome.browser.lemurx.LemurXConsoleShell.rewriteNewTabUrl(
-+                            params.getUrl(), isIncognito());
++                            params.getUrl(), isIncognito(), this);
 +            if (lemurxChat != null) params.setUrl(lemurxChat);
 +
              // TODO(tedchoc): When showing the android NTP, delay the call to

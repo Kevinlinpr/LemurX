@@ -1,5 +1,5 @@
 diff --git a/chrome/android/BUILD.gn b/chrome/android/BUILD.gn
-index 2133a964d0..e317cd6b61 100644
+index 2133a964d0..960302175e 100644
 --- a/chrome/android/BUILD.gn
 +++ b/chrome/android/BUILD.gn
 @@ -175,6 +175,30 @@ if (_is_default_toolchain) {
@@ -33,16 +33,7 @@ index 2133a964d0..e317cd6b61 100644
        "//chrome/android/webapk/libs/common:splash_resources",
        "//chrome/app:java_strings_grd",
        "//chrome/browser/actor/android:java_resources",
-@@ -324,6 +348,8 @@ if (_is_default_toolchain) {
-       ":usage_stats_proto_java",
-       ":xr_java",
-       "$google_play_services_package:google_play_services_auth_base_java",
-+      # LemurX: Google Sign-In for the Lemur account (lemurx/muse/LemurXGoogleSignIn.java).
-+      "$google_play_services_package:google_play_services_auth_java",
-       "$google_play_services_package:google_play_services_base_java",
-       "$google_play_services_package:google_play_services_basement_java",
-       "$google_play_services_package:google_play_services_cast_framework_java",
-@@ -1840,6 +1866,7 @@ if (_is_default_toolchain) {
+@@ -1840,6 +1864,7 @@ if (_is_default_toolchain) {
    java_group("chrome_public_non_pak_assets") {
      deps = [
        "//chrome/android/webapk/libs/runtime_library:runtime_library_assets",
@@ -50,7 +41,19 @@ index 2133a964d0..e317cd6b61 100644
        "//components/privacy_sandbox/privacy_sandbox_attestations/preload:privacy_sandbox_attestations_assets",
      ]
    }
-@@ -2990,6 +3017,8 @@ if (_is_default_toolchain) {
+@@ -2229,6 +2254,11 @@ if (_is_default_toolchain) {
+       # Deps to pull services into base module.
+       # TODO(crbug.com/40148088): Consider moving these to the chrome module to
+       # reduce base dex size.
++      # LemurX: Google Sign-In (LemurXGoogleSignIn.java). play-services-auth
++      # declares RevocationBoundService; isolatedSplits requires that class in
++      # the base dex, so this AAR must live here — not on chrome_java (the
++      # chrome DFM). chrome_java still compiles against it via this target.
++      "$google_play_services_package:google_play_services_auth_java",
+       "//base:service_loader_java",
+       "//chrome/android/modules/on_demand:provider_java",
+       "//components/background_task_scheduler:background_task_scheduler_java",
+@@ -2990,6 +3020,8 @@ if (_is_default_toolchain) {
  
    generate_jni("chrome_jni_headers") {
      sources = [

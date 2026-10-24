@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Night colours for the bottom pill and stroke icons. Day values stay in values/. -->
+<resources>
+    <color name="lemurx_console_icon">#FFE7EEF2</color>
+    <color name="lemurx_console_pill">#FF1C262C</color>
+    <color name="lemurx_console_pill_stroke">#FF2C3A42</color>
+    <color name="lemurx_console_cell_pressed">#FF2A363E</color>
+    <color name="lemurx_console_cell_active">#FF2A363E</color>
+    <color name="lemurx_console_shadow">#FF000000</color>
+</resources>

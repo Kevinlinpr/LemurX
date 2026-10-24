@@ -569,13 +569,40 @@ final class LemurXHumanInput {
                 });
     }
 
+    /** 输入框快照：光标前 / 选区 / 光标后。选区在时 {@code text()} 仍是整框。 */
+    static final class FieldSnap {
+        final String before;
+        final String selected;
+        final String after;
+
+        FieldSnap(String before, String selected, String after) {
+            this.before = before;
+            this.selected = selected;
+            this.after = after;
+        }
+
+        String text() {
+            return before + selected + after;
+        }
+
+        boolean hasSelection() {
+            return !selected.isEmpty();
+        }
+    }
+
     /**
      * 读出当前输入框里的全部文字（光标前 + 选区 + 光标后）。必须在输入法线程上读，所以投到
      * {@link InputConnection#getHandler()} 再等结果。读不到返回 null，调用方就不要假装核对过。
      */
     static @Nullable String fieldText(@Nullable InputConnection ic) {
+        FieldSnap snap = fieldSnap(ic);
+        return snap == null ? null : snap.text();
+    }
+
+    /** 和 {@link #fieldText} 一次读，但把选区拆开，好算「替换选区之后整框该是什么」。 */
+    static @Nullable FieldSnap fieldSnap(@Nullable InputConnection ic) {
         if (ic == null) return null;
-        AtomicReference<String> out = new AtomicReference<>();
+        AtomicReference<FieldSnap> out = new AtomicReference<>();
         CountDownLatch latch = new CountDownLatch(1);
         Runnable job =
                 () -> {
@@ -586,7 +613,7 @@ final class LemurXHumanInput {
                         String b = before == null ? "" : before.toString();
                         String s = selected == null ? "" : selected.toString();
                         String a = after == null ? "" : after.toString();
-                        out.set(b + s + a);
+                        out.set(new FieldSnap(b, s, a));
                     } catch (Throwable t) {
                         Log.i(TAG, "field text: %s", t.toString());
                     } finally {

@@ -107,7 +107,7 @@ class MuseTasksView extends FrameLayout {
         column.addView(chips);
 
         mError = new TextView(context);
-        mError.setTextColor(0xFFB3261E);
+        mError.setTextColor(MusePage.error(context));
         mError.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         mError.setPadding(pad, 0, pad, dp(8));
         mError.setVisibility(View.GONE);
@@ -135,10 +135,10 @@ class MuseTasksView extends FrameLayout {
         Context context = getContext();
         for (int i = 0; i < mChips.length; i++) {
             boolean on = i == mFilter;
-            mChips[i].setTextColor(on ? 0xFFFFFFFF : MusePage.COLOR_TEXT);
+            mChips[i].setTextColor(on ? MusePage.onAccent(context) : MusePage.text(context));
             mChips[i].setBackground(on
-                    ? MusePage.rounded(MusePage.COLOR_ACCENT, 18, context)
-                    : MusePage.rounded(MusePage.COLOR_SURFACE, 18, context));
+                    ? MusePage.rounded(MusePage.accent(getContext()), 18, context)
+                    : MusePage.rounded(MusePage.surface(getContext()), 18, context));
         }
     }
 
@@ -282,7 +282,7 @@ class MuseTasksView extends FrameLayout {
             empty.setText(mTasks == null && mError.getVisibility() == View.VISIBLE
                     ? R.string.lemurx_muse_tasks_offline
                     : R.string.lemurx_muse_tasks_empty);
-            empty.setTextColor(MusePage.COLOR_MUTED);
+            empty.setTextColor(MusePage.muted(getContext()));
             empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
             empty.setGravity(Gravity.CENTER);
             empty.setLineSpacing(0, 1.3f);
@@ -306,7 +306,7 @@ class MuseTasksView extends FrameLayout {
         Context context = getContext();
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(MusePage.rounded(MusePage.COLOR_SURFACE, 18, context));
+        card.setBackground(MusePage.rounded(MusePage.surface(getContext()), 18, context));
         card.setPadding(dp(16), dp(14), dp(16), dp(14));
         return card;
     }
@@ -326,10 +326,10 @@ class MuseTasksView extends FrameLayout {
         view.setText(label);
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         view.setTypeface(Typeface.DEFAULT_BOLD);
-        view.setTextColor(primary ? 0xFFFFFFFF : MusePage.COLOR_TEXT);
+        view.setTextColor(primary ? MusePage.onAccent(context) : MusePage.text(context));
         view.setBackground(primary
-                ? MusePage.rounded(MusePage.COLOR_ACCENT, 16, context)
-                : MusePage.outlined(0xFFC9CED3, 16, context));
+                ? MusePage.rounded(MusePage.accent(getContext()), 16, context)
+                : MusePage.outlined(MusePage.outline(context), 16, context));
         view.setPadding(dp(14), dp(7), dp(14), dp(7));
         view.setOnClickListener(onClick);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
@@ -376,9 +376,9 @@ class MuseTasksView extends FrameLayout {
         String title = thread != null ? MuseChatView.titleOf(thread) : null;
         if (TextUtils.isEmpty(title) && tab != null) title = tab.getTitle();
         if (TextUtils.isEmpty(title)) title = getContext().getString(R.string.lemurx_muse_brand);
-        card.addView(text(title, 15, MusePage.COLOR_TEXT, true));
-        card.addView(statusLine(item.liveStatus != null ? item.liveStatus : "", 0xFF1A73E8));
-        card.addView(text(tabLine(thread, tab), 13, MusePage.COLOR_MUTED, false));
+        card.addView(text(title, 15, MusePage.text(getContext()), true));
+        card.addView(statusLine(item.liveStatus != null ? item.liveStatus : "", MusePage.link(getContext())));
+        card.addView(text(tabLine(thread, tab), 13, MusePage.muted(getContext()), false));
         LinearLayout actions = new LinearLayout(getContext());
         actions.setOrientation(LinearLayout.HORIZONTAL);
         if (thread != null && !thread.equals(mPage.threadId())) {
@@ -403,7 +403,7 @@ class MuseTasksView extends FrameLayout {
         if (thread.isEmpty()) thread = null;
         Tab tab = tabFor(thread);
 
-        card.addView(text(task.optString("title", task.optString("prompt", "")), 15, MusePage.COLOR_TEXT, true));
+        card.addView(text(task.optString("title", task.optString("prompt", "")), 15, MusePage.text(getContext()), true));
         card.addView(statusLine(statusLabel(status), statusColor(status)));
 
         // 计划进度：n/m 步 · 当前步
@@ -422,28 +422,28 @@ class MuseTasksView extends FrameLayout {
             }
             String progress = context.getString(R.string.lemurx_muse_steps, done, plan.length());
             if (!TextUtils.isEmpty(current)) progress += " · " + current;
-            card.addView(text(progress, 13, MusePage.COLOR_MUTED, false));
+            card.addView(text(progress, 13, MusePage.muted(getContext()), false));
         }
         String question = task.optString("question", "");
         if (!question.isEmpty() && "waiting_input".equals(status)) {
-            TextView q = text(question, 14, MusePage.COLOR_TEXT, false);
+            TextView q = text(question, 14, MusePage.text(getContext()), false);
             q.setPadding(0, dp(6), 0, 0);
             card.addView(q);
         }
         String result = task.optString("result", "");
         if (!result.isEmpty() && "succeeded".equals(status)) {
             TextView r = text(result.length() > 200 ? result.substring(0, 200) + "…" : result, 13,
-                    MusePage.COLOR_MUTED, false);
+                    MusePage.muted(getContext()), false);
             r.setPadding(0, dp(6), 0, 0);
             card.addView(r);
         }
         String error = task.optString("error", "");
         if (!error.isEmpty() && "failed".equals(status)) {
-            TextView e = text(error, 13, 0xFFB3261E, false);
+            TextView e = text(error, 13, MusePage.error(getContext()), false);
             e.setPadding(0, dp(6), 0, 0);
             card.addView(e);
         }
-        TextView where = text(tabLine(thread, tab), 13, MusePage.COLOR_MUTED, false);
+        TextView where = text(tabLine(thread, tab), 13, MusePage.muted(getContext()), false);
         where.setPadding(0, dp(6), 0, 0);
         card.addView(where);
 
@@ -507,22 +507,23 @@ class MuseTasksView extends FrameLayout {
         }
     }
 
-    private static int statusColor(String status) {
+    private int statusColor(String status) {
+        Context context = getContext();
         switch (status) {
             case "running":
             case "queued":
             case "scheduled":
-                return 0xFF1A73E8;
+                return MusePage.link(context);
             case "waiting_approval":
             case "waiting_input":
             case "paused":
-                return 0xFFB26A00;
+                return MusePage.warn(context);
             case "failed":
-                return 0xFFB3261E;
+                return MusePage.error(context);
             case "succeeded":
-                return 0xFF1E7B34;
+                return MusePage.ok(context);
             default:
-                return MusePage.COLOR_MUTED;
+                return MusePage.muted(context);
         }
     }
 

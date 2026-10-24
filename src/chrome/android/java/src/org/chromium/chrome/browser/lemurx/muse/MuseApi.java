@@ -13,6 +13,7 @@ import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.lemurx.LemurXKillSwitch;
+import org.chromium.chrome.browser.lemurx.agent.LemurXDeviceBridge;
 import org.chromium.chrome.browser.lemurx.agent.LemurXDeviceConfig;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
@@ -21,6 +22,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -38,7 +40,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <ul>
  *   <li>会话：{@code POST /api/session} 换一个 Bearer token，存在私有 SharedPreferences 里；
- *       401 时自动重新换一次。token 和访问密钥只在内存 / 私有存储里流转，不打日志。
+ *       401 时自动重新换一次。已登录时带上 aero 票据，会话主人是这个账号；没票据就是游客。
+ *       token、票据和访问密钥只在内存 / 私有存储里流转，不打日志。
  *   <li>JSON：{@link #get} / {@link #send}，后台线程发请求，结果回到 UI 线程。
  *   <li>对话：{@link #run} 走 AG-UI 协议（{@code POST /api/copilotkit/agent/default/run} →
  *       SSE 事件流），逐 token 回调，可取消。
@@ -54,10 +57,19 @@ public final class MuseApi {
     private static final String KEY_API_URL = "api_url";
     private static final String KEY_TOKEN = "session_token";
     private static final String KEY_ACCESS_KEY = "access_key";
+    /** 这台安装自己的游客密钥；不进日志，登录后用来认领游客桶。 */
+    private static final String KEY_GUEST_KEY = "guest_key";
+    /** 当前这份会话 token 是不是带着 aero 票据换的。登录状态变了就要重换。 */
+    private static final String KEY_SESSION_SIGNED_IN = "session_signed_in";
 
-    /** 部署在新加坡的 Aero 服务；局域网备一份，公网不通的时候还能聊。 */
-    public static final String DEFAULT_API_URL = "http://18.143.226.219:8787";
-    public static final String LAN_API_URL = "http://192.168.0.37:8787";
+    /**
+     * 当前对话服务。测服在局域网；公网地址还留着，设置里可以改回去。
+     * 健康检查失败时不再改去另一台机器。
+     */
+    public static final String DEFAULT_API_URL = "http://192.168.1.111:8787";
+    public static final String LAN_API_URL = "http://192.168.1.111:8787";
+    /** 上一版写进偏好里的公网地址。读到就清掉，否则改默认值也不会生效。 */
+    private static final String PREVIOUS_API_URL = "https://api.aero.osmangroupx.com";
     private static @Nullable String sLiveUrl;
 
     private static final int CONNECT_TIMEOUT_MS = 10_000;
@@ -138,10 +150,20 @@ public final class MuseApi {
         } catch (Exception e) {
             // 读不到就用默认
         }
-        if (TextUtils.isEmpty(url) || url.contains("trycloudflare.com")) url = DEFAULT_API_URL;
+        if (PREVIOUS_API_URL.equals(url)) {
+            prefs().edit().remove(KEY_API_URL).apply();
+            url = null;
+        }
+        if (TextUtils.isEmpty(url) || retired(url)) url = DEFAULT_API_URL;
         if (sLiveUrl != null) url = sLiveUrl;
         while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
         return url;
+    }
+
+    /** 旧的明文 IP 和临时隧道已经关了，存下来的地址不能再用。 */
+    private static boolean retired(String url) {
+        String lower = url.toLowerCase(java.util.Locale.US);
+        return lower.contains("trycloudflare.com") || lower.contains("18.143.226.219");
     }
 
     /** 健康检查选定当前能通的地址（公网优先，局域网兜底）。 */
@@ -191,9 +213,71 @@ public final class MuseApi {
         editor.remove(KEY_TOKEN).apply();
     }
 
+    /** 这台安装的游客密钥。没有就现造一份，之后一直用。 */
+    public static String guestKey() {
+        SharedPreferences p = prefs();
+        String key = p.getString(KEY_GUEST_KEY, null);
+        if (TextUtils.isEmpty(key)) {
+            key = UUID.randomUUID().toString();
+            p.edit().putString(KEY_GUEST_KEY, key).apply();
+        }
+        return key;
+    }
+
+    public static @Nullable String accountId() {
+        return LemurXAccount.accountId();
+    }
+
     /** 退出：丢掉本机的会话 token。 */
     public static void signOut() {
         prefs().edit().remove(KEY_TOKEN).apply();
+    }
+
+    /** 登录或退出账号后换主人：清掉旧会话和旧设备令牌，设备桥按新身份重新登记。 */
+    public static void rebind() {
+        signOut();
+        LemurXDeviceConfig.setDeviceToken(null);
+        LemurXDeviceBridge.reconnectIdentity();
+    }
+
+    /**
+     * 用当前会话给这台手机登记一把设备令牌。测服只允许登录用户登记，会话里要带着
+     * aero 票据；游客会话会被拒绝。令牌只进私有存储，不打日志。后台线程。
+     */
+    public static boolean enrollThisDevice() {
+        MuseApi api = sInstance != null ? sInstance : new MuseApi();
+        try {
+            boolean ok = api.enrollOnce(true);
+            if (ok) Log.i(TAG, "device enrolled");
+            return ok;
+        } catch (Exception e) {
+            Log.w(TAG, "device enroll: %s", e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean enrollOnce(boolean retryAuth) throws IOException, JSONException {
+        String token = ensureToken();
+        JSONObject body = new JSONObject();
+        body.put("name", LemurXDeviceConfig.deviceName());
+        HttpURLConnection connection = open("POST", "/api/devices", token, false);
+        try {
+            writeBody(connection, body.toString());
+            int status = connection.getResponseCode();
+            String text =
+                    readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+            if (status == 401 && retryAuth) {
+                clearToken(token);
+                return enrollOnce(false);
+            }
+            if (status >= 400) throw new IOException(errorMessage(status, text));
+            String deviceToken = new JSONObject(text).optString("token", "");
+            if (TextUtils.isEmpty(deviceToken)) throw new IOException("device enroll returned no token");
+            LemurXDeviceConfig.setDeviceToken(deviceToken);
+            return true;
+        } finally {
+            connection.disconnect();
+        }
     }
 
     public static boolean hasSession() {
@@ -209,6 +293,40 @@ public final class MuseApi {
 
     public void send(String method, String path, @Nullable JSONObject body, Callback<Object> callback) {
         request(method, path, body, callback);
+    }
+
+    /** 社区发帖前上传一张 JPEG。结果是 {"id": "..."}。 */
+    public void postImage(String path, byte[] jpeg, Callback<Object> callback) {
+        mExecutor.execute(
+                () -> {
+                    Object value = null;
+                    String error = null;
+                    try {
+                        value = postImageBlocking(path, jpeg, true);
+                    } catch (Exception e) {
+                        error = describe(e);
+                    }
+                    final Object v = value;
+                    final String err = error;
+                    ThreadUtils.postOnUiThread(() -> callback.onResult(v, err));
+                });
+    }
+
+    /** 带登录态把一张社区图片拉下来。 */
+    public void getBytes(String path, Callback<byte[]> callback) {
+        mExecutor.execute(
+                () -> {
+                    byte[] value = null;
+                    String error = null;
+                    try {
+                        value = getBytesBlocking(path, true);
+                    } catch (Exception e) {
+                        error = describe(e);
+                    }
+                    final byte[] v = value;
+                    final String err = error;
+                    ThreadUtils.postOnUiThread(() -> callback.onResult(v, err));
+                });
     }
 
     private void request(
@@ -333,14 +451,62 @@ public final class MuseApi {
         }
     }
 
-    /** 拿一个可用的 token：本地有就用，没有就 POST /api/session 换一个。后台线程。 */
+    /** GET /api/app/release。不带登录态。公网不通就改走局域网。结果回到 UI 线程。 */
+    public void probeRelease(Callback<JSONObject> callback) {
+        mExecutor.execute(
+                () -> {
+                    try {
+                        JSONObject json = releaseOnce(apiUrl());
+                        if (json == null && !LAN_API_URL.equals(apiUrl())) {
+                            json = releaseOnce(LAN_API_URL);
+                        }
+                        if (json == null) {
+                            ThreadUtils.postOnUiThread(() -> callback.onResult(null, "unreachable"));
+                            return;
+                        }
+                        final JSONObject out = json;
+                        ThreadUtils.postOnUiThread(() -> callback.onResult(out, null));
+                    } catch (Exception e) {
+                        ThreadUtils.postOnUiThread(() -> callback.onResult(null, describe(e)));
+                    }
+                });
+    }
+
+    private static @Nullable JSONObject releaseOnce(String base) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(base + "/api/app/release").openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(READ_TIMEOUT_MS);
+            connection.setUseCaches(false);
+            int status = connection.getResponseCode();
+            if (status != 200) return null;
+            String text = readAll(connection.getInputStream());
+            return new JSONObject(text);
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    /**
+     * 拿一个可用的 token。本地会话还在、而且登录状态没变，就继续用；否则 POST /api/session。
+     * 已登录带上 aero 票据，guestKey 仍带上，服务端会把游客桶认领到这个账号。后台线程。
+     */
     private String ensureToken() throws IOException, JSONException {
         synchronized (mTokenLock) {
+            String ticket = LemurXAccount.aeroTicket();
+            boolean signedIn = ticket != null;
             String token = prefs().getString(KEY_TOKEN, null);
-            if (!TextUtils.isEmpty(token)) return token;
+            boolean wasSignedIn = prefs().getBoolean(KEY_SESSION_SIGNED_IN, false);
+            if (!TextUtils.isEmpty(token) && signedIn == wasSignedIn) return token;
             JSONObject body = new JSONObject();
             String accessKey = accessKey();
             if (!TextUtils.isEmpty(accessKey)) body.put("accessKey", accessKey);
+            body.put("guestKey", guestKey());
+            if (ticket != null) body.put("ticket", ticket);
             HttpURLConnection connection = open("POST", "/api/session", null, false);
             try {
                 writeBody(connection, body.toString());
@@ -355,7 +521,10 @@ public final class MuseApi {
                 }
                 JSONObject json = new JSONObject(text);
                 token = json.getString("token");
-                prefs().edit().putString(KEY_TOKEN, token).apply();
+                prefs().edit()
+                        .putString(KEY_TOKEN, token)
+                        .putBoolean(KEY_SESSION_SIGNED_IN, signedIn)
+                        .apply();
                 return token;
             } finally {
                 connection.disconnect();
@@ -542,6 +711,48 @@ public final class MuseApi {
         }
     }
 
+    private Object postImageBlocking(String path, byte[] jpeg, boolean retryAuth)
+            throws IOException, JSONException {
+        String token = ensureToken();
+        HttpURLConnection connection = open("POST", path, token, false);
+        try {
+            connection.setRequestProperty("Content-Type", "image/jpeg");
+            connection.setFixedLengthStreamingMode(jpeg.length);
+            try (OutputStream out = connection.getOutputStream()) {
+                out.write(jpeg);
+            }
+            int status = connection.getResponseCode();
+            if (status == 401 && retryAuth) {
+                clearToken(token);
+                return postImageBlocking(path, jpeg, false);
+            }
+            String text = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+            if (status >= 400) throw new IOException(errorMessage(status, text));
+            return parseJson(text);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private byte[] getBytesBlocking(String path, boolean retryAuth) throws IOException, JSONException {
+        String token = ensureToken();
+        HttpURLConnection connection = open("GET", path, token, false);
+        try {
+            int status = connection.getResponseCode();
+            if (status == 401 && retryAuth) {
+                clearToken(token);
+                return getBytesBlocking(path, false);
+            }
+            if (status >= 400) {
+                String text = readAll(connection.getErrorStream());
+                throw new IOException(errorMessage(status, text));
+            }
+            return readBytes(connection.getInputStream());
+        } finally {
+            connection.disconnect();
+        }
+    }
+
     // ---------------------------------------------------------------- 底层
 
     private static HttpURLConnection open(
@@ -567,6 +778,20 @@ public final class MuseApi {
         try (OutputStream out = connection.getOutputStream()) {
             out.write(bytes);
         }
+    }
+
+    private static byte[] readBytes(@Nullable InputStream in) throws IOException {
+        if (in == null) return new byte[0];
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (InputStream stream = in) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = stream.read(buf)) > 0) {
+                if (out.size() + n > 2_500_000) throw new IOException("That image is too large");
+                out.write(buf, 0, n);
+            }
+        }
+        return out.toByteArray();
     }
 
     private static String readAll(@Nullable InputStream in) throws IOException {

@@ -4,13 +4,16 @@
 
 package org.chromium.chrome.browser.lemurx.agent;
 
+import android.app.Activity;
 import android.app.Notification;
+import android.app.PictureInPictureParams;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.Typeface;
 import android.os.Build;
@@ -18,6 +21,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.text.TextUtils;
+import android.util.Rational;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -45,9 +49,16 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.lemurx.LemurXConsoleShell;
 import org.chromium.chrome.browser.lemurx.LemurXKillSwitch;
+import org.chromium.chrome.browser.lemurx.muse.LemurXAccount;
+import org.chromium.chrome.browser.lemurx.muse.MuseApi;
+import org.chromium.chrome.browser.lemurx.muse.MusePage;
 import org.chromium.chrome.browser.lemurx.muse.MuseUrls;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabCreationState;
 import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.chrome.browser.tab.TabObserver;
+import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabClosureParams;
 import org.chromium.chrome.browser.tabmodel.TabModel;
@@ -57,6 +68,7 @@ import org.chromium.content_public.browser.ImeAdapter;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.RenderCoordinates;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.url.GURL;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -100,7 +112,8 @@ import java.util.regex.Pattern;
  *
  * <p>前台时的操作就是真人操作：点击 / 滑动是带压力、弧线和抖动的真实触摸事件，文字走输入法通道
  * （{@link LemurXHumanInput}），每一下都画在屏幕上（{@link LemurXTouchOverlay}）；用户一碰屏幕，
- * 进行中的手势立即取消。窗口不在前台时一律回 DEVICE_BACKGROUND，由服务端转给云端浏览器。
+ * 进行中的手势立即取消。窗口不在前台时一律回 DEVICE_BACKGROUND，这一轮挂起，
+ * 等用户回到对话里点继续，再在同一个标签上接着操作。
  *
  * <p>用户永远赢：
  *
@@ -129,7 +142,9 @@ public final class LemurXDeviceBridge {
     // 与 OpenMuse 侧对齐：BrowserService.request() 45s 超时，桥 40s，本机每条命令预算 30s。
     private static final long COMMAND_BUDGET_MS = 30_000;
     /** 长连接上 15 秒一个 ping；这么久没字节就当连接断了，重新接上。 */
-    private static final int STREAM_READ_TIMEOUT_MS = 45_000;
+    private static final int STREAM_READ_TIMEOUT_MS = 22_000;
+    /** 看门狗：超过这个时间没收到字节，即使读线程还活着也拆掉重连（代理会把死连接撑着）。 */
+    private static final long STALE_STREAM_MS = 25_000;
     private static final int HTTP_TIMEOUT_MS = 15_000;
     private static final long UI_TIMEOUT_MS = 10_000;
     /** 无障碍树快照最多序列化这么多节点（正文 + 元素都从里面来）。 */
@@ -275,8 +290,27 @@ public final class LemurXDeviceBridge {
     private static volatile @Nullable String sLastError;
     private static volatile long sLastPollMs;
     private static volatile int sCommands;
-    /** 用户点了「接管」：本次进程内不再连接，重新打开 Aero 后恢复。 */
+    /** 测试包被远程关停：本次进程内不再连接。点「接管」不会置位——长连接要留给下一轮对话。 */
     private static volatile boolean sPausedByUser;
+    /** 切到后台之后为真：即使用户把窗口又打开了，也要等他在对话里点继续。画中画不算后台。 */
+    private static volatile boolean sAgentSuspended;
+    /** 正在进入或停留在 Aero 自己的画中画里。这期间页面操作继续，不挂起。 */
+    private static volatile boolean sPipArmed;
+    /** 画中画里藏起中间那粒「Agent 正在操作」，小窗只留网页。 */
+    private static boolean sHideBannerChip;
+    private static boolean sAgentPip;
+    private static boolean sPipWanted;
+    private static boolean sPipAuto;
+    private static int sLeaveGen;
+    private static ApplicationStatus.@Nullable ActivityStateListener sForegroundListener;
+    /** 这个 Agent 正在操作的那一个标签。跳转都落在这里，页面自己弹出的标签会被折回来。 */
+    private static int sAnchorTab = Tab.INVALID_TAB_ID;
+    private static volatile boolean sHoldInTab;
+    private static boolean sFolding;
+    private static @Nullable TabModelSelector sWatchedTabs;
+    /** 正在向服务端登记这台手机，避免看门狗每 3 秒再发一次。 */
+    private static volatile boolean sEnrolling;
+    private static volatile long sNextEnrollMs;
     /**
      * 读长连接和执行命令必须分开。命令在读线程里跑的时候（打开网页、截图）没人读心跳，
      * 对端或代理会把这条连接拆掉；OkHttp 的读超时还会 interrupt 读线程，循环一看到中断标志就退出，
@@ -301,6 +335,11 @@ public final class LemurXDeviceBridge {
     private static @Nullable WebContents sSuppressedIme;
     /** 打字还没结束时不许收键盘、不许放开系统输入法。点击回调会迟到，不能把正在打的字打断。 */
     private static volatile int sImeHold;
+    /**
+     * 把页面暂时交给用户（验证码等）：锁缩小成胶囊，系统键盘可以出来。
+     * 点「继续」或 Agent 下一次自己操作时收回。
+     */
+    private static volatile boolean sYielded;
     private static @Nullable View sImeView;
     private static final Runnable sImeWatch = LemurXDeviceBridge::watchIme;
     /** 最近一次打字核对的结果。只在这一次输入的回复里用，不留在日志里。 */
@@ -320,15 +359,173 @@ public final class LemurXDeviceBridge {
         if (activity.isDestroyed() || activity.isFinishing()) return;
         if (sActivity == activity && sThread != null && sThread.isAlive()) return;
         sActivity = activity;
+        watchForeground(activity);
         overlay(); // 提前挂好并完成布局，第一下点击就能画在正确位置
         start();
         armWatchdog();
+        noteAgentPresence();
+    }
+
+    /**
+     * 离开前台就把正在进行的操作挂起。回到窗口不会自动接着做。
+     * 画中画会先经过暂停，等一拍确认不是画中画再挂起。
+     */
+    private static void watchForeground(ChromeTabbedActivity activity) {
+        if (sForegroundListener != null) {
+            ApplicationStatus.unregisterActivityStateListener(sForegroundListener);
+        }
+        sForegroundListener =
+                (watched, newState) -> {
+                    if (watched != sActivity) return;
+                    if (newState == ActivityState.RESUMED) {
+                        sLeaveGen++;
+                        return;
+                    }
+                    if (newState != ActivityState.PAUSED && newState != ActivityState.STOPPED) {
+                        return;
+                    }
+                    if (inAgentPip(sActivity)) return;
+                    int gen = ++sLeaveGen;
+                    sWatchdog.postDelayed(
+                            () -> {
+                                if (gen != sLeaveGen) return;
+                                ChromeTabbedActivity current = sActivity;
+                                if (current == null || inAgentPip(current)) return;
+                                int state = ApplicationStatus.getStateForActivity(current);
+                                if (state == ActivityState.RESUMED) return;
+                                MusePage.suspendIfRunning();
+                            },
+                            250);
+                };
+        ApplicationStatus.registerStateListenerForActivity(sForegroundListener, activity);
+    }
+
+    /**
+     * 用户按 Home 离开时，这一轮还在操作就把窗口收成画中画，页面继续被操作。
+     *
+     * @return true 表示已经收进画中画，调用方不必再走视频画中画
+     */
+    public static boolean enterPipForAgent(Activity activity) {
+        if (!(activity instanceof ChromeTabbedActivity) || activity != sActivity) return false;
+        if (activity.isFinishing() || activity.isDestroyed()) return false;
+        if (activity.isInPictureInPictureMode()) return sAgentPip;
+        if (!agentBusy()) return false;
+        sPipArmed = true;
+        // 先露出 Agent 正在操作的那一页，再钉住整页尺寸缩进小窗。
+        revealHeldPage();
+        LemurXConsoleShell.setPipChrome(true);
+        setBannerChipVisible(false);
+        boolean entered = false;
+        try {
+            entered = activity.enterPictureInPictureMode(pipParams(false));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            Log.i(TAG, "pip: %s", e.getMessage());
+        }
+        if (!entered) {
+            sPipArmed = false;
+            LemurXConsoleShell.setPipChrome(false);
+            setBannerChipVisible(true);
+        }
+        return entered;
+    }
+
+    /**
+     * 画中画开关。Aero 自己收进去的那次不交给视频画中画处理。
+     *
+     * @return true 表示这次是 Aero 的画中画
+     */
+    public static boolean onAgentPipModeChanged(boolean inPicture) {
+        if (inPicture) {
+            if (!sPipArmed && !agentBusy()) return false;
+            sAgentPip = true;
+            sPipArmed = true;
+            LemurXConsoleShell.setPipChrome(true);
+            setBannerChipVisible(false);
+            sLeaveGen++;
+            return true;
+        }
+        if (!sAgentPip) return false;
+        sAgentPip = false;
+        sPipArmed = false;
+        LemurXConsoleShell.setPipChrome(false);
+        setBannerChipVisible(true);
+        noteAgentPresence();
+        return true;
+    }
+
+    /**
+     * 正在干活时更新画中画比例。不交给系统自动进入：自动进入会跳过 Home 回调，
+     * 来不及在窗口缩小前把网页钉在整页尺寸上。
+     */
+    public static void noteAgentPresence() {
+        boolean busy = agentBusy();
+        ChromeTabbedActivity activity = sActivity;
+        if (activity == null || activity.isDestroyed()) return;
+        boolean autoEnter = false;
+        if (busy == sPipWanted && autoEnter == sPipAuto) return;
+        sPipWanted = busy;
+        sPipAuto = autoEnter;
+        try {
+            activity.setPictureInPictureParams(pipParams(autoEnter));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            Log.i(TAG, "pip params: %s", e.getMessage());
+        }
+    }
+
+    private static boolean agentBusy() {
+        return isHoldingTab() || MusePage.hasLiveWork();
+    }
+
+    private static boolean inAgentPip(@Nullable ChromeTabbedActivity activity) {
+        return sPipArmed || (sAgentPip && activity != null && activity.isInPictureInPictureMode());
+    }
+
+    private static PictureInPictureParams pipParams(boolean autoEnter) {
+        PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder();
+        Rational ratio = LemurXConsoleShell.pageAspectRatio();
+        builder.setAspectRatio(ratio != null ? ratio : new Rational(9, 16));
+        Rect src = LemurXConsoleShell.pageRectInWindow();
+        if (src != null && src.width() > 0 && src.height() > 0) {
+            builder.setSourceRectHint(src);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(autoEnter);
+            // 拖动小窗时先缩放现有画面，不要边拖边按新尺寸重排网页。
+            builder.setSeamlessResizeEnabled(false);
+        }
+        return builder.build();
+    }
+
+    /** 画中画里看 Agent 正在操作的那一页，而不是停在对话上。 */
+    private static void revealHeldPage() {
+        if (!isHoldingTab()) return;
+        Tab tab = findTab(anchorTabId());
+        if (tab == null || !isWeb(tab)) return;
+        selectTab(tab);
+    }
+
+    /** 对话确认这一轮要挂起。之后的页面命令一律拒绝，直到 {@link #markResumed}。 */
+    public static void markSuspended() {
+        sAgentSuspended = true;
+        hideBanner();
+        new Thread(() -> reportPresence(false), "LemurXPresence").start();
+    }
+
+    /** 用户点了继续：重新允许在这个前台标签上操作。 */
+    public static void markResumed() {
+        ThreadUtils.assertOnUiThread();
+        sAgentSuspended = false;
+        new Thread(() -> reportPresence(true), "LemurXPresence").start();
     }
 
     /** 窗口销毁：停轮询、收横幅、撤通知。UI 线程。 */
     public static void detach(ChromeTabbedActivity activity) {
         ThreadUtils.assertOnUiThread();
         if (sActivity != activity) return;
+        if (sForegroundListener != null) {
+            ApplicationStatus.unregisterActivityStateListener(sForegroundListener);
+            sForegroundListener = null;
+        }
         stop();
         hideBanner();
         sActivity = null;
@@ -373,7 +570,7 @@ public final class LemurXDeviceBridge {
         if (sPausedByUser || LemurXKillSwitch.isDisabled()) return;
         String token = LemurXDeviceConfig.token();
         if (TextUtils.isEmpty(token)) {
-            Log.i(TAG, "no device token; bridge idle");
+            enrollThenStart();
             return;
         }
         final int generation = ++sGeneration;
@@ -383,6 +580,40 @@ public final class LemurXDeviceBridge {
         sThread = thread;
         thread.start();
         Log.i(TAG, "bridge started -> %s", LemurXDeviceConfig.server());
+    }
+
+    /** 登录 / 退出后换主人：旧流挂在上一份身份上，清掉令牌后按新会话重新登记。 */
+    public static void reconnectIdentity() {
+        if (sActivity == null || sPausedByUser || LemurXKillSwitch.isDisabled()) return;
+        stop();
+        sNextEnrollMs = 0;
+        start();
+    }
+
+    /** 没有设备令牌时先登记。已登录但还没有 aero 票据时，先静默补一张。失败后退避，避免把服务端打满。 */
+    private static void enrollThenStart() {
+        if (sEnrolling || System.currentTimeMillis() < sNextEnrollMs) return;
+        sEnrolling = true;
+        Log.i(TAG, "enrolling this phone");
+        ChromeTabbedActivity activity = sActivity;
+        new Thread(
+                        () -> {
+                            LemurXAccount.ensureAeroTicket(activity);
+                            boolean ok = MuseApi.enrollThisDevice();
+                            ThreadUtils.runOnUiThread(
+                                    () -> {
+                                        sEnrolling = false;
+                                        if (sPausedByUser || LemurXKillSwitch.isDisabled()) return;
+                                        if (!ok) {
+                                            sNextEnrollMs = System.currentTimeMillis() + 15_000;
+                                            Log.w(TAG, "device enroll failed; retrying later");
+                                            return;
+                                        }
+                                        if (sActivity != null) start();
+                                    });
+                        },
+                        "LemurXEnroll")
+                .start();
     }
 
     private static void stop() {
@@ -410,6 +641,7 @@ public final class LemurXDeviceBridge {
                 Thread.interrupted();
                 String why = holdStream(generation);
                 if (sGeneration != generation) break;
+                if ("reenroll".equals(why)) break;
                 if (why == null) {
                     backoff = BACKOFF_MIN_MS;
                     continue;
@@ -433,7 +665,7 @@ public final class LemurXDeviceBridge {
         if (sGeneration == generation) setConnected(false);
     }
 
-    /** 线程自己退出时拉起来。用户点了接管、或测试包被关停，就不要再连。 */
+    /** 线程自己退出或代理把死连接撑着时拉起来。测试包关停就不要再连。 */
     private static void armWatchdog() {
         if (sWatchdogArmed) return;
         sWatchdogArmed = true;
@@ -442,12 +674,22 @@ public final class LemurXDeviceBridge {
 
     private static void watchdog() {
         try {
-            if (sActivity != null
-                    && !sPausedByUser
-                    && !LemurXKillSwitch.isDisabled()
-                    && (sThread == null || !sThread.isAlive())
-                    && !TextUtils.isEmpty(LemurXDeviceConfig.token())) {
+            if (sActivity == null || sPausedByUser || LemurXKillSwitch.isDisabled()) return;
+            if (TextUtils.isEmpty(LemurXDeviceConfig.token())) {
+                start();
+                return;
+            }
+            boolean dead = sThread == null || !sThread.isAlive();
+            boolean stale =
+                    sLastPollMs > 0 && System.currentTimeMillis() - sLastPollMs > STALE_STREAM_MS;
+            if (dead) {
                 Log.w(TAG, "bridge thread gone; starting again");
+                start();
+            } else if (stale) {
+                // 这次重连自己还没读到心跳。先把计时拨回来，否则看门狗每 3 秒拆掉还没握上的连接。
+                Log.w(TAG, "stream stale; starting again");
+                sLastPollMs = System.currentTimeMillis();
+                stop();
                 start();
             }
         } finally {
@@ -480,6 +722,7 @@ public final class LemurXDeviceBridge {
             connection.setUseCaches(false);
             connection.setRequestProperty(
                     "Authorization", "Bearer " + LemurXDeviceConfig.token());
+            applyIdentity(connection);
             connection.setRequestProperty("Accept", "text/event-stream");
             int status = connection.getResponseCode();
             if (status != 200) {
@@ -489,7 +732,12 @@ public final class LemurXDeviceBridge {
                     LemurXKillSwitch.activate();
                     return "disabled";
                 }
-                if (status == 401) return "device token rejected (401)";
+                if (status == 401) {
+                    // 旧的共享令牌，或换主人之后的令牌。清掉，循环退出后会重新登记。
+                    LemurXDeviceConfig.setDeviceToken(null);
+                    sNextEnrollMs = 0;
+                    return "reenroll";
+                }
                 if (status == 404) return "server has no Aero bridge (404)";
                 return "http " + status;
             }
@@ -622,6 +870,14 @@ public final class LemurXDeviceBridge {
         return sb.toString();
     }
 
+    /** 设备桥按游客 / 账号主人排队，密钥本身不打日志。 */
+    private static void applyIdentity(HttpURLConnection connection) {
+        String guest = MuseApi.guestKey();
+        if (!TextUtils.isEmpty(guest)) connection.setRequestProperty("X-Aero-Guest", guest);
+        String account = MuseApi.accountId();
+        if (!TextUtils.isEmpty(account)) connection.setRequestProperty("X-Aero-Account", account);
+    }
+
     private static HttpResult http(String method, String url, @Nullable String body,
             int timeoutMs) {
         HttpResult out = new HttpResult();
@@ -634,6 +890,7 @@ public final class LemurXDeviceBridge {
             connection.setUseCaches(false);
             connection.setRequestProperty("Authorization",
                     "Bearer " + LemurXDeviceConfig.token());
+            applyIdentity(connection);
             connection.setRequestProperty("Accept", "application/json");
             if (body != null) {
                 connection.setDoOutput(true);
@@ -672,14 +929,14 @@ public final class LemurXDeviceBridge {
         JSONObject body = cmd.optJSONObject("body");
         if (body == null) body = new JSONObject();
         try {
-            // 可见性契约：窗口不在前台时不打开、不读、不操作网页（用户看不见就不做）。
-            // 服务端收到 DEVICE_BACKGROUND 会把这条会话交给云端浏览器。
+            // 可见性契约：窗口不在前台，或这一轮已挂起时，不打开、不读、不操作网页。
+            // 没有第二台浏览器接手。用户回到对话里点继续，才在这个标签上接着做。
             boolean touchesPage = path.startsWith("/sessions")
                     && !("GET".equals(method) && "/sessions".equals(path))
                     && !path.endsWith("/close") && !path.contains("/downloads");
             if (touchesPage && !foreground()) {
                 return Reply.error(409, "DEVICE_BACKGROUND",
-                        "Aero is not on screen; the user cannot see the page.");
+                        "Aero left the screen. The operation is suspended. Stop. The user resumes from the same tab.");
             }
             if ("/sessions".equals(path) && "GET".equals(method)) {
                 JSONArray list = listSessions();
@@ -785,15 +1042,18 @@ public final class LemurXDeviceBridge {
         final boolean bringFront = LemurXDeviceConfig.foreground() && foreground();
         TabInfo tab =
                 onUi(() -> {
-                    Tab existing = findTab(session.tab);
-                    // 控制台标签留在原地。这个会话自己的网页标签可以接着打开新网址。
-                    if (existing != null && isConsole(existing)) existing = null;
+                    // 用户正在看的这一页优先，不回到以前另开的标签。
+                    Tab existing = sActivity == null ? null : sActivity.getActivityTab();
+                    if (existing == null) existing = findTab(session.tab);
                     if (existing != null) {
+                        // 一个 Agent 一个标签：网址就在当前标签里打开，不再另开一页。
+                        holdInTab(existing.getId());
                         existing.loadUrl(new LoadUrlParams(url));
                         if (bringFront) selectTab(existing);
                         return TabInfo.of(existing);
                     }
                     Tab opened = openTab(url, !bringFront);
+                    if (opened != null) holdInTab(opened.getId());
                     if (opened != null && bringFront) selectTab(opened);
                     return opened == null ? null : TabInfo.of(opened);
                 });
@@ -843,7 +1103,16 @@ public final class LemurXDeviceBridge {
             final String url = s.url;
             final boolean foreground = LemurXDeviceConfig.foreground();
             TabInfo reopened = onUi(() -> {
-                Tab t = openTab(url, !foreground);
+                Tab t = findTab(sAnchorTab);
+                if (t == null && sActivity != null) t = sActivity.getActivityTab();
+                if (t != null) {
+                    holdInTab(t.getId());
+                    t.loadUrl(new LoadUrlParams(url));
+                    if (foreground) selectTab(t);
+                    return TabInfo.of(t);
+                }
+                t = openTab(url, !foreground);
+                if (t != null) holdInTab(t.getId());
                 return t == null ? null : TabInfo.of(t);
             });
             if (reopened == null) {
@@ -875,15 +1144,16 @@ public final class LemurXDeviceBridge {
     }
 
     /**
-     * 当前前台的网页优先；控制台自己不算；没有前台网页时用这个会话上次的标签。把会话指到
-     * 选中的标签上并（按设置）切到前台。
+     * 只操作这个会话自己的标签。不跟着「当前前台」或最近一个网页跑，否则一点链接就串到新标签。
      */
     private static @Nullable TabInfo useContent(Session s) {
         final int preferred = s.tab;
         final boolean foreground = LemurXDeviceConfig.foreground();
         TabInfo tab = onUi(() -> {
-            Tab chosen = contentTab(preferred);
+            Tab chosen = findTab(preferred);
+            if (chosen == null && sActivity != null) chosen = sActivity.getActivityTab();
             if (chosen == null) return null;
+            holdInTab(chosen.getId());
             if (foreground) selectTab(chosen);
             return TabInfo.of(chosen);
         });
@@ -1054,6 +1324,21 @@ public final class LemurXDeviceBridge {
             throw new SessionError(502, "INPUT_FAILED", "The page is not ready for input.");
         }
         String kind = body.optString("type", "");
+        if (!"yield".equals(kind)) {
+            // 用户填完验证码之后 Agent 接着干：先收回页面，再按住系统键盘。
+            if (sYielded) {
+                onUi(
+                        () -> {
+                            resumeDriving();
+                            return true;
+                        });
+            }
+            onUi(
+                    () -> {
+                        if (isDriving()) forceHideSystemIme(webContentsForTab(tab.id));
+                        return true;
+                    });
+        }
         boolean ok;
         JSONObject resolved = null;
         if ("dialog".equals(kind)) {
@@ -1100,6 +1385,18 @@ public final class LemurXDeviceBridge {
                         "That text is not in the focused field.");
             }
             ok = true;
+        } else if ("yield".equals(kind)) {
+            String reason = body.optString("reason", "");
+            if (reason.length() > 200) reason = reason.substring(0, 200);
+            yieldToUser(tab.id, reason);
+            ok = true;
+        } else if ("resume".equals(kind)) {
+            onUi(
+                    () -> {
+                        resumeDriving();
+                        return true;
+                    });
+            ok = true;
         } else if ("text".equals(kind) && body.has("text")) {
             String text = body.optString("text", "");
             if (text.length() > 10_000) {
@@ -1128,6 +1425,9 @@ public final class LemurXDeviceBridge {
             }
             pace();
             ok = pressKey(tab.id, name);
+        } else if ("login".equals(kind)) {
+            fillSavedLogin(tab.id, body.optString("username", ""));
+            ok = true;
         } else if ("scroll".equals(kind) && body.has("deltaY")
                 && Math.abs(body.optDouble("deltaY", 0)) <= 5000) {
             pace();
@@ -1268,6 +1568,91 @@ public final class LemurXDeviceBridge {
             sleep(80);
         }
         return e;
+    }
+
+    /**
+     * 用本机密码库里这个站点的账号填登录框。密码只进输入法，不进返回值。
+     * username 为空且只存了一个账号时用那一个；存了多个就报用户名让调用方再选。
+     */
+    private static void fillSavedLogin(int tabId, String username) throws SessionError {
+        String pageUrl = onUi(() -> {
+            Tab t = findTab(tabId);
+            if (t == null) return "";
+            GURL url = t.getUrl();
+            return url == null ? "" : url.getSpec();
+        });
+        Profile profile = onUi(() -> {
+            Tab t = findTab(tabId);
+            return t == null ? null : t.getProfile();
+        });
+        if (profile == null || pageUrl == null || pageUrl.isEmpty()) {
+            throw new SessionError(502, "INPUT_FAILED", "The page is not ready for input.");
+        }
+        LemurXPasswords.Lookup found = LemurXPasswords.lookup(profile, pageUrl, username);
+        if (found.kind == LemurXPasswords.MANY) {
+            throw new SessionError(409, "MULTIPLE_ACCOUNTS",
+                    "Several saved accounts for this site: " + found.choices
+                            + ". Call login again with username set to one of them.");
+        }
+        if (found.kind != LemurXPasswords.ONE || found.login == null) {
+            throw new SessionError(404, "NO_SAVED_LOGIN",
+                    "No saved password for this site. Sign in once and accept the save prompt. "
+                            + "Aero keeps it in the same store as Chrome, on this phone.");
+        }
+        LemurXPasswords.Login login = found.login;
+        try {
+            LemurXPage.Snapshot snap = snapshot(tabId);
+            if (snap == null) {
+                throw new SessionError(502, "INPUT_FAILED", "The page is not ready for input.");
+            }
+            LemurXPage.Element password = null;
+            LemurXPage.Element nameField = null;
+            for (LemurXPage.Element e : snap.elements) {
+                if (e.disabled) continue;
+                if ("password".equalsIgnoreCase(e.inputType)) {
+                    if (password == null || (password.offscreen && !e.offscreen)) password = e;
+                    continue;
+                }
+                if (password != null || !e.editable || "searchBox".equals(e.role)) continue;
+                if (!"textField".equals(e.role) && !"email".equalsIgnoreCase(e.inputType)
+                        && !"tel".equalsIgnoreCase(e.inputType)
+                        && !"text".equalsIgnoreCase(e.inputType)) {
+                    continue;
+                }
+                nameField = e;
+            }
+            if (password == null) {
+                throw new SessionError(409, "NO_LOGIN_FORM",
+                        "No password field is on this page.");
+            }
+            caption("填写已保存的登录");
+            if (nameField != null && !login.username.isEmpty()) {
+                focusTarget(tabId, nameField.id);
+                int typed = typeText(tabId, login.username);
+                if (typed == TYPE_NO_FOCUS) {
+                    throw new SessionError(409, "NO_INPUT_FOCUS",
+                            "Could not focus the username field.");
+                }
+                if (typed != TYPE_OK) {
+                    throw new SessionError(502, "INPUT_FAILED", "Could not type the username.");
+                }
+            }
+            focusTarget(tabId, password.id);
+            int typed = typeText(tabId, login.password);
+            if (typed == TYPE_NO_FOCUS) {
+                throw new SessionError(409, "NO_INPUT_FOCUS",
+                        "Could not focus the password field.");
+            }
+            if (typed != TYPE_OK) {
+                throw new SessionError(502, "INPUT_FAILED", "Could not type the saved password.");
+            }
+        } finally {
+            // 打字核对会把框里的字记下来给模型改。登录不能把密码带回服务端。
+            sFieldValue = null;
+            sFieldChecked = false;
+            sFieldMatched = false;
+            found.login = null;
+        }
     }
 
     /** 定位并保证可见、够大：返回 {快照, 元素}。 */
@@ -1493,12 +1878,11 @@ public final class LemurXDeviceBridge {
         if (wc == null) return TYPE_FAILED;
         try {
             if (!LemurXHumanInput.hasEditableFocus(wc)) return TYPE_NO_FOCUS;
-            String before = LemurXHumanInput.fieldText(inputConnection(wc));
+            LemurXHumanInput.FieldSnap before = LemurXHumanInput.fieldSnap(inputConnection(wc));
             LemurXAgentKeyboard keys = onUi(() -> showKeyboard(30_000, wc));
             awaitImeHidden();
             boolean ok = LemurXHumanInput.typeText(wc, text, LemurXDeviceBridge::userActive, keys);
             if (!ok) return TYPE_FAILED;
-            // 短字段（邮箱、用户名）打完必须就是这段文字。原来框里已经有一大段正文时，才是接在后面。
             String want = wantField(before, text);
             sleep(220);
             String after = LemurXHumanInput.fieldText(inputConnection(wc));
@@ -1513,8 +1897,10 @@ public final class LemurXDeviceBridge {
                 Log.i(TAG, "field check matched len=%d", after.length());
                 return TYPE_OK;
             }
-            Log.i(TAG, "field check mismatch before=%d after=%d want=%d",
-                    before == null ? -1 : before.length(), after.length(), want.length());
+            Log.i(TAG, "field check mismatch before=%d sel=%d after=%d want=%d",
+                    before == null ? -1 : before.text().length(),
+                    before == null ? -1 : before.selected.length(),
+                    after.length(), want.length());
             if (userActive()) return TYPE_OK;
             fixField(tabId, wc, after, want, keys);
             sleep(220);
@@ -1529,10 +1915,17 @@ public final class LemurXDeviceBridge {
         }
     }
 
-    /** 空框或短框：留下的就该是这次要填的字。长正文才把新字接在原来的后面。 */
-    private static String wantField(@Nullable String before, String typed) {
-        if (before != null && before.length() > 40 && !sameField(before, typed)) return before + typed;
-        return typed;
+    /**
+     * 打完之后整框该是什么。有选区就是替换那一段（browser_select 之后的改字）；
+     * 没选区就插在光标处。不要再把「短框 = 整框变成这次打的那几个字」——模型改一段错字时
+     * 只会传来替换片段，整框对成片段就会把刚填对的字删掉，然后选、打、删死循环。
+     */
+    private static String wantField(
+            LemurXHumanInput.@Nullable FieldSnap before, String typed) {
+        if (before == null) return typed;
+        if (before.hasSelection()) return before.before + typed + before.after;
+        if (before.text().isEmpty() || sameField(before.text(), typed)) return typed;
+        return before.before + typed + before.after;
     }
 
     private static boolean sameField(String actual, String intended) {
@@ -1540,8 +1933,9 @@ public final class LemurXDeviceBridge {
     }
 
     /**
-     * 像人一样改错：尾巴错了就按退格；中间错了一段就长按选中它，再打上正确的字。
-     * 不把整个输入框清空重打。
+     * 像人一样改错：只修尾巴（退格再补）或在对上的前缀后面插入。中间一段对不上就停，
+     * 留给模型自己 browser_select，不再长按——长按选中的往往是词不是算出来的区间，
+     * 填对之后又被下一次核对当成整框错字删掉。
      */
     private static void fixField(
             int tabId, WebContents wc, String actual, String want, @Nullable LemurXAgentKeyboard keys) {
@@ -1571,16 +1965,8 @@ public final class LemurXDeviceBridge {
             }
             return;
         }
-        longPressFocused(tabId);
-        LemurXHumanInput.selectRange(ic, prefix, actual.length() - suffix);
-        sleep(280);
-        if (userActive()) return;
-        if (good.isEmpty()) {
-            if (keys != null) keys.pressKey("Backspace");
-            LemurXHumanInput.backspace(ic);
-        } else {
-            LemurXHumanInput.typeText(wc, good, LemurXDeviceBridge::userActive, keys);
-        }
+        Log.i(TAG, "field check skip mid-span fix prefix=%d suffix=%d bad=%d",
+                prefix, suffix, bad.length());
     }
 
     private static int commonPrefix(String a, String b) {
@@ -1626,9 +2012,16 @@ public final class LemurXDeviceBridge {
         if (field == null || ic == null) return TYPE_FAILED;
         int at = field.indexOf(text);
         if (at < 0) return TYPE_FAILED;
+        // 长按先结束（系统会先选中一个词），再套上算出来的区间，避免手势把区间改回去。
         longPressFocused(tabId);
+        sleep(160);
         LemurXHumanInput.selectRange(ic, at, at + text.length());
-        sleep(240);
+        sleep(160);
+        LemurXHumanInput.FieldSnap snap = LemurXHumanInput.fieldSnap(ic);
+        if (snap == null || !text.equals(snap.selected)) {
+            LemurXHumanInput.selectRange(ic, at, at + text.length());
+            sleep(80);
+        }
         sFieldChecked = true;
         sFieldValue = text;
         sFieldMatched = true;
@@ -1735,9 +2128,23 @@ public final class LemurXDeviceBridge {
     }
 
     private static void watchIme() {
-        if (sImeHold <= 0) return;
-        forceHideSystemIme(sSuppressedIme);
+        if (sImeHold <= 0 && !isDriving()) return;
+        WebContents wc = sSuppressedIme;
+        if ((wc == null || wc.isDestroyed()) && isDriving()) wc = webContentsForTab(sBannerTab);
+        forceHideSystemIme(wc);
         sWatchdog.postDelayed(sImeWatch, 200);
+    }
+
+    /** Agent 锁着页面、且没有把填写权交给用户。 */
+    private static boolean isDriving() {
+        View lock = sBanner;
+        return lock != null && lock.getVisibility() == View.VISIBLE && !sYielded;
+    }
+
+    private static @Nullable WebContents webContentsForTab(int tabId) {
+        ThreadUtils.assertOnUiThread();
+        Tab tab = findTab(tabId);
+        return tab == null ? null : tab.getWebContents();
     }
 
     /** 系统输入法从哪扇窗弹出来都收掉。UI 线程。 */
@@ -1812,14 +2219,19 @@ public final class LemurXDeviceBridge {
 
     private static void hideKeyboardNow() {
         // 字还没打完。点击那一头的延迟回调不能在这时把键盘拆掉，否则系统键盘会弹回来。
-        if (sImeHold > 0 && !userActive()) {
+        if (sImeHold > 0 && !userActive() && !sYielded) {
             scheduleHideKeyboard(800);
             return;
         }
         View k = sKeyboard;
         sKeyboard = null;
         sImeView = null;
-        setImeSuppressed(null, false);
+        if (isDriving()) {
+            // 还在接管：只收 agent 键盘，系统输入法继续按住。
+            forceHideSystemIme(sSuppressedIme);
+        } else {
+            setImeSuppressed(null, false);
+        }
         if (k == null) return;
         k.removeCallbacks(sHideKeyboard);
         if (k.getParent() instanceof ViewGroup) ((ViewGroup) k.getParent()).removeView(k);
@@ -1866,8 +2278,8 @@ public final class LemurXDeviceBridge {
                         if (LemurXHumanInput.hasEditableFocus(wc)) {
                             showKeyboard(30_000, wc);
                         } else if (delay == 800 && sImeHold == 0 && sKeyboard == null) {
-                            // 没点进输入框，也没有正在用的键盘：放开系统输入法。
-                            setImeSuppressed(null, false);
+                            // 没点进输入框：Agent 还在接管就继续按住系统键盘，不要弹给用户。
+                            if (!isDriving()) setImeSuppressed(null, false);
                         }
                     }, delay);
                 }
@@ -2025,11 +2437,12 @@ public final class LemurXDeviceBridge {
         return sUserFingerDown || SystemClock.uptimeMillis() < sUserTouchUntil;
     }
 
-    /** 这个窗口是不是在前台（用户看得见）。 */
+    /** 这个窗口是不是在前台，并且这一轮没有被用户挂起。 */
     static boolean foreground() {
         ChromeTabbedActivity activity = sActivity;
-        return activity != null
-                && ApplicationStatus.getStateForActivity(activity) == ActivityState.RESUMED;
+        if (sAgentSuspended || activity == null) return false;
+        if (inAgentPip(activity)) return true;
+        return ApplicationStatus.getStateForActivity(activity) == ActivityState.RESUMED;
     }
 
     // ---------------------------------------------------------------- 标签页（UI 线程）
@@ -2093,22 +2506,113 @@ public final class LemurXDeviceBridge {
         return url.startsWith("http://") || url.startsWith("https://");
     }
 
-    /** 当前前台的网页优先；控制台不算；再退到会话上次的标签；最后是最近活跃的网页标签。 */
-    private static @Nullable Tab contentTab(int preferredId) {
+    /** 记下这个 Agent 的标签，并开始把页面弹出的新标签折回这一页。UI 线程。 */
+    private static void holdInTab(int tabId) {
+        ThreadUtils.assertOnUiThread();
+        if (tabId == Tab.INVALID_TAB_ID) return;
+        sAnchorTab = tabId;
+        sHoldInTab = true;
+        watchNewTabs();
+        noteAgentPresence();
+    }
+
+    /** 这个 Agent 正在用的标签。对话里用来显示「开了几个页面」。 */
+    public static int anchorTabId() {
+        return sAnchorTab;
+    }
+
+    /** 仍留在这个 Agent 名下的网页标签数。跳转被折回当前标签时就是 1。 */
+    public static int pageCount() {
+        ThreadUtils.assertOnUiThread();
+        Tab tab = findTab(sAnchorTab);
+        return tab != null && isWeb(tab) ? 1 : 0;
+    }
+
+    public static String pageHost() {
+        ThreadUtils.assertOnUiThread();
+        Tab tab = findTab(sAnchorTab);
+        if (tab == null || tab.getUrl() == null) return "";
+        String host = tab.getUrl().getHost();
+        return host == null ? "" : host;
+    }
+
+    /** 这一轮是不是还占着标签。先读再 {@link #releaseScreen}。 */
+    public static boolean isHoldingTab() {
+        return sHoldInTab;
+    }
+
+    /** 操作结束或要用户回答：放开屏幕锁。对话由控制台盖回来。 */
+    public static void releaseScreen() {
+        sHoldInTab = false;
+        hideBanner();
+        noteAgentPresence();
+    }
+
+    private static void watchNewTabs() {
+        ThreadUtils.assertOnUiThread();
         TabModelSelector selector = selector();
-        if (selector == null) return null;
-        Tab current = selector.getCurrentTab();
-        if (current != null && !isConsole(current) && isWeb(current)) return current;
-        Tab preferred = findTab(preferredId);
-        if (preferred != null && !isConsole(preferred)) return preferred;
-        Tab best = null;
-        TabModel model = selector.getModel(false);
-        for (int i = 0; i < model.getCount(); i++) {
-            Tab t = model.getTabAt(i);
-            if (t == null || isConsole(t) || !isWeb(t)) continue;
-            if (best == null || t.getTimestampMillis() > best.getTimestampMillis()) best = t;
+        if (selector == null || selector == sWatchedTabs) return;
+        selector.getModel(false).addObserver(new TabModelObserver() {
+            @Override
+            public void didAddTab(
+                    Tab tab,
+                    @TabLaunchType int type,
+                    @TabCreationState int creationState,
+                    boolean markedForSelection) {
+                if (!sHoldInTab || sFolding || sYielded) return;
+                if (tab.getId() == sAnchorTab) return;
+                if (isHttp(tab)) foldNow(tab);
+                else foldWhenReady(tab);
+            }
+        });
+        sWatchedTabs = selector;
+    }
+
+    /** 新标签的网址还没到：等到第一次 http(s) 再折回锚点，避免 about:blank 把当前页盖掉。 */
+    private static void foldWhenReady(Tab extra) {
+        extra.addObserver(new TabObserver() {
+            @Override
+            public void onUrlUpdated(Tab tab) {
+                if (!isHttp(tab)) return;
+                tab.removeObserver(this);
+                foldNow(tab);
+            }
+
+            @Override
+            public void onPageLoadStarted(Tab tab, GURL url) {
+                String spec = url == null ? "" : url.getSpec();
+                if (!spec.startsWith("http://") && !spec.startsWith("https://")) return;
+                tab.removeObserver(this);
+                foldNow(tab);
+            }
+        });
+    }
+
+    /** 页面用 target=_blank / window.open 弹出的标签：网址载入当前标签，然后关掉新标签。 */
+    private static void foldNow(Tab extra) {
+        ThreadUtils.assertOnUiThread();
+        if (!sHoldInTab || sFolding || extra.getId() == sAnchorTab) return;
+        Tab anchor = findTab(sAnchorTab);
+        if (anchor == null || !isHttp(extra)) return;
+        String url = extra.getUrl().getSpec();
+        sFolding = true;
+        try {
+            anchor.loadUrl(new LoadUrlParams(url));
+            selectTab(anchor);
+            closeTab(extra);
+        } finally {
+            sFolding = false;
         }
-        return best;
+    }
+
+    private static boolean isHttp(Tab tab) {
+        String url;
+        try {
+            url = tab.getUrl() == null ? "" : tab.getUrl().getSpec();
+        } catch (Exception e) {
+            return false;
+        }
+        return url.startsWith("http://") || url.startsWith("https://");
     }
 
     private static @Nullable Tab openTab(String url, boolean background) {
@@ -2173,6 +2677,10 @@ public final class LemurXDeviceBridge {
     // ---------------------------------------------------------------- 接管胶囊 / 通知（UI 线程）
 
     private static void showBanner(int tabId, String text) {
+        showBanner(tabId, text, false);
+    }
+
+    private static void showBanner(int tabId, String text, boolean yield) {
         if (!LemurXDeviceConfig.banner()) return;
         ThreadUtils.runOnUiThread(() -> {
             ChromeTabbedActivity activity = sActivity;
@@ -2184,11 +2692,21 @@ public final class LemurXDeviceBridge {
                 content.addView(sBanner, new FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             }
+            sYielded = yield;
             TextView label = sBanner.findViewWithTag("label");
             if (label != null) label.setText(text);
             sBanner.setVisibility(View.VISIBLE);
-            keepLockOnTop();
             sBannerTab = tabId;
+            applyBannerChip();
+            applyLockMode();
+            if (yield) {
+                hideKeyboardNow();
+            } else {
+                forceHideSystemIme(webContentsForTab(tabId));
+                sWatchdog.removeCallbacks(sImeWatch);
+                sWatchdog.post(sImeWatch);
+            }
+            keepLockOnTop();
         });
     }
 
@@ -2212,6 +2730,9 @@ public final class LemurXDeviceBridge {
 
     private static void hideBanner() {
         ThreadUtils.runOnUiThread(() -> {
+            sYielded = false;
+            sWatchdog.removeCallbacks(sImeWatch);
+            setImeSuppressed(null, false);
             View banner = sBanner;
             sBanner = null;
             sBannerTab = Tab.INVALID_TAB_ID;
@@ -2226,12 +2747,31 @@ public final class LemurXDeviceBridge {
         });
     }
 
+    /** 画中画里不显示接管胶囊。退出后再放回来。 */
+    private static void setBannerChipVisible(boolean visible) {
+        sHideBannerChip = !visible;
+        if (ThreadUtils.runningOnUiThread()) applyBannerChip();
+        else ThreadUtils.runOnUiThread(LemurXDeviceBridge::applyBannerChip);
+    }
+
+    private static void applyBannerChip() {
+        ThreadUtils.assertOnUiThread();
+        View lock = sBanner;
+        if (!(lock instanceof ViewGroup)) return;
+        ViewGroup group = (ViewGroup) lock;
+        if (group.getChildCount() == 0) return;
+        View chip = group.getChildAt(0);
+        if (chip == null) return;
+        chip.setVisibility(sHideBannerChip ? View.GONE : View.VISIBLE);
+    }
+
     /** 全屏透明锁：吃掉页面和底栏的触摸，中间只放一粒接管胶囊。 */
     private static View buildLock(Context context) {
         FrameLayout lock = new FrameLayout(context) {
             @Override
             public boolean onTouchEvent(MotionEvent event) {
-                return true;
+                // 交给用户填写时不吞触摸，让网页和系统键盘能用。
+                return !sYielded;
             }
         };
         lock.setClickable(true);
@@ -2274,6 +2814,7 @@ public final class LemurXDeviceBridge {
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         Button take = new Button(context);
+        take.setTag("take");
         take.setText(R.string.lemurx_muse_take_over);
         take.setAllCaps(false);
         take.setTextColor(0xFF132631);
@@ -2288,20 +2829,89 @@ public final class LemurXDeviceBridge {
         take.setMinimumHeight(dp(context, 32));
         take.setMinWidth(0);
         take.setMinimumWidth(0);
-        take.setOnClickListener(v -> pauseByUser());
+        take.setOnClickListener(v -> onLockChip());
         LinearLayout.LayoutParams takeLp =
                 new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(context, 32));
         takeLp.leftMargin = dp(context, 12);
         row.addView(take, takeLp);
-        row.setOnClickListener(v -> pauseByUser());
         return row;
     }
 
-    /** 接管：断开，本次进程内不再连接；重新打开 Aero 后恢复。 */
+    /** 接管胶囊：正在操作时断开；交给用户填写时点「继续」收回。 */
+    private static void onLockChip() {
+        if (sYielded) resumeDriving();
+        else pauseByUser();
+    }
+
+    /**
+     * 验证码等要用户自己出值：缩小锁、放开系统键盘。先在对话里问过，再调这个。
+     */
+    private static void yieldToUser(int tabId, String reason) {
+        // 验证码和要用户看的结果都回到对话里问，不把人留在锁住的网页上。
+        sHoldInTab = false;
+        hideBanner();
+        onUi(
+                () -> {
+                    LemurXConsoleShell.returnToChat(tabId);
+                    return true;
+                });
+    }
+
+    /** 用户填完了：收回页面，重新按住系统键盘。 */
+    private static void resumeDriving() {
+        ThreadUtils.assertOnUiThread();
+        if (!sYielded && isDriving()) return;
+        sYielded = false;
+        applyLockMode();
+        View lock = sBanner;
+        if (lock != null) {
+            TextView label = lock.findViewWithTag("label");
+            if (label != null) {
+                label.setText(
+                        ContextUtils.getApplicationContext()
+                                .getString(R.string.lemurx_agent_working));
+            }
+        }
+        forceHideSystemIme(webContentsForTab(sBannerTab));
+        sWatchdog.removeCallbacks(sImeWatch);
+        sWatchdog.post(sImeWatch);
+        keepLockOnTop();
+    }
+
+    /** 全屏锁 vs 只留胶囊。UI 线程。 */
+    private static void applyLockMode() {
+        ThreadUtils.assertOnUiThread();
+        View lock = sBanner;
+        if (lock == null) return;
+        ViewGroup.LayoutParams raw = lock.getLayoutParams();
+        if (raw instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+            if (sYielded) {
+                lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+                lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+                lp.gravity = Gravity.CENTER;
+                lock.setClickable(false);
+            } else {
+                lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+                lp.height = ViewGroup.LayoutParams.MATCH_PARENT;
+                lp.gravity = Gravity.NO_GRAVITY;
+                lock.setClickable(true);
+            }
+            lock.setLayoutParams(lp);
+        }
+        Button take = lock.findViewWithTag("take");
+        if (take != null) {
+            take.setText(sYielded ? R.string.lemurx_muse_resume : R.string.lemurx_muse_take_over);
+        }
+        keepLockOnTop();
+    }
+
+    /**
+     * 接管：停掉当前操作、放开页面。长连接不断——下一句对话来了 Agent 还要能 browser_look。
+     * 只有测试包远程关停才把 {@link #sPausedByUser} 拉起来，那才会真的不再连。
+     */
     private static void pauseByUser() {
         ThreadUtils.assertOnUiThread();
-        sPausedByUser = true;
-        stop();
         hideBanner();
         Toast.makeText(ContextUtils.getApplicationContext(), R.string.lemurx_agent_paused,
                 Toast.LENGTH_LONG)

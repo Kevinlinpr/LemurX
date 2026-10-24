@@ -30,9 +30,13 @@ public final class LemurXSettingsIcons {
                 apply((PreferenceGroup) preference);
                 if (preference instanceof PreferenceCategory) continue;
             }
-            if (preference.getIcon() != null) continue;
+            // 对得上的行一律换成 Aero 图标，盖掉 Chromium 自己画的那套。
+            // 对不上、但已经有图的（搜索引擎标志、卡组织）留着。
             int icon = iconFor(preference.getKey());
-            if (icon == 0) continue;
+            if (icon < 0) {
+                if (preference.getIcon() != null) continue;
+                icon = R.drawable.lemurx_muse_ic_settings;
+            }
             preference.setIcon(icon);
             preference.setIconSpaceReserved(true);
         }
@@ -52,7 +56,7 @@ public final class LemurXSettingsIcons {
             case "lemurx_sign_out":
                 return R.drawable.lemurx_muse_ic_logout;
             case "lemurx_data":
-                return R.drawable.lemurx_muse_ic_sparkles;
+                return R.drawable.lemurx_muse_ic_data;
             case "lemurx_autofill":
             case "autofill_and_passwords":
             case "passwords":
@@ -125,8 +129,9 @@ public final class LemurXSettingsIcons {
             case "preload_pages":
             case "default_browser":
             case "glic":
-            default:
                 return R.drawable.lemurx_muse_ic_settings;
+            default:
+                return -1;
         }
     }
 }

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aero — Personal Agent Browser</title>
-  <meta name="description" content="Aero：反爬虫机制、长任务调度、Agent 捆绑标签页、Agent 对话。">
+  <meta name="description" content="Aero：个人智能体浏览器。对话是主界面，操作留在当前标签，只在前台进行。">
   <meta property="og:title" content="Aero — Personal Agent Browser">
   <meta property="og:description" content="四件核心能力：反爬、长任务、标签捆绑 Agent、对话。">
   <meta property="og:image" content="images/logo.png">
@@ -24,9 +24,9 @@
       </a>
       <nav class="nav__links" id="navLinks">
         <a href="#anti" data-i="nav_anti">反爬</a>
-        <a href="#muse" data-i="nav_muse">长任务</a>
         <a href="#tab" data-i="nav_tab">标签</a>
         <a href="#chat" data-i="nav_chat">对话</a>
+        <a href="#test" data-i="nav_test">测试</a>
       </nav>
       <select class="lang" id="lang" aria-label="Language">
         <option value="zh">中文</option>
@@ -42,7 +42,11 @@
         <img class="hero__logo" src="images/logo.png" width="168" height="168" alt="Aero">
         <p class="eyebrow"><span class="dot"></span><span data-i="eye">Personal Agent Browser</span></p>
         <h1>Aero</h1>
-        <p class="lede" data-i="lede">私人智能体浏览器。核心就四件事。</p>
+        <p class="lede" data-i="lede">私人智能体浏览器。对话是主界面，操作发生在你正在看的这个标签里。</p>
+        <p class="hero__actions">
+          <a class="btn" href="#test" data-i="cta">下载 Android 测试版</a>
+          <a class="btn btn--ghost" href="privacy.html" data-i="privacy">隐私政策</a>
+        </p>
         <p class="status" id="status" data-i="status_wait">正在探测智能体服务…</p>
       </div>
     </section>
@@ -55,15 +59,15 @@
             <h3 data-i="p1t">反爬虫机制</h3>
             <p data-i="p1p">不注入脚本，不挂 DevTools。文字来自一次无障碍树快照，点击是真的触摸事件。反自动化站点面对的是一只真实的手，不是爬虫。</p>
           </article>
-          <article class="card" id="muse">
-            <p class="num">02</p>
-            <h3 data-i="p2t">长任务调度</h3>
-            <p data-i="p2p">盯站点、做计划、连续操作，都可以作为长任务跑下去。浏览器退到后台时，任务可以接着跑；回到前台，你仍然接得住。</p>
-          </article>
           <article class="card" id="tab">
-            <p class="num">03</p>
+            <p class="num">02</p>
             <h3 data-i="p3t">Agent 捆绑标签页</h3>
             <p data-i="p3p">一个标签绑一个 Agent。它读过的页、点过的按钮、交过的任务，都留在这个标签里，不和别的标签串台。</p>
+          </article>
+          <article class="card" id="screen">
+            <p class="num">03</p>
+            <h3 data-i="p2t">只在前台操作</h3>
+            <p data-i="p2p">点击、输入、跳转都发生在你看着的这个标签里。切到后台，这一轮会挂起。回到 Aero 后点继续，它才接着做。不会把页面交给另一台看不见的浏览器。</p>
           </article>
           <article class="card" id="chat">
             <p class="num">04</p>
@@ -73,11 +77,30 @@
         </div>
       </div>
     </section>
+    <section id="test">
+      <div class="wrap test">
+        <p class="num">TEST</p>
+        <h2 data-i="test_t">Android 对外测试</h2>
+        <p class="lede" data-i="test_p">当前测试版 0.1.8。不需要账号，打开后可以用游客身份对话。测试版会在打开时检查更新，有新版本就必须更新。</p>
+        <p class="hero__actions">
+          <a class="btn" href="/releases/aero-10.apk">Aero-0.1.8.apk</a>
+        </p>
+        <ol class="steps">
+          <li data-i="s1">下载 APK，允许 Aero 安装未知来源应用。</li>
+          <li data-i="s2">打开即可使用。Google 登录和游客模式都可以。</li>
+          <li data-i="s3">之后的测试包由应用自己提示更新，不必再来这页找安装包。</li>
+        </ol>
+      </div>
+    </section>
   </main>
 
   <footer class="footer">
     <div class="wrap footer__inner">
-      <span data-i="foot">Aero · Osman Group · 官方 Chromium 稳定版</span>
+      <span data-i="foot">Aero · 奥斯曼集团有限公司 Osman Group Limited · 香港</span>
+      <span class="footer__links">
+        <a href="privacy.html" data-i="privacy">隐私政策</a>
+        <a href="mailto:mail@osmangroupx.com">mail@osmangroupx.com</a>
+      </span>
     </div>
   </footer>
   <script src="js/aero.js"></script>

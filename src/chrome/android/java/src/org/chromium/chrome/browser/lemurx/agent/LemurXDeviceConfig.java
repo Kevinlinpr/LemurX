@@ -80,7 +80,8 @@ public final class LemurXDeviceConfig {
             // 读不到就往下退
         }
         if (TextUtils.isEmpty(value)) value = asset().optString(key, "");
-        if (KEY_SERVER.equals(key) && value != null && value.contains("trycloudflare.com")) {
+        if (KEY_SERVER.equals(key) && value != null && (retired(value) || previousServer(value))) {
+            if (previousServer(value)) prefs().edit().remove(KEY_SERVER).apply();
             value = "";
         }
         if (TextUtils.isEmpty(value)) value = fallback;
@@ -94,9 +95,37 @@ public final class LemurXDeviceConfig {
         return url;
     }
 
-    /** 设备令牌（服务端 .env 的 LEMURX_DEVICE_TOKEN）；空表示这台设备没接桥。 */
+    /** 上一版打包进去的公网地址。清掉之后才走现在的测服。 */
+    private static boolean previousServer(String url) {
+        return "https://api.aero.osmangroupx.com".equals(url);
+    }
+
+    /** 旧的明文 IP 和临时隧道已经关了。 */
+    private static boolean retired(String url) {
+        String lower = url.toLowerCase(java.util.Locale.US);
+        return lower.contains("trycloudflare.com") || lower.contains("18.143.226.219");
+    }
+
+    /**
+     * 这台手机登记后拿到的设备令牌。只认本机存的那份：apk 里旧的共享令牌服务端已经不认。
+     * 空表示还没登记。
+     */
     public static String token() {
-        return pick(KEY_TOKEN, "").trim();
+        String value = null;
+        try {
+            value = prefs().getString(KEY_TOKEN, null);
+        } catch (Exception e) {
+            // 读不到就当没登记
+        }
+        return value == null ? "" : value.trim();
+    }
+
+    /** 登记成功后写入；传 null 清掉，下次会重新登记。 */
+    public static void setDeviceToken(@Nullable String token) {
+        SharedPreferences.Editor editor = prefs().edit();
+        if (TextUtils.isEmpty(token)) editor.remove(KEY_TOKEN);
+        else editor.putString(KEY_TOKEN, token.trim());
+        editor.apply();
     }
 
     /**

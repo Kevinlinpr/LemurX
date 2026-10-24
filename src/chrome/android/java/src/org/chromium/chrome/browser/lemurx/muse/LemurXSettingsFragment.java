@@ -6,30 +6,16 @@ package org.chromium.chrome.browser.lemurx.muse;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.Color;
-import android.graphics.Outline;
-import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.text.InputType;
 import android.text.TextUtils;
-import android.util.TypedValue;
-import android.view.Gravity;
-import android.view.View;
-import android.view.ViewGroup;
-import android.view.ViewOutlineProvider;
-import android.view.Window;
-import android.view.WindowManager;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.appcompat.content.res.AppCompatResources;
 
 import androidx.preference.EditTextPreference;
 import androidx.preference.Preference;
@@ -49,7 +35,8 @@ import org.chromium.components.browser_ui.settings.EmbeddableSettingsPage;
 import org.chromium.components.browser_ui.settings.SettingsNavigation.SettingsFragment;
 
 /**
- * LemurX 设置：每个原生页面左上角 ☰ 打开的就是它，跑在 Chrome 的 SettingsActivity 里。
+ * 设置页。左上角 ☰ 由 {@link MuseDrawer} 从左侧滑出同一组入口；这一页留给那些入口
+ * 再往下走（个人数据、全部设置）时仍可打开。
  *
  * <p>分组（对应 Lemur 浏览器"个人中心"的结构，见 lemur_project chrome/lemur/user）：
  *
@@ -77,18 +64,12 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
     private static final boolean SHOW_SERVER_SETTINGS = false;
 
     private @Nullable Preference mAccount;
-    private @Nullable Preference mSignOut;
 
     /** Google 账号选择页的回执；必须在 fragment STARTED 之前注册，所以放在字段初始化里。 */
     private final ActivityResultLauncher<Intent> mGoogleLauncher =
             registerForActivityResult(
                     new ActivityResultContracts.StartActivityForResult(),
                     result -> onGoogleResult(result.getData()));
-
-    /** 正在显示的登录底栏；登录成功后关掉。 */
-    private @Nullable Dialog mSignInSheet;
-    private @Nullable View mGoogleButton;
-    private boolean mGoogleInProgress;
 
     @Override
     public void onCreatePreferences(@Nullable Bundle savedInstanceState, @Nullable String rootKey) {
@@ -98,8 +79,12 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
 
         // ---- 账号
         PreferenceCategory account = category(context, screen, R.string.lemurx_muse_settings_account);
+        // 和 Chrome SignInPreference 同一套原生行：account_management_account_row。
+        // 登录 / 退出只改 title、summary、icon，不换 layout、不插删行，避免卡片被挤扁。
         mAccount = new Preference(context);
         mAccount.setKey("lemurx_account");
+        mAccount.setLayoutResource(R.layout.account_management_account_row);
+        mAccount.setIcon(AppCompatResources.getDrawable(context, R.drawable.account_circle_with_bg));
         mAccount.setOnPreferenceClickListener(
                 p -> {
                     if (LemurXAccount.isSignedIn()) {
@@ -109,18 +94,7 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
                     }
                     return true;
                 });
-        LemurXSettingsIcons.set(mAccount, R.drawable.lemurx_muse_ic_user);
         account.addPreference(mAccount);
-        mSignOut = new Preference(context);
-        mSignOut.setKey("lemurx_sign_out");
-        mSignOut.setTitle(R.string.lemurx_muse_settings_sign_out);
-        LemurXSettingsIcons.set(mSignOut, R.drawable.lemurx_muse_ic_logout);
-        mSignOut.setOnPreferenceClickListener(
-                p -> {
-                    signOut();
-                    return true;
-                });
-        account.addPreference(mSignOut);
         if (SHOW_SERVER_SETTINGS) addAccountServer(context, account);
         updateAccount();
 
@@ -130,7 +104,7 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
         personal.setKey("lemurx_data");
         personal.setTitle(R.string.lemurx_muse_settings_data);
         personal.setSummary(R.string.lemurx_muse_settings_data_hint);
-        LemurXSettingsIcons.set(personal, R.drawable.lemurx_muse_ic_sparkles);
+        LemurXSettingsIcons.set(personal, R.drawable.lemurx_muse_ic_data);
         personal.setOnPreferenceClickListener(
                 p -> {
                     SettingsNavigationFactory.createSettingsNavigation()
@@ -280,18 +254,28 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
     // ---------------------------------------------------------------- 账号
 
     private void updateAccount() {
-        if (mAccount == null || mSignOut == null) return;
+        if (mAccount == null) return;
+        Context context = getContext();
+        if (context == null) return;
         LemurXAccount.Profile profile = LemurXAccount.profile();
         if (profile != null) {
             mAccount.setTitle(profile.displayName());
             mAccount.setSummary(TextUtils.isEmpty(profile.email)
                     ? getString(R.string.lemurx_muse_settings_signed_in)
                     : profile.email);
-            mSignOut.setVisible(true);
+            // 原生账号行图标槽是 40dp，和 SignInPreference / ProfileDataCache 一致。
+            int size = MusePage.dp(context, 40);
+            LemurXAccount.loadAvatar(
+                    size,
+                    drawable -> {
+                        if (mAccount == null || !isAdded() || drawable == null) return;
+                        mAccount.setIcon(drawable);
+                    });
         } else {
             mAccount.setTitle(R.string.lemurx_muse_settings_sign_in);
             mAccount.setSummary(R.string.lemurx_muse_settings_sign_in_hint);
-            mSignOut.setVisible(false);
+            mAccount.setIcon(
+                    AppCompatResources.getDrawable(context, R.drawable.account_circle_with_bg));
         }
     }
 
@@ -301,161 +285,26 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
         if (LemurXAccount.isSignedIn()) LemurXAccount.refreshProfile(error -> updateAccount());
     }
 
-    /**
-     * 登录底栏：Lemur 浏览器的 "Dialog/Google Login"（OverseasLoginHubFragment +
-     * dialog_overseas_login_hub.xml）——圆角卡片、拖拽把手、应用图标、标题、说明、"使用 Google
-     * 继续"、"暂不"、法律说明。代码构建，不用 XML。
-     */
+    /** 登录底栏在 {@link LemurXSignIn}。设置页用自己的 Activity Result 打开 Google 账号选择页。 */
     private void showSignIn() {
-        Context context = requireContext();
         Activity activity = getActivity();
         if (activity == null) return;
-        int pad = MusePage.dp(context, 20);
-
-        LinearLayout card = new LinearLayout(context);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER_HORIZONTAL);
-        card.setBackground(MusePage.rounded(0xFFEBEBEB, 24, context));
-        card.setPadding(pad, MusePage.dp(context, 10), pad, pad);
-
-        View handle = new View(context);
-        handle.setBackground(MusePage.rounded(0xFFC8C8C8, 2, context));
-        card.addView(handle, new LinearLayout.LayoutParams(MusePage.dp(context, 36), MusePage.dp(context, 4)));
-
-        ImageView icon = new ImageView(context);
-        icon.setImageResource(R.mipmap.app_icon);
-        icon.setClipToOutline(true);
-        icon.setOutlineProvider(
-                new ViewOutlineProvider() {
-                    @Override
-                    public void getOutline(View view, Outline outline) {
-                        outline.setOval(0, 0, view.getWidth(), view.getHeight());
-                    }
-                });
-        LinearLayout.LayoutParams iconLp =
-                new LinearLayout.LayoutParams(MusePage.dp(context, 56), MusePage.dp(context, 56));
-        iconLp.topMargin = MusePage.dp(context, 22);
-        card.addView(icon, iconLp);
-
-        TextView title = new TextView(context);
-        title.setText(R.string.lemurx_login_title);
-        title.setTextColor(Color.BLACK);
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
-        title.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams titleLp = wrap();
-        titleLp.topMargin = MusePage.dp(context, 14);
-        card.addView(title, titleLp);
-
-        TextView description = new TextView(context);
-        description.setText(R.string.lemurx_login_description);
-        description.setTextColor(0x99000000);
-        description.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        description.setGravity(Gravity.CENTER);
-        description.setLineSpacing(0, 1.25f);
-        LinearLayout.LayoutParams descLp = wrap();
-        descLp.topMargin = MusePage.dp(context, 6);
-        card.addView(description, descLp);
-
-        // "使用 Google 继续"：白底、细边、胶囊
-        LinearLayout google = new LinearLayout(context);
-        google.setOrientation(LinearLayout.HORIZONTAL);
-        google.setGravity(Gravity.CENTER);
-        GradientDrawable googleBg = MusePage.rounded(Color.WHITE, 29, context);
-        googleBg.setStroke(MusePage.dp(context, 1), 0xFFEBEBEB);
-        google.setBackground(googleBg);
-        google.setClickable(true);
-        google.setFocusable(true);
-        ImageView googleIcon = new ImageView(context);
-        googleIcon.setImageResource(R.drawable.lemurx_login_ic_google);
-        google.addView(googleIcon, new LinearLayout.LayoutParams(MusePage.dp(context, 20), MusePage.dp(context, 20)));
-        TextView googleLabel = new TextView(context);
-        googleLabel.setText(R.string.lemurx_login_google);
-        googleLabel.setTextColor(Color.BLACK);
-        googleLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        googleLabel.setTypeface(googleLabel.getTypeface(), android.graphics.Typeface.BOLD);
-        LinearLayout.LayoutParams labelLp = wrap();
-        labelLp.setMarginStart(MusePage.dp(context, 10));
-        google.addView(googleLabel, labelLp);
-        LinearLayout.LayoutParams googleLp =
-                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, MusePage.dp(context, 52));
-        googleLp.topMargin = MusePage.dp(context, 26);
-        card.addView(google, googleLp);
-        google.setOnClickListener(v -> startGoogleSignIn(activity));
-        mGoogleButton = google;
-
-        TextView notNow = new TextView(context);
-        notNow.setText(R.string.lemurx_login_not_now);
-        notNow.setTextColor(0x99000000);
-        notNow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        notNow.setGravity(Gravity.CENTER);
-        notNow.setPadding(0, MusePage.dp(context, 14), 0, MusePage.dp(context, 14));
-        notNow.setClickable(true);
-        notNow.setFocusable(true);
-        card.addView(notNow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        TextView legal = new TextView(context);
-        legal.setText(R.string.lemurx_login_legal);
-        legal.setTextColor(0x4D000000);
-        legal.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        legal.setGravity(Gravity.CENTER);
-        card.addView(legal, wrap());
-
-        Dialog dialog = new Dialog(context);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        dialog.setContentView(card);
-        dialog.setCanceledOnTouchOutside(true);
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            window.setGravity(Gravity.BOTTOM);
-            window.setDimAmount(0.5f);
-            WindowManager.LayoutParams lp = window.getAttributes();
-            lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
-            lp.y = MusePage.dp(context, 16);
-            window.setAttributes(lp);
-            // 两侧留 16dp，像 Lemur 的 setMargin(16)
-            int margin = MusePage.dp(context, 16);
-            View decor = window.getDecorView();
-            decor.setPadding(margin, 0, margin, 0);
-        }
-        notNow.setOnClickListener(v -> dialog.dismiss());
-        dialog.setOnDismissListener(
-                d -> {
-                    if (mSignInSheet == dialog) {
-                        mSignInSheet = null;
-                        mGoogleButton = null;
-                    }
-                });
-        mSignInSheet = dialog;
-        dialog.show();
-    }
-
-    private static LinearLayout.LayoutParams wrap() {
-        return new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-    }
-
-    private void startGoogleSignIn(Activity activity) {
-        if (mGoogleInProgress) return;
-        mGoogleInProgress = true;
-        setGoogleBusy(true);
-        LemurXGoogleSignIn.start(
+        LemurXSignIn.show(
                 activity,
                 intent -> {
                     try {
                         mGoogleLauncher.launch(intent);
                     } catch (RuntimeException e) {
-                        onGoogleFailed(getString(R.string.lemurx_login_google_failed));
+                        LemurXSignIn.fail(getString(R.string.lemurx_login_google_failed));
                     }
                 },
-                this::onGoogleFailed);
+                this::toast);
     }
 
     private void onGoogleResult(@Nullable Intent data) {
         Context context = getContext();
         if (context == null) {
-            mGoogleInProgress = false;
+            LemurXSignIn.setBusy(false);
             return;
         }
         LemurXGoogleSignIn.handleResult(
@@ -467,39 +316,24 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
                         LemurXAccount.signInWithGoogle(
                                 account,
                                 error -> {
-                                    mGoogleInProgress = false;
-                                    setGoogleBusy(false);
+                                    LemurXSignIn.setBusy(false);
                                     if (error != null) {
                                         toast(error);
                                         return;
                                     }
-                                    Dialog sheet = mSignInSheet;
-                                    if (sheet != null) sheet.dismiss();
+                                    LemurXSignIn.dismiss();
+                                    MuseApi.rebind();
                                     updateAccount();
                                 });
                     }
 
                     @Override
                     public void onError(int statusCode, String message) {
-                        mGoogleInProgress = false;
-                        setGoogleBusy(false);
+                        LemurXSignIn.setBusy(false);
                         // 用户自己取消的不用提示
                         if (!LemurXGoogleSignIn.isCancelled(statusCode)) toast(message);
                     }
                 });
-    }
-
-    private void onGoogleFailed(String message) {
-        mGoogleInProgress = false;
-        setGoogleBusy(false);
-        toast(message);
-    }
-
-    private void setGoogleBusy(boolean busy) {
-        View button = mGoogleButton;
-        if (button == null) return;
-        button.setEnabled(!busy);
-        button.setAlpha(busy ? 0.5f : 1f);
     }
 
     private void toast(String message) {
@@ -510,7 +344,11 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
     private void signOut() {
         Activity activity = getActivity();
         if (activity != null) LemurXGoogleSignIn.signOut(activity);
-        LemurXAccount.signOut(error -> updateAccount());
+        LemurXAccount.signOut(
+                error -> {
+                    MuseApi.rebind();
+                    updateAccount();
+                });
     }
 
     private void showProfile() {
@@ -530,8 +368,8 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
         new AlertDialog.Builder(context)
                 .setTitle(profile.displayName())
                 .setMessage(text.toString().trim())
-                .setNegativeButton(android.R.string.ok, null)
-                .setPositiveButton(R.string.lemurx_muse_settings_sign_out, (d, w) -> signOut())
+                .setNeutralButton(R.string.lemurx_muse_settings_sign_out, (d, w) -> signOut())
+                .setPositiveButton(android.R.string.ok, null)
                 .show();
     }
 }

@@ -30,7 +30,7 @@ index 480b1a90ae..aabf5ee1a5 100644
 +                // paints, and let the shell swap the history entry for the chat URL.
 +                String lemurxChat =
 +                        org.chromium.chrome.browser.lemurx.LemurXConsoleShell.rewriteNewTabUrl(
-+                                url, tab.isIncognito());
++                                url, tab.isIncognito(), tab);
 +                if (lemurxChat != null) {
 +                    page = getBuilder().buildLemurXPage(tab, lemurxChat);
 +                    org.chromium.chrome.browser.lemurx.LemurXConsoleShell.replaceNewTabEntry(

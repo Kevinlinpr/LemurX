@@ -21,7 +21,8 @@ import java.util.UUID;
  * <ul>
  *   <li>{@code chrome-native://lemurx/chat/<id>} 一个对话；每个标签页一个对话，id 就是服务端的
  *       会话 id（{@code /api/conversation?id=}、AG-UI 的 threadId）。
- *   <li>{@code chrome-native://lemurx/tasks} 任务：各标签页里的智能体在做什么、接管。
+ *   <li>{@code chrome-native://lemurx/community} 社区：自愿加入的人，和他们公开留下的话。
+ *   <li>{@code chrome-native://lemurx/tasks} 旧的任务地址，打开时落到社区。
  * </ul>
  *
  * <p>个人数据（密码 / 支付 / 地址 / 给智能体的资料）是全局的，不是页面：在 ☰ 设置里
@@ -33,11 +34,14 @@ public final class MuseUrls {
     public static final String HOST = "lemurx";
 
     public static final String SECTION_CHAT = "chat";
+    public static final String SECTION_COMMUNITY = "community";
+    /** 旧地址。打开时 {@link #sectionOf} 把它当成社区。 */
     public static final String SECTION_TASKS = "tasks";
 
     private static final String PREFIX = "chrome-native://" + HOST + "/";
 
-    public static final String TASKS_URL = PREFIX + SECTION_TASKS;
+    public static final String COMMUNITY_URL = PREFIX + SECTION_COMMUNITY;
+    public static final String TASKS_URL = COMMUNITY_URL;
 
     private MuseUrls() {}
 
@@ -55,7 +59,7 @@ public final class MuseUrls {
         return sectionOf(url) != null;
     }
 
-    /** chat / tasks，不是 LemurX 页面返回 null。 */
+    /** chat / community。旧的 tasks 地址也算社区。不是 LemurX 页面返回 null。 */
     public static @Nullable String sectionOf(@Nullable String url) {
         if (TextUtils.isEmpty(url) || !url.startsWith(PREFIX)) return null;
         String rest = url.substring(PREFIX.length());
@@ -67,8 +71,10 @@ public final class MuseUrls {
         if (cut >= 0) rest = rest.substring(0, cut);
         switch (rest) {
             case SECTION_CHAT:
-            case SECTION_TASKS:
                 return rest;
+            case SECTION_COMMUNITY:
+            case SECTION_TASKS:
+                return SECTION_COMMUNITY;
             default:
                 return null;
         }
