@@ -38,11 +38,17 @@ import org.json.JSONObject;
  * 个人数据：用户自己的资料库。全局的，不属于某个标签页，所以不在底部导航栏里，而是 ☰ 设置里的
  * 一页（{@link LemurXDataFragment} 把它包成 SettingsActivity 里的 Fragment）。
  *
+ * <p>Flagship wave 4 — 数据落点（钉死在代码注释里，供审计）：
  * <ul>
- *   <li>「浏览器保管」：密码、支付方式、地址。密码和 Chrome 同一套加密存储，Aero 可以在页面上
- *       填入已保存的登录，密码不离开这台手机。支付方式和地址只在设置里看，智能体读不到。
- *   <li>「给 LemurX 的资料」：服务端的 memories（{@code /api/agent/memories}），每次对话都会
- *       提供给智能体，用来放偏好、常用信息、工作背景这类方便它办事的内容。可增删改。
+ *   <li>密码 / passkey → Chromium {@code PasswordStore}（本机 Keystore 级加密）。入口
+ *       {@link #openPasswords()}。云端只调度不透明引用 + 位数下标；本机
+ *       {@code LemurXPasswords} / {@code LemurXDeviceBridge} 解析并填入，回执不含明文。
+ *   <li>银行卡 → Chrome Autofill payment methods（本机）。智能体<strong>读不到</strong>。
+ *   <li>地址 → Chrome Autofill profiles（本机）。智能体<strong>读不到</strong>。
+ *   <li>Tailscale master auth key、computer run 全文 → {@code LemurXVault}（Android Keystore
+ *       AES-GCM）。服务端最多持有短效 joinToken（用完不落库）和 run metadata。
+ *   <li>「给 Aero 的资料」→ 服务端 {@code /api/agent/memories}。只放偏好 / 工作背景，
+ *       <strong>禁止</strong>口令、卡号、密钥。可增删改。
  * </ul>
  */
 @NullMarked

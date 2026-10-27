@@ -63,13 +63,13 @@ public final class MuseApi {
     private static final String KEY_SESSION_SIGNED_IN = "session_signed_in";
 
     /**
-     * 当前对话服务。测服在局域网；公网地址还留着，设置里可以改回去。
+     * 对外测试包默认走公网。局域网测服只在公网健康检查失败、或更新清单缺失时兜底。
      * 健康检查失败时不再改去另一台机器。
      */
-    public static final String DEFAULT_API_URL = "http://192.168.1.111:8787";
+    public static final String DEFAULT_API_URL = "https://api.aero.osmangroupx.com";
     public static final String LAN_API_URL = "http://192.168.1.111:8787";
-    /** 上一版写进偏好里的公网地址。读到就清掉，否则改默认值也不会生效。 */
-    private static final String PREVIOUS_API_URL = "https://api.aero.osmangroupx.com";
+    /** 公网发布地址。更新探测在当前服务没有清单时再问一次这里。 */
+    private static final String PUBLIC_API_URL = "https://api.aero.osmangroupx.com";
     private static @Nullable String sLiveUrl;
 
     private static final int CONNECT_TIMEOUT_MS = 10_000;
@@ -102,6 +102,12 @@ public final class MuseApi {
         void onToolCall(String toolName);
 
         void onToolResult(String toolCallId, String content);
+
+        /**
+         * 自己电脑上的一次运行进度（CUSTOM own_computer）。
+         * value 含 phase / computerRunId / command / line|output。
+         */
+        default void onOwnComputer(JSONObject value) {}
 
         void onFinished();
 
@@ -149,10 +155,6 @@ public final class MuseApi {
             url = prefs().getString(KEY_API_URL, null);
         } catch (Exception e) {
             // 读不到就用默认
-        }
-        if (PREVIOUS_API_URL.equals(url)) {
-            prefs().edit().remove(KEY_API_URL).apply();
-            url = null;
         }
         if (TextUtils.isEmpty(url) || retired(url)) url = DEFAULT_API_URL;
         if (sLiveUrl != null) url = sLiveUrl;
@@ -451,12 +453,15 @@ public final class MuseApi {
         }
     }
 
-    /** GET /api/app/release。不带登录态。公网不通就改走局域网。结果回到 UI 线程。 */
+    /** GET /api/app/release。不带登录态。当前服务没有清单时再问公网，公网不通再问局域网。结果回到 UI 线程。 */
     public void probeRelease(Callback<JSONObject> callback) {
         mExecutor.execute(
                 () -> {
                     try {
                         JSONObject json = releaseOnce(apiUrl());
+                        if (json == null && !PUBLIC_API_URL.equals(apiUrl())) {
+                            json = releaseOnce(PUBLIC_API_URL);
+                        }
                         if (json == null && !LAN_API_URL.equals(apiUrl())) {
                             json = releaseOnce(LAN_API_URL);
                         }
@@ -688,6 +693,25 @@ public final class MuseApi {
                 String id = event.optString("toolCallId", "");
                 String content = event.optString("content", "");
                 ThreadUtils.postOnUiThread(() -> listener.onToolResult(id, content));
+                return false;
+            }
+            case "CUSTOM": {
+                if (!"own_computer".equals(event.optString("name", ""))) return false;
+                Object raw = event.opt("value");
+                JSONObject value;
+                if (raw instanceof JSONObject) {
+                    value = (JSONObject) raw;
+                } else if (raw instanceof String) {
+                    try {
+                        value = new JSONObject((String) raw);
+                    } catch (JSONException e) {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+                JSONObject payload = value;
+                ThreadUtils.postOnUiThread(() -> listener.onOwnComputer(payload));
                 return false;
             }
             case "RUN_FINISHED":

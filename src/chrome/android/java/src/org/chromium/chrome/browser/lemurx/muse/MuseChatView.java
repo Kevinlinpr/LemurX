@@ -160,6 +160,8 @@ class MuseChatView extends FrameLayout {
         String text;
         final List<Attach> files;
         @Nullable TextView view;
+        /** 助手回复的排版：段落、代码块、表格。用户气泡不用。 */
+        @Nullable LinearLayout body;
         /** 正文和文件卡片分开挂。窗口滚动时整行一起进出。 */
         @Nullable LinearLayout row;
         /** 文本或宽度变了就加一，用来判断离屏高度缓存还能不能用。 */
@@ -237,12 +239,17 @@ class MuseChatView extends FrameLayout {
     private @Nullable Message mStreaming;
     /** 打字机：已经画到这条回复的第几个字符。落后于 {@link Message#text} 时逐帧往前赶。 */
     private int mTyped;
+    /** 上一帧打字的时间，用来按经过的时间吐字，而不是一帧跳一大截。 */
+    private long mTypeAt;
     private boolean mTypePending;
     private boolean mTypeFinished;
     private @Nullable Message mTypeMessage;
     private boolean mStickToBottom = true;
     /** 刚进入对话，滚动监听先别把“贴底”清掉，等滚到最新一条再说。 */
     private boolean mHoldBottom;
+    /** 手指正按在列表上。这时不要把滚动位置拽回底部。 */
+    private boolean mUserDrag;
+    private float mDragY;
     private boolean mImeSuppressed;
     /**
      * 正在选字的那一条。平时气泡不拿焦点，滚动不去子孙里做选区计算；长按发生前一小段才把这一条
@@ -271,6 +278,33 @@ class MuseChatView extends FrameLayout {
         mScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         // 滚动时不去子孙里找焦点，否则每条可选文字都会在滑动里做一次焦点计算。
         mScroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        // 键盘收起后视口变高，贴底的思考行要跟着落到新的底部，不能停在原来那一截。
+        mScroll.addOnLayoutChangeListener(
+                (v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                    if (bottom - top == oldBottom - oldTop) return;
+                    pinIfStuck();
+                });
+        mScroll.setOnTouchListener(
+                (v, event) -> {
+                    switch (event.getActionMasked()) {
+                        case MotionEvent.ACTION_DOWN:
+                            mUserDrag = true;
+                            mDragY = event.getY();
+                            mHoldBottom = false;
+                            break;
+                        case MotionEvent.ACTION_MOVE:
+                            // 手指向下拖是在看上面的历史。一离开底部就取消贴底，后面的布局不要再拽回来。
+                            if (event.getY() - mDragY > dp(8)) mStickToBottom = false;
+                            break;
+                        case MotionEvent.ACTION_UP:
+                        case MotionEvent.ACTION_CANCEL:
+                            mUserDrag = false;
+                            break;
+                        default:
+                            break;
+                    }
+                    return false;
+                });
         mScroll.getViewTreeObserver()
                 .addOnScrollChangedListener(
                         () -> {
@@ -278,7 +312,11 @@ class MuseChatView extends FrameLayout {
                             View child = mScroll.getChildAt(0);
                             if (child == null) return;
                             int bottom = child.getHeight() - mScroll.getHeight() - mScroll.getScrollY();
-                            mStickToBottom = bottom < dp(80);
+                            if (mUserDrag) {
+                                if (bottom > dp(8)) mStickToBottom = false;
+                            } else {
+                                mStickToBottom = bottom < dp(24);
+                            }
                             updateJump();
                             scheduleWindow();
                         });
@@ -286,6 +324,12 @@ class MuseChatView extends FrameLayout {
         mList = new LinearLayout(context);
         mList.setOrientation(LinearLayout.VERTICAL);
         mList.setPadding(pad, dp(8), pad, dp(12));
+        // 新消息和思考行是布局完才变高的。贴底时按真实高度再补一次，别停在输入栏后面。
+        mList.addOnLayoutChangeListener(
+                (v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                    if (bottom - top == oldBottom - oldTop) return;
+                    pinIfStuck();
+                });
         mTopGap = new View(context);
         mTopGap.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         mBotGap = new View(context);
@@ -676,6 +720,14 @@ class MuseChatView extends FrameLayout {
                                 Message loaded = decodeStored(
                                         m.optString("id", UUID.randomUUID().toString()), role, content);
                                 if (TextUtils.isEmpty(loaded.text) && loaded.files.isEmpty()) continue;
+                                // 存档里的电脑卡片绑回本线程，点开后页内新跑也挂回这里。
+                                for (Attach file : loaded.files) {
+                                    if ("computer".equals(file.kind) && file.computerRunId != null) {
+                                        LemurXComputer.Run run =
+                                                LemurXComputer.getRun(file.computerRunId);
+                                        if (run != null) run.threadId = id;
+                                    }
+                                }
                                 append(loaded);
                             }
                             for (Message m : typed) append(m);
@@ -855,16 +907,24 @@ class MuseChatView extends FrameLayout {
             view.setLinkTextColor(MusePage.link(context));
             lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
             lp.setMargins(0, dp(6), 0, dp(6));
-            renderInto(view, message.text);
         }
         message.view = view;
         view.setLayoutParams(lp);
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.VERTICAL);
-        row.addView(view);
+        if ("user".equals(message.role)) {
+            row.addView(view);
+        } else {
+            LinearLayout body = new LinearLayout(context);
+            body.setOrientation(LinearLayout.VERTICAL);
+            message.body = body;
+            row.addView(body, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            renderInto(view, message.text);
+        }
         message.row = row;
-        bindFiles(message);
         if (!"user".equals(message.role)) row.addView(shareChip(message));
+        bindFiles(message);
         // 正在输入的那行始终压在列表最后。挂哪些气泡由窗口决定，不在这里整列加进去。
         if (!mBatch) scheduleWindow();
         updateEmpty();
@@ -907,10 +967,17 @@ class MuseChatView extends FrameLayout {
             heights[i] = heightOf(mMessages.get(i), width);
             content += heights[i];
         }
+        int extra = mList.getPaddingTop() + mList.getPaddingBottom();
+        if (mShowTyping) {
+            mTyping.measure(
+                    View.MeasureSpec.makeMeasureSpec(Math.max(width, 1), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            extra += mTyping.getMeasuredHeight();
+        }
         int viewport = Math.max(mScroll.getHeight(), 1);
-        int maxScroll = Math.max(0, content - viewport);
-        // 只有刚进入对话才按贴底算窗口。用户已经滑开时跟手指走，不能再拽回底部。
-        int scroll = mHoldBottom ? maxScroll : mScroll.getScrollY();
+        int maxScroll = Math.max(0, content + extra - viewport);
+        // 窗口跟着当前滚动位置。贴底只在没按住屏幕时由 pinIfStuck 做，不能在这里把历史拽回去。
+        int scroll = mHoldBottom && !mUserDrag ? maxScroll : mScroll.getScrollY();
         if (scroll > maxScroll) scroll = maxScroll;
         int from = Math.max(0, scroll - viewport);
         int to = scroll + viewport + viewport;
@@ -929,9 +996,7 @@ class MuseChatView extends FrameLayout {
         // 视口里的气泡变高不用重挂；只有窗口外的高度变了才重算空白。
         if (start == mWinStart && end == mWinEnd && top == mTopSpan && bot == mBotSpan
                 && (n == 0 || mList.getChildCount() > 0)) {
-            if (mHoldBottom && mScroll.getScrollY() < scroll - dp(4)) {
-                mScroll.post(this::finishPinBottom);
-            }
+            if (mHoldBottom && !mUserDrag) mScroll.post(this::pinIfStuck);
             return;
         }
         mWinStart = start;
@@ -1005,11 +1070,29 @@ class MuseChatView extends FrameLayout {
 
     private void renderInto(TextView view, String markdown) {
         Message message = messageFor(view);
+        if (message != null && message.body != null) {
+            boolean streaming =
+                    message == mTypeMessage && (!mTypeFinished || mTyped < message.text.length());
+            MuseRich.show(message.body, markdown, streaming, this::openInNewTab, this::styleSelectable);
+            view.setVisibility(View.GONE);
+            bindFiles(message);
+            return;
+        }
         CharSequence body =
                 MuseMarkdown.render(markdown, MusePage.text(getContext()), this::openInNewTab);
         view.setText(body);
         view.setVisibility(TextUtils.isEmpty(body) ? View.GONE : View.VISIBLE);
         if (message != null) bindFiles(message);
+    }
+
+    /** 回复里的文字可以长按选择，点一下不会把键盘收掉。 */
+    private void styleSelectable(TextView view) {
+        view.setTextIsSelectable(true);
+        view.setHighlightColor(MusePage.night(getContext()) ? 0x668AB4F8 : 0x661A73E8);
+        view.setCustomSelectionActionModeCallback(selectionMode(view));
+        view.setOnTouchListener((v, event) -> trackSelectionArm((TextView) v, event));
+        view.setMovementMethod(LinkSelectMovementMethod.getInstance());
+        view.setLinkTextColor(MusePage.link(getContext()));
     }
 
     private @Nullable Message messageFor(TextView view) {
@@ -1023,13 +1106,14 @@ class MuseChatView extends FrameLayout {
     private void beginType(Message message) {
         mTypeMessage = message;
         mTyped = 0;
+        mTypeAt = 0;
         mTypeFinished = false;
         scheduleType();
     }
 
     /**
-     * 打字机：目标文本已经在 {@link Message#text} 里攒着，这里按积压多少一次吐
-     * 几个字。还没追上时用纯文本（半截 markdown 会花），追上了再渲一遍。
+     * 打字机：目标文本已经在 {@link Message#text} 里攒着。按经过的时间匀速往前，
+     * 积压多了才略加快，每一帧都按已经写完的 Markdown 排，不把半截符号铺出来。
      */
     private void scheduleType() {
         if (mTypePending) return;
@@ -1043,47 +1127,83 @@ class MuseChatView extends FrameLayout {
         if (m == null || m.view == null) return;
         int have = m.text.length();
         if (mTyped < have) {
+            long now = android.os.SystemClock.uptimeMillis();
+            long dt = mTypeAt == 0 ? 16 : Math.min(48, Math.max(8, now - mTypeAt));
+            mTypeAt = now;
             int backlog = have - mTyped;
-            int step = backlog > 120 ? 16 : backlog > 40 ? 6 : backlog > 12 ? 2 : 1;
-            mTyped = Math.min(have, mTyped + step);
-            String shown = m.text.substring(0, mTyped);
+            float perSec = backlog > 400 ? 120f : backlog > 120 ? 64f : backlog > 24 ? 32f : 20f;
+            int step = Math.max(1, Math.round(perSec * dt / 1000f));
+            if (backlog < 8) step = 1;
+            else step = Math.min(step, backlog > 400 ? 5 : 2);
+            mTyped = snapMark(m.text, Math.min(have, mTyped + step));
             m.gen++;
-            if (mTyped < have) {
-                m.view.setText(shown);
-            } else {
-                renderInto(m.view, shown);
-            }
+            renderInto(m.view, m.text.substring(0, mTyped));
             if (mStickToBottom) scrollToBottom(false);
             updateJump();
             scheduleWindow();
             scheduleType();
             return;
         }
+        mTypeAt = 0;
         if (mTypeFinished && !TextUtils.isEmpty(m.text)) {
             m.gen++;
             renderInto(m.view, m.text);
-            if (mStickToBottom) scrollToBottom(true);
+            if (mStickToBottom) scrollToBottom(false);
             updateJump();
             scheduleWindow();
         }
     }
 
+    /** 不把一个字拆成两半，也不停在 ** 、~~ 、` 的中间。 */
+    private static int snapMark(String text, int index) {
+        if (index <= 0) return 0;
+        if (index >= text.length()) return text.length();
+        if (Character.isHighSurrogate(text.charAt(index - 1))) index++;
+        if (index < text.length()) {
+            char previous = text.charAt(index - 1);
+            char next = text.charAt(index);
+            if ((previous == '*' || previous == '~' || previous == '`') && next == previous) {
+                index++;
+            }
+        }
+        return Math.min(index, text.length());
+    }
+
     private void scrollToBottom(boolean smooth) {
         mScroll.post(
                 () -> {
+                    // 手指还在翻历史时，这一帧排出来的贴底作废。
+                    if (mUserDrag) return;
                     // 不用 fullScroll：它会把焦点挪到列表里的文字上，输入框失焦、键盘缩回去。
                     if (mHoldBottom && !smooth) {
                         finishPinBottom();
                         return;
                     }
                     View child = mScroll.getChildAt(0);
-                    int bottom = child == null ? 0 : child.getHeight();
+                    int bottom = child == null ? 0 : Math.max(0, child.getHeight() - mScroll.getHeight());
                     if (smooth) {
                         mScroll.smoothScrollTo(0, bottom);
                     } else {
                         mScroll.scrollTo(0, bottom);
                     }
+                    // 思考行和键盘收起都会在这一帧之后才改高度，下一帧再贴到真正的底。
+                    if (mStickToBottom || mHoldBottom) mScroll.post(this::pinIfStuck);
                 });
+    }
+
+    /** 贴底时滚到内容的真实底部，把思考中那一行露出来。手指还在列表上时不动。 */
+    private void pinIfStuck() {
+        if (mUserDrag) return;
+        if (!mStickToBottom && !mHoldBottom) return;
+        View child = mScroll.getChildAt(0);
+        if (child == null) return;
+        int target = Math.max(0, child.getHeight() - mScroll.getHeight());
+        if (Math.abs(mScroll.getScrollY() - target) <= dp(2)) {
+            if (mHoldBottom) finishPinBottom();
+            return;
+        }
+        mScroll.scrollTo(0, target);
+        if (mHoldBottom) finishPinBottom();
     }
 
     /** 滚到最新一条后再放开滚动监听，这样中途的 0 位移不会被当成用户离开了底部。 */
@@ -1222,6 +1342,9 @@ class MuseChatView extends FrameLayout {
                                             mStreaming = next;
                                             append(next);
                                             beginType(next);
+                                        } else {
+                                            // 工具卡已经先挂上了（电脑运行等），正文才到：接着打这一条。
+                                            beginType(current);
                                         }
                                         showStatus(null);
                                     }
@@ -1263,9 +1386,16 @@ class MuseChatView extends FrameLayout {
                                     public void onToolResult(String toolCallId, String content) {
                                         if (gen != mRunGen || !thread.equals(mThreadId)) return;
                                         takeWrittenFile(content);
+                                        takeComputerRun(content);
                                         // 工具已经回来：不要还停在"browse web"，下一轮模型思考时换成思考中。
                                         showStatus(getContext().getString(
                                                 R.string.lemurx_muse_thinking));
+                                    }
+
+                                    @Override
+                                    public void onOwnComputer(JSONObject value) {
+                                        if (gen != mRunGen || !thread.equals(mThreadId)) return;
+                                        applyOwnComputer(value);
                                     }
 
                                     @Override
@@ -1385,8 +1515,9 @@ class MuseChatView extends FrameLayout {
         setRunning(false);
         showStatus(null);
         if (current != null && current.view != null && TextUtils.isEmpty(current.text)) {
-            if (current.view.getParent() instanceof ViewGroup) {
-                ((ViewGroup) current.view.getParent()).removeView(current.view);
+            View gone = current.row != null ? current.row : current.view;
+            if (gone.getParent() instanceof ViewGroup) {
+                ((ViewGroup) gone.getParent()).removeView(gone);
             }
             mMessages.remove(current);
             if (mTypeMessage == current) mTypeMessage = null;
@@ -1661,6 +1792,8 @@ class MuseChatView extends FrameLayout {
         switch (name) {
             case "write_file":
                 return context.getString(R.string.lemurx_muse_tool_write);
+            case "use_own_computer":
+                return context.getString(R.string.lemurx_muse_tool_computer);
             case "delegate_task":
                 return context.getString(R.string.lemurx_muse_tool_delegate);
             case "browse":
@@ -1701,7 +1834,7 @@ class MuseChatView extends FrameLayout {
     /** 这一轮要发给模型的一个附件。图片是 JPEG 的 Base64，摘录是已经截断的文本。 */
     private static final class Attach {
         final String name;
-        final String excerpt;
+        String excerpt;
         final List<String> images;
 
         final String kind;
@@ -1709,21 +1842,35 @@ class MuseChatView extends FrameLayout {
         /** 模型交回的 PDF / Word。正文是 Markdown，文件由手机排出来。 */
         final boolean generated;
 
+        /** 对话工具这次在用户电脑上跑的命令。点预览看全文，复制不离开对话。 */
+        final @Nullable String computerRunId;
+
         /** 排好的 PDF 或 docx。预览页在 images 里。 */
         @Nullable byte[] data;
 
         boolean rendering;
 
         Attach(String name, String excerpt, List<String> images, String kind) {
-            this(name, excerpt, images, kind, false);
+            this(name, excerpt, images, kind, false, null);
         }
 
         Attach(String name, String excerpt, List<String> images, String kind, boolean generated) {
+            this(name, excerpt, images, kind, generated, null);
+        }
+
+        Attach(
+                String name,
+                String excerpt,
+                List<String> images,
+                String kind,
+                boolean generated,
+                @Nullable String computerRunId) {
             this.name = name;
             this.excerpt = excerpt;
             this.images = images;
             this.kind = kind;
             this.generated = generated;
+            this.computerRunId = computerRunId;
         }
     }
 
@@ -2220,7 +2367,7 @@ class MuseChatView extends FrameLayout {
     }
 
     private static final Pattern FILE_MARK =
-            Pattern.compile("\\[\\[aero-file:(image|pdf|text|doc):([^\\]]+)\\]\\]");
+            Pattern.compile("\\[\\[aero-file:(image|pdf|text|doc|computer):([^\\]]+)\\]\\]");
 
     /** 存档带上文本正文，重新打开还能预览。发给模型的那份只留文件名。 */
     private JSONArray archiveJson() {
@@ -2249,6 +2396,31 @@ class MuseChatView extends FrameLayout {
             if (out.length() > 0) out.append('\n');
             out.append("[[aero-file:").append(file.kind).append(':').append(name).append("]]");
             if (file.generated) out.append("\n[[aero-office]]");
+            if ("computer".equals(file.kind)) {
+                // 卡片要活过进程重启：runId + 短预览进存档；完整输出只在本机 LemurXVault。
+                String runId = file.computerRunId == null ? "" : file.computerRunId;
+                LemurXComputer.Run run = runId.isEmpty() ? null : LemurXComputer.getRun(runId);
+                JSONObject meta = new JSONObject();
+                try {
+                    meta.put("runId", runId);
+                    String command = run != null && run.command != null && !run.command.isEmpty()
+                            ? run.command
+                            : file.name;
+                    meta.put("command", command);
+                    String preview = file.excerpt == null ? "" : file.excerpt;
+                    if (preview.length() > 240) preview = preview.substring(preview.length() - 240);
+                    meta.put("preview", preview);
+                    meta.put("ok", run == null || run.ok);
+                    meta.put("done", run == null || run.done);
+                    if (run != null && run.error != null) meta.put("error", run.error);
+                } catch (JSONException e) {
+                    // ignore
+                }
+                String body = Base64.encodeToString(
+                        meta.toString().getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+                out.append("\n[[aero-body:").append(body).append("]]");
+                continue;
+            }
             if (!file.excerpt.isEmpty()) {
                 String body = Base64.encodeToString(
                         file.excerpt.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
@@ -2264,6 +2436,7 @@ class MuseChatView extends FrameLayout {
     private static String storedContent(Message message) {
         StringBuilder out = new StringBuilder(message.text == null ? "" : message.text.trim());
         for (Attach file : message.files) {
+            if ("computer".equals(file.kind)) continue;
             String name = file.name.replace("]", " ").replace("\n", " ").trim();
             if (name.isEmpty()) name = "file";
             if (out.length() > 0) out.append('\n');
@@ -2287,16 +2460,42 @@ class MuseChatView extends FrameLayout {
                 tail = tail.substring("[[aero-office]]".length());
             }
             String excerpt = "";
+            String bodyText = "";
             Matcher body = BODY_MARK.matcher(tail);
             if (body.lookingAt()) {
                 String encoded = body.group(1);
                 if (encoded != null) {
                     try {
-                        excerpt = new String(Base64.decode(encoded, Base64.DEFAULT), StandardCharsets.UTF_8);
+                        bodyText = new String(Base64.decode(encoded, Base64.DEFAULT), StandardCharsets.UTF_8);
+                        excerpt = bodyText;
                     } catch (IllegalArgumentException e) {
                         excerpt = "";
                     }
                 }
+            }
+            if ("computer".equals(kind)) {
+                String runId = "";
+                boolean ok = true;
+                boolean done = true;
+                @Nullable String error = null;
+                try {
+                    JSONObject meta = new JSONObject(bodyText);
+                    runId = meta.optString("runId", "");
+                    String savedCommand = meta.optString("command", "");
+                    if (!savedCommand.isEmpty()) name = savedCommand;
+                    excerpt = meta.optString("preview", excerpt);
+                    ok = meta.optBoolean("ok", true);
+                    done = meta.optBoolean("done", true);
+                    error = meta.has("error") ? meta.optString("error") : null;
+                    // 旧存档里若仍带 output，忽略：全文只从本机 vault 再水合。
+                } catch (JSONException e) {
+                    // 旧格式或坏数据：没有 runId 就不做卡片。
+                }
+                if (runId.isEmpty()) continue;
+                if (excerpt == null) excerpt = "";
+                LemurXComputer.hydrate(runId, name, null, ok, done, error, null, null);
+                files.add(new Attach(name, excerpt, List.of(), "computer", false, runId));
+                continue;
             }
             files.add(
                     new Attach(
@@ -2355,6 +2554,7 @@ class MuseChatView extends FrameLayout {
     }
 
     private View fileCard(Attach file, boolean user) {
+        if ("computer".equals(file.kind)) return commandCard(file);
         Context context = getContext();
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.HORIZONTAL);
@@ -2379,6 +2579,8 @@ class MuseChatView extends FrameLayout {
         kind.setText(fileKindLabel(file.kind));
         kind.setTextColor(MusePage.muted(context));
         kind.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        kind.setMaxLines(2);
+        kind.setEllipsize(TextUtils.TruncateAt.START);
         texts.addView(name);
         texts.addView(kind);
         TextView share = new TextView(context);
@@ -2386,7 +2588,8 @@ class MuseChatView extends FrameLayout {
         share.setTextColor(MusePage.muted(context));
         share.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         share.setPadding(dp(10), dp(4), 0, dp(4));
-        share.setOnClickListener(v -> MuseCommunityView.shareWork(file.name, file.kind, file.excerpt));
+        share.setOnClickListener(
+                v -> MuseCommunityView.shareWork(file.name, file.kind, file.excerpt));
         texts.addView(share);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2405,10 +2608,163 @@ class MuseChatView extends FrameLayout {
         return card;
     }
 
+    /** 对话里的一条命令：等宽、可选中，复制不离开对话，预览再看全文。 */
+    private View commandCard(Attach file) {
+        Context context = getContext();
+        LinearLayout card = new LinearLayout(context);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(12), dp(12));
+        card.setBackground(MusePage.rounded(MusePage.surface(context), 16, context));
+
+        LinearLayout head = new LinearLayout(context);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView icon = new ImageView(context);
+        icon.setImageResource(R.drawable.lemurx_muse_ic_code);
+        icon.setColorFilter(MusePage.text(context), PorterDuff.Mode.SRC_IN);
+        head.addView(icon, new LinearLayout.LayoutParams(dp(16), dp(16)));
+        TextView label = new TextView(context);
+        label.setText(R.string.lemurx_muse_command_label);
+        label.setTextColor(MusePage.muted(context));
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        LinearLayout.LayoutParams labelLp =
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        labelLp.setMarginStart(dp(8));
+        head.addView(label, labelLp);
+        head.addView(
+                commandChip(
+                        context,
+                        R.string.lemurx_muse_command_copy,
+                        true,
+                        v -> copyPlain(commandText(file), (TextView) v)));
+        TextView open = commandChip(
+                context,
+                R.string.lemurx_muse_command_preview,
+                false,
+                v -> previewCommand(file));
+        LinearLayout.LayoutParams openLp =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        openLp.setMarginStart(dp(4));
+        head.addView(open, openLp);
+        card.addView(head);
+
+        TextView command = commandBody(context, commandText(file), MusePage.text(context));
+        command.setBackground(MusePage.rounded(MusePage.bg(context), 10, context));
+        LinearLayout.LayoutParams commandLp =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        commandLp.topMargin = dp(8);
+        card.addView(command, commandLp);
+
+        String output = commandOutput(file);
+        if (!output.isEmpty()) {
+            TextView out = commandBody(context, output, MusePage.muted(context));
+            out.setMaxLines(6);
+            out.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams outLp =
+                    new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            outLp.topMargin = dp(8);
+            card.addView(out, outLp);
+        } else if (commandRunning(file)) {
+            TextView wait = new TextView(context);
+            wait.setText(R.string.lemurx_muse_command_running);
+            wait.setTextColor(MusePage.muted(context));
+            wait.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            LinearLayout.LayoutParams waitLp =
+                    new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            waitLp.topMargin = dp(8);
+            card.addView(wait, waitLp);
+        }
+
+        LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(8);
+        lp.setMarginEnd(dp(16));
+        card.setLayoutParams(lp);
+        return card;
+    }
+
+    private TextView commandChip(
+            Context context, int label, boolean filled, View.OnClickListener click) {
+        TextView chip = new TextView(context);
+        chip.setText(label);
+        chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        chip.setPadding(dp(10), dp(5), dp(10), dp(5));
+        if (filled) {
+            chip.setTextColor(MusePage.onAccent(context));
+            chip.setBackground(MusePage.rounded(MusePage.accent(context), 12, context));
+        } else {
+            chip.setTextColor(MusePage.text(context));
+        }
+        chip.setOnClickListener(click);
+        return chip;
+    }
+
+    private TextView commandBody(Context context, String text, int color) {
+        TextView body = new TextView(context);
+        body.setText(text);
+        body.setTextColor(color);
+        body.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        body.setTypeface(Typeface.MONOSPACE);
+        body.setTextIsSelectable(true);
+        body.setPadding(dp(10), dp(8), dp(10), dp(8));
+        body.setLineSpacing(dp(2), 1f);
+        return body;
+    }
+
+    private String commandText(Attach file) {
+        if (file.computerRunId != null) {
+            LemurXComputer.Run run = LemurXComputer.getRun(file.computerRunId);
+            if (run != null && !run.command.isEmpty()) return run.command;
+        }
+        return file.name == null ? "" : file.name;
+    }
+
+    private String commandOutput(Attach file) {
+        if (file.computerRunId != null) {
+            LemurXComputer.Run run = LemurXComputer.getRun(file.computerRunId);
+            if (run != null) {
+                String body = run.output.toString().trim();
+                if (!body.isEmpty()) return body;
+                if (run.done && run.error != null && !run.error.isEmpty()) return run.error;
+                return "";
+            }
+            String local = LemurXVault.getRunOutput(file.computerRunId);
+            if (local != null && !local.trim().isEmpty()) return local.trim();
+        }
+        String excerpt = file.excerpt == null ? "" : file.excerpt.trim();
+        if ("…".equals(excerpt)) return "";
+        return excerpt;
+    }
+
+    private boolean commandRunning(Attach file) {
+        if (file.computerRunId != null) {
+            LemurXComputer.Run run = LemurXComputer.getRun(file.computerRunId);
+            if (run != null) return !run.done;
+        }
+        return "…".equals(file.excerpt);
+    }
+
+    private void copyPlain(String text, TextView label) {
+        if (text == null || text.isEmpty()) return;
+        ClipboardManager clipboard =
+                (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard == null) return;
+        clipboard.setPrimaryClip(ClipData.newPlainText("aero-command", text));
+        LemurXHaptics.tick(label);
+        label.setText(R.string.lemurx_muse_command_copied);
+        label.postDelayed(() -> label.setText(R.string.lemurx_muse_command_copy), 1200);
+    }
+
     private String fileKindLabel(String kind) {
         if ("pdf".equals(kind)) return getContext().getString(R.string.lemurx_muse_file_pdf);
         if ("doc".equals(kind)) return getContext().getString(R.string.lemurx_muse_file_word);
         if ("image".equals(kind)) return getContext().getString(R.string.lemurx_muse_file_image);
+        if ("computer".equals(kind)) return getContext().getString(R.string.lemurx_muse_file_computer);
         return getContext().getString(R.string.lemurx_muse_file_note);
     }
 
@@ -2430,19 +2786,8 @@ class MuseChatView extends FrameLayout {
             String kind = officeKind(name, file.optString("kind", "text"));
             String text = file.optString("text", "");
             if (text.isEmpty()) return;
-            Message host = mStreaming;
-            if (host == null) {
-                for (int i = mMessages.size() - 1; i >= 0; i--) {
-                    if ("assistant".equals(mMessages.get(i).role)) {
-                        host = mMessages.get(i);
-                        break;
-                    }
-                }
-            }
-            if (host == null) {
-                host = new Message(UUID.randomUUID().toString(), "assistant", "");
-                append(host);
-            }
+            Message host = hostForToolCard();
+            if (host == null) return;
             boolean office = "pdf".equals(kind) || "doc".equals(kind);
             Attach written =
                     new Attach(name, text, office ? new ArrayList<>() : List.of(), kind, office);
@@ -2462,8 +2807,127 @@ class MuseChatView extends FrameLayout {
         }
     }
 
+    /** 服务端 use_own_computer 的最终结果；和 CUSTOM 进度共用同一张卡片与电脑页 run。 */
+    private void takeComputerRun(String content) {
+        if (content == null || !content.contains("computerRunId")) return;
+        try {
+            JSONObject root = new JSONObject(content.trim());
+            String runId = root.optString("computerRunId", "");
+            if (runId.isEmpty()) return;
+            String command = root.optString("command", "");
+            boolean ok = root.optBoolean("ok", false);
+            String output = root.optString("output", "");
+            String error = root.optString("error", "");
+            LemurXComputer.mirrorChatResult(
+                    runId, command, output, ok, ok ? null : error, mThreadId);
+            upsertComputerCard(
+                    runId, command, ok ? output : (error.isEmpty() ? output : error), true);
+        } catch (JSONException e) {
+            Log.i(TAG, "use_own_computer: %s", e.getMessage());
+        }
+    }
+
+    /** SSE CUSTOM own_computer：边跑边更新对话卡片，并镜像到电脑页。 */
+    private void applyOwnComputer(JSONObject value) {
+        String runId = value.optString("computerRunId", "");
+        if (runId.isEmpty()) return;
+        String command = value.optString("command", "");
+        String phase = value.optString("phase", "");
+        String host = value.optString("host", "");
+        if ("start".equals(phase)) {
+            LemurXComputer.beginRun(runId, command, "chat", mThreadId, host);
+            upsertComputerCard(runId, command, "…", true);
+            showStatus(getContext().getString(
+                    R.string.lemurx_muse_working,
+                    getContext().getString(R.string.lemurx_muse_tool_computer)));
+            return;
+        }
+        if ("chunk".equals(phase)) {
+            String line = value.optString("line", "");
+            LemurXComputer.appendRun(runId, line);
+            LemurXComputer.Run run = LemurXComputer.getRun(runId);
+            // 行级进度只刷新卡片，不每次写存档；start/end 才落盘。
+            upsertComputerCard(runId, command, run != null ? run.preview() : line, false);
+            return;
+        }
+        if ("end".equals(phase)) {
+            boolean ok = value.optBoolean("ok", false);
+            String output = value.optString("output", "");
+            String error = value.optString("error", "");
+            if (LemurXComputer.getRun(runId) == null) {
+                // 未加入 Tailscale 时服务端只发 end，没有 start。
+                LemurXComputer.mirrorChatResult(
+                        runId, command, output, ok, ok ? null : error, mThreadId);
+            } else {
+                LemurXComputer.endRun(runId, ok, ok ? null : error, output.isEmpty() ? null : output);
+            }
+            LemurXComputer.Run run = LemurXComputer.getRun(runId);
+            String preview = run != null ? run.preview() : (ok ? output : error);
+            upsertComputerCard(runId, command, preview, true);
+        }
+    }
+
+    /** 电脑页自己跑完的命令：在本对话挂一张可点的卡片。 */
+    void offerComputerRun(String runId, String command) {
+        ThreadUtils.assertOnUiThread();
+        if (mThreadId == null || TextUtils.isEmpty(runId)) return;
+        LemurXComputer.Run run = LemurXComputer.getRun(runId);
+        if (run != null) run.threadId = mThreadId;
+        String preview = run != null ? run.preview() : "";
+        upsertComputerCard(runId, command, preview, true);
+    }
+
+    private void upsertComputerCard(String runId, String command, String preview, boolean save) {
+        Message host = hostForToolCard();
+        if (host == null) return;
+        String title = TextUtils.isEmpty(command)
+                ? getContext().getString(R.string.lemurx_muse_computer_card)
+                : command.replace('\n', ' ').replace(']', ' ').trim();
+        if (title.length() > 400) title = title.substring(0, 400);
+        for (Attach file : host.files) {
+            if (runId.equals(file.computerRunId)) {
+                file.excerpt = preview == null ? "" : preview;
+                bindFiles(host);
+                host.gen++;
+                if (mStickToBottom) scrollToBottom(false);
+                scheduleWindow();
+                if (save) persist();
+                return;
+            }
+        }
+        if (host.view == null) append(host);
+        host.files.add(new Attach(title, preview == null ? "" : preview, List.of(), "computer",
+                false, runId));
+        bindFiles(host);
+        host.gen++;
+        if (mStickToBottom) scrollToBottom(true);
+        scheduleWindow();
+        persist();
+    }
+
+    private @Nullable Message hostForToolCard() {
+        Message host = mStreaming;
+        if (host == null) {
+            for (int i = mMessages.size() - 1; i >= 0; i--) {
+                if ("assistant".equals(mMessages.get(i).role)) {
+                    host = mMessages.get(i);
+                    break;
+                }
+            }
+        }
+        if (host == null) {
+            host = new Message(UUID.randomUUID().toString(), "assistant", "");
+            append(host);
+        }
+        return host;
+    }
+
     /** 点文件名。模型生成的 PDF / Word 先排好再打开，普通附件直接预览。 */
     private void openAttachment(Attach file) {
+        if ("computer".equals(file.kind)) {
+            previewCommand(file);
+            return;
+        }
         if (!file.generated || !file.images.isEmpty() || file.excerpt.isEmpty()) {
             preview(file);
             return;
@@ -2687,6 +3151,139 @@ class MuseChatView extends FrameLayout {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         addView(stage, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        stage.bringToFront();
+        mPreview = stage;
+        sPreviewOwner = this;
+        BackPressManager.lemurXConsoleStateChanged();
+    }
+
+    /** 命令全文：上面是指令，下面的输出可以自己滚动、选中、复制。 */
+    private void previewCommand(Attach file) {
+        dismissPreview();
+        Context context = getContext();
+        String command = commandText(file);
+        String output = commandOutput(file);
+        FrameLayout stage = new FrameLayout(context);
+        stage.setBackgroundColor(MusePage.bg(context));
+        stage.setClickable(true);
+        stage.setElevation(dp(24));
+        LinearLayout column = new LinearLayout(context);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setPadding(dp(16), dp(12), dp(16), dp(16));
+
+        LinearLayout bar = new LinearLayout(context);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = new TextView(context);
+        title.setText(R.string.lemurx_muse_command_label);
+        title.setTextColor(MusePage.text(context));
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView copyCommand = commandChip(
+                context,
+                R.string.lemurx_muse_command_copy,
+                true,
+                v -> copyPlain(command, (TextView) v));
+        LinearLayout.LayoutParams copyLp =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        copyLp.setMarginEnd(dp(8));
+        bar.addView(copyCommand, copyLp);
+        TextView close = new TextView(context);
+        close.setText(R.string.lemurx_muse_preview_close);
+        close.setTextColor(MusePage.onAccent(context));
+        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        close.setBackground(MusePage.rounded(MusePage.accent(context), 14, context));
+        close.setPadding(dp(14), dp(8), dp(14), dp(8));
+        close.setOnClickListener(v -> dismissPreview());
+        bar.addView(close);
+        column.addView(bar);
+
+        ScrollView commandScroll = new ScrollView(context);
+        commandScroll.setFillViewport(true);
+        TextView commandView = commandBody(context, command, MusePage.text(context));
+        commandView.setBackground(MusePage.rounded(MusePage.surface(context), 12, context));
+        commandScroll.addView(commandView);
+        LinearLayout.LayoutParams commandLp =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        commandLp.topMargin = dp(12);
+        column.addView(commandScroll, commandLp);
+        int commandCap = dp(180);
+        commandScroll.addOnLayoutChangeListener(
+                new View.OnLayoutChangeListener() {
+                    @Override
+                    public void onLayoutChange(
+                            View v,
+                            int left,
+                            int top,
+                            int right,
+                            int bottom,
+                            int oldLeft,
+                            int oldTop,
+                            int oldRight,
+                            int oldBottom) {
+                        if (v.getHeight() <= commandCap) return;
+                        v.removeOnLayoutChangeListener(this);
+                        ViewGroup.LayoutParams params = v.getLayoutParams();
+                        params.height = commandCap;
+                        v.setLayoutParams(params);
+                    }
+                });
+
+        LinearLayout outBar = new LinearLayout(context);
+        outBar.setOrientation(LinearLayout.HORIZONTAL);
+        outBar.setGravity(Gravity.CENTER_VERTICAL);
+        TextView outLabel = new TextView(context);
+        outLabel.setText(R.string.lemurx_muse_command_output);
+        outLabel.setTextColor(MusePage.muted(context));
+        outLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        outBar.addView(
+                outLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (!output.isEmpty()) {
+            outBar.addView(
+                    commandChip(
+                            context,
+                            R.string.lemurx_muse_command_copy,
+                            false,
+                            v -> copyPlain(output, (TextView) v)));
+        }
+        LinearLayout.LayoutParams outBarLp =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        outBarLp.topMargin = dp(16);
+        outBarLp.bottomMargin = dp(8);
+        column.addView(outBar, outBarLp);
+
+        ScrollView outputScroll = new ScrollView(context);
+        outputScroll.setFillViewport(true);
+        TextView outputView = commandBody(
+                context,
+                output.isEmpty()
+                        ? context.getString(
+                                commandRunning(file)
+                                        ? R.string.lemurx_muse_command_running
+                                        : R.string.lemurx_muse_command_empty)
+                        : output,
+                output.isEmpty() ? MusePage.muted(context) : MusePage.text(context));
+        outputView.setBackground(MusePage.rounded(MusePage.surface(context), 12, context));
+        outputScroll.addView(
+                outputView,
+                new ScrollView.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        column.addView(
+                outputScroll,
+                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        stage.addView(
+                column,
+                new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        addView(
+                stage,
+                new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         stage.bringToFront();
         mPreview = stage;
         sPreviewOwner = this;

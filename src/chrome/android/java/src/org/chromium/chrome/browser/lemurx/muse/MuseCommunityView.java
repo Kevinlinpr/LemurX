@@ -68,12 +68,16 @@ class MuseCommunityView extends FrameLayout {
     private final EditText mInput;
     private final EditText mLink;
     private final TextView mAction;
+    private final TextView mAttached;
     private final View mCompose;
     private final FrameLayout mDetail;
     private final ImageView mZoom;
     private final TextView mError;
     private static @Nullable MuseCommunityView sOpen;
     private final List<byte[]> mPhotoBytes = new ArrayList<>();
+    private @Nullable String mShareFileName;
+    private @Nullable String mShareFileKind;
+    private @Nullable String mShareFileText;
     private boolean mJoined;
     private boolean mBusy;
 
@@ -97,19 +101,23 @@ class MuseCommunityView extends FrameLayout {
         mList = new LinearLayout(context);
         mList.setOrientation(LinearLayout.VERTICAL);
         mList.setPadding(pad, dp(8), pad, pad);
-        scroll.addView(mList, new FrameLayout.LayoutParams(
+        scroll.addView(mList, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         column.addView(scroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         addView(column, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        ScrollView scroller = new ScrollView(context);
+        scroller.setFillViewport(true);
+        scroller.setVerticalScrollBarEnabled(false);
+        scroller.setBackgroundColor(MusePage.bg(context));
+        scroller.setVisibility(GONE);
+        scroller.setClipToPadding(false);
+        mCompose = scroller;
         LinearLayout compose = new LinearLayout(context);
         compose.setOrientation(LinearLayout.VERTICAL);
-        compose.setBackgroundColor(MusePage.bg(context));
-        compose.setPadding(pad, dp(8), pad, pad);
-        compose.setVisibility(GONE);
-        mCompose = compose;
+        compose.setPadding(pad, dp(8), pad, dp(24));
 
         TextView composeTitle = new TextView(context);
         composeTitle.setText(R.string.lemurx_muse_community_write);
@@ -160,10 +168,38 @@ class MuseCommunityView extends FrameLayout {
         mInput.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         mInput.setBackground(MusePage.rounded(MusePage.surface(context), 16, context));
         mInput.setPadding(dp(14), dp(12), dp(14), dp(12));
+        mInput.setVerticalScrollBarEnabled(false);
+        mInput.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                revealCursor();
+            }
+        });
+        mInput.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) revealCursor();
+        });
         LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         inputLp.topMargin = dp(12);
-        compose.addView(mInput, 1, inputLp);
+        compose.addView(mInput, inputLp);
+
+        mAttached = new TextView(context);
+        mAttached.setTextColor(MusePage.text(context));
+        mAttached.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        mAttached.setTypeface(Typeface.DEFAULT_BOLD);
+        mAttached.setVisibility(GONE);
+        mAttached.setPadding(dp(14), dp(12), dp(14), dp(12));
+        mAttached.setBackground(MusePage.rounded(MusePage.surface(context), 16, context));
+        LinearLayout.LayoutParams attachedLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        attachedLp.topMargin = dp(12);
+        compose.addView(mAttached, attachedLp);
 
         mAction = new TextView(context);
         mAction.setText(R.string.lemurx_muse_community_post);
@@ -178,7 +214,12 @@ class MuseCommunityView extends FrameLayout {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         actionLp.topMargin = dp(12);
         compose.addView(mAction, actionLp);
-        addView(compose, new FrameLayout.LayoutParams(
+        scroller.addView(compose, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        scroller.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (bottom - top != oldBottom - oldTop) revealCursor();
+        });
+        addView(scroller, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         mDetail = new FrameLayout(context);
@@ -217,15 +258,71 @@ class MuseCommunityView extends FrameLayout {
         return row;
     }
 
-    /** 右上角加号。没登录先走 Google，登录后盖住广场写帖。 */
+    /** 右上角加号。空白发帖页，发出去之前都可以改。 */
     void openCompose() {
-        if (!LemurXAccount.isSignedIn()) {
-            Activity activity = LemurXConsoleShell.activity();
-            if (activity != null) LemurXSignIn.showFromBrowser(activity);
-            return;
+        mInput.setText("");
+        mLink.setText("");
+        mPhotoBytes.clear();
+        refreshPhotos();
+        clearAttachment();
+        showError(null);
+        presentCompose();
+    }
+
+    /** 从对话带进来的草稿。先改字，点发布才发出去。 */
+    void openShare(
+            String text,
+            @Nullable String fileName,
+            @Nullable String fileKind,
+            @Nullable String fileText) {
+        mLink.setText("");
+        mPhotoBytes.clear();
+        refreshPhotos();
+        mInput.setText(text);
+        if (fileName != null && !fileName.isEmpty()) {
+            mShareFileName = fileName;
+            mShareFileKind = fileKind;
+            mShareFileText = fileText;
+            mAttached.setText(getContext().getString(R.string.lemurx_muse_community_attached, fileName));
+            mAttached.setVisibility(VISIBLE);
+        } else {
+            clearAttachment();
         }
+        showError(null);
+        presentCompose();
+    }
+
+    private void presentCompose() {
         mCompose.setVisibility(VISIBLE);
         mInput.requestFocus();
+        mInput.post(this::revealCursor);
+    }
+
+    /** 光标那一行留在键盘上方，长文可以继续往下滚到发布按钮。 */
+    private void revealCursor() {
+        if (!(mCompose instanceof ScrollView) || mCompose.getVisibility() != VISIBLE) return;
+        if (!mInput.isFocused()) return;
+        ScrollView scroller = (ScrollView) mCompose;
+        android.text.Layout layout = mInput.getLayout();
+        if (layout == null) {
+            mInput.post(this::revealCursor);
+            return;
+        }
+        int pos = mInput.getSelectionEnd();
+        if (pos < 0) pos = mInput.length();
+        int line = layout.getLineForOffset(Math.max(0, pos));
+        int lineBottom = mInput.getTop() + layout.getLineBottom(line) + dp(88);
+        int target = lineBottom - scroller.getHeight();
+        if (target < 0) target = 0;
+        scroller.smoothScrollTo(0, target);
+    }
+
+    private void clearAttachment() {
+        mShareFileName = null;
+        mShareFileKind = null;
+        mShareFileText = null;
+        mAttached.setText("");
+        mAttached.setVisibility(GONE);
     }
 
     static boolean closeCompose() {
@@ -457,7 +554,8 @@ class MuseCommunityView extends FrameLayout {
         if (mBusy) return;
         String typed = mInput.getText() == null ? "" : mInput.getText().toString().trim();
         String link = mLink.getText() == null ? "" : mLink.getText().toString().trim();
-        if (typed.isEmpty() && link.isEmpty() && mPhotoBytes.isEmpty()) {
+        boolean hasFile = mShareFileName != null && !mShareFileName.isEmpty();
+        if (typed.isEmpty() && link.isEmpty() && mPhotoBytes.isEmpty() && !hasFile) {
             showError(getContext().getString(R.string.lemurx_muse_community_need));
             return;
         }
@@ -495,9 +593,22 @@ class MuseCommunityView extends FrameLayout {
 
     private void sendPost(JSONArray ids, String text, String link) {
         JSONObject body = new JSONObject();
+        String fileName = mShareFileName;
+        String fileKind = mShareFileKind;
+        String fileText = mShareFileText;
         try {
-            body.put("kind", "note");
-            body.put("text", text);
+            if (fileName != null && !fileName.isEmpty()) {
+                body.put("kind", "agent");
+                body.put("text", text.isEmpty() ? fileName : text);
+                body.put("fileName", fileName);
+                body.put("fileKind", fileKind == null ? "text" : fileKind);
+                String excerpt = fileText == null ? "" : fileText;
+                if (excerpt.length() > 8000) excerpt = excerpt.substring(0, 8000);
+                body.put("fileText", excerpt);
+            } else {
+                body.put("kind", "note");
+                body.put("text", text);
+            }
             if (!link.isEmpty()) body.put("url", link);
             if (ids.length() > 0) body.put("images", ids);
         } catch (Exception e) {
@@ -516,6 +627,7 @@ class MuseCommunityView extends FrameLayout {
             mLink.setText("");
             mPhotoBytes.clear();
             refreshPhotos();
+            clearAttachment();
             hideCompose();
             if (value instanceof JSONObject) show((JSONObject) value);
         });
@@ -915,56 +1027,30 @@ class MuseCommunityView extends FrameLayout {
         return bitmap;
     }
 
-    /** 对话里一键把这段回答发到社区。没登录先走 Google。 */
+    /** 对话里把这段回答带进发帖页。不直接发出去。 */
     static void shareNote(String text) {
         String body = text == null ? "" : text.trim();
+        if (body.isEmpty()) return;
         if (body.length() > 2000) body = body.substring(0, 2000);
-        sharePayload(body, null, null, null);
+        openEditor(body, null, null, null);
     }
 
-    /** 一键把 Aero 做出的文件发到社区。 */
+    /** 把 Aero 做出的文件带进发帖页，文案可以改，点发布才发出去。 */
     static void shareWork(String name, String kind, String text) {
-        sharePayload("", name, kind, text);
+        String fileName = name == null ? "" : name.trim();
+        if (fileName.isEmpty()) return;
+        String caption = text == null ? "" : text.trim();
+        if (caption.length() > 2000) caption = caption.substring(0, 2000);
+        String fileText = text == null ? "" : text;
+        if (fileText.length() > 8000) fileText = fileText.substring(0, 8000);
+        openEditor(caption, fileName, kind, fileText);
     }
 
-    private static void sharePayload(
+    private static void openEditor(
             String text, @Nullable String fileName, @Nullable String fileKind, @Nullable String fileText) {
-        if (!LemurXAccount.isSignedIn()) {
-            Activity activity = LemurXConsoleShell.activity();
-            if (activity != null) LemurXSignIn.showFromBrowser(activity);
-            return;
-        }
-        JSONObject identity = googleIdentity();
-        if (identity == null) {
-            Activity activity = LemurXConsoleShell.activity();
-            if (activity != null) LemurXSignIn.showFromBrowser(activity);
-            return;
-        }
-        MuseApi.get().send("POST", "/api/community/join", identity, (joined, joinError) -> {
-            if (joinError != null) return;
-            JSONObject body = new JSONObject();
-            try {
-                if (fileName != null) {
-                    body.put("kind", "agent");
-                    body.put("text", text.isEmpty() ? fileName : text);
-                    body.put("fileName", fileName);
-                    body.put("fileKind", fileKind == null ? "text" : fileKind);
-                    String excerpt = fileText == null ? "" : fileText;
-                    if (excerpt.length() > 8000) excerpt = excerpt.substring(0, 8000);
-                    body.put("fileText", excerpt);
-                } else {
-                    if (text.isEmpty()) return;
-                    body.put("kind", "note");
-                    body.put("text", text);
-                }
-            } catch (Exception e) {
-                return;
-            }
-            MuseApi.get().send("POST", "/api/community/posts", body, (value, error) -> {
-                if (error != null) return;
-                LemurXConsoleShell.goCommunity();
-            });
-        });
+        LemurXConsoleShell.goCommunity();
+        MuseCommunityView view = MusePage.communityCover();
+        if (view != null) view.openShare(text, fileName, fileKind, fileText);
     }
 
     private static @Nullable Bitmap fetchAvatar(String url) {

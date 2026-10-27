@@ -11,7 +11,9 @@ import android.text.Spanned;
 import android.text.style.BackgroundColorSpan;
 import android.text.style.ClickableSpan;
 import android.text.style.LeadingMarginSpan;
+import android.text.style.QuoteSpan;
 import android.text.style.RelativeSizeSpan;
+import android.text.style.StrikethroughSpan;
 import android.text.style.StyleSpan;
 import android.text.style.TypefaceSpan;
 import android.view.View;
@@ -23,7 +25,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 够用的 Markdown → Spanned：标题、粗体、斜体、行内代码、代码块、无序 / 有序列表、链接。
+ * 够用的 Markdown → Spanned：标题、粗体、斜体、删除线、行内代码、代码块、无序 / 有序 /
+ * 任务列表、引用、链接。表格由 {@link MuseRich} 单独排成可以横滑的格子，不在这里铺管道符。
  * 流式回复每来一段都要重排一次，所以只做单遍扫描、不建语法树。
  *
  * <p>链接是模型生成的、不可信：只放行 http(s)，点击交给 {@link LinkHandler}（开新标签页），
@@ -42,6 +45,7 @@ final class MuseMarkdown {
                             + "|`([^`\\n]+)`" // 5 行内代码
                             + "|\\[([^\\]\\n]+)\\]\\((https?://[^\\s)]+)\\)" // 6,7 链接
                             + "|(?<![\\w/])(https?://[^\\s<>()\\[\\]\"']+)" // 8 裸链接
+                            + "|~~([^~\\n]+)~~" // 9 删除线
                     );
 
     private static final int CODE_BG = 0x14132631;
@@ -90,6 +94,18 @@ final class MuseMarkdown {
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 out.setSpan(new RelativeSizeSpan(level == 1 ? 1.25f : level == 2 ? 1.15f : 1.05f),
                         start, out.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            } else if (trimmed.startsWith("- [ ] ") || trimmed.startsWith("- [x] ")
+                    || trimmed.startsWith("- [X] ")) {
+                ordinal = 0;
+                boolean done = trimmed.charAt(3) == 'x' || trimmed.charAt(3) == 'X';
+                out.append(done ? "☑  " : "☐  ");
+                appendInline(out, trimmed.substring(6).trim(), links);
+                if (done) {
+                    out.setSpan(new StrikethroughSpan(), start, out.length(),
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+                out.setSpan(new LeadingMarginSpan.Standard(0, 28), start, out.length(),
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ")) {
                 ordinal = 0;
                 out.append("•  ");
@@ -105,9 +121,7 @@ final class MuseMarkdown {
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             } else if (trimmed.startsWith("> ")) {
                 appendInline(out, trimmed.substring(2), links);
-                out.setSpan(new StyleSpan(Typeface.ITALIC), start, out.length(),
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                out.setSpan(new LeadingMarginSpan.Standard(24, 24), start, out.length(),
+                out.setSpan(new QuoteSpan(0xFF9AA0A6, 6, 18), start, out.length(),
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             } else if (trimmed.equals("---") || trimmed.equals("***")) {
                 out.append("—————");
@@ -144,6 +158,7 @@ final class MuseMarkdown {
             String label = m.group(6);
             String href = m.group(7);
             String bare = m.group(8);
+            String strike = m.group(9);
             if (bold != null) {
                 appendInline(out, bold, links);
                 out.setSpan(new StyleSpan(Typeface.BOLD), start, out.length(),
@@ -161,6 +176,10 @@ final class MuseMarkdown {
             } else if (label != null && href != null) {
                 out.append(label);
                 link(out, start, href, links);
+            } else if (strike != null) {
+                appendInline(out, strike, links);
+                out.setSpan(new StrikethroughSpan(), start, out.length(),
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             } else if (bare != null) {
                 String url = bare;
                 // 句尾标点不算进链接

@@ -14,10 +14,12 @@ import android.graphics.Typeface;
 import android.os.Build;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.WindowInsets;
+import android.view.WindowInsetsAnimation;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -294,7 +296,9 @@ public class MusePage implements NativePage {
         applyPadding();
         LemurXConsoleShell.addNavListener(mNavListener);
         mDrawer = new MuseDrawer(mRoot);
-        mDrawer.setFilesAction(this::showFiles);
+        mDrawer.setFilesAction(this::openFiles);
+        // 抽屉打开电脑页时带上本标签页的 threadId，页内跑完的命令只挂回这一路对话。
+        mDrawer.setComputerAction(() -> showComputer(null, mThreadId));
         updateForUrl(url);
     }
 
@@ -527,9 +531,22 @@ public class MusePage implements NativePage {
         LemurXConsoleShell.openNewSession();
     }
 
-    /** 顶栏 ☰：从左侧滑出设置，不另开一页。 */
-    private void openSettings() {
+    /** 顶栏 ☰：从左侧滑出设置，不另开一页。网页底栏在社区的位置也会走到这里。 */
+    public void openDrawer() {
         mDrawer.open();
+    }
+
+    private void openSettings() {
+        openDrawer();
+    }
+
+    /**
+     * 文件架。这一页如果还没挂上屏幕（人在网页上打开侧边栏），先回到对话再盖上文件架，
+     * 否则列表加在一块看不见的页面上。
+     */
+    private void openFiles() {
+        if (mRoot.getParent() == null) LemurXConsoleShell.goChat();
+        showFiles();
     }
 
     /** 文件架盖在当前分区上。返回键先收它，再收抽屉。 */
@@ -543,6 +560,7 @@ public class MusePage implements NativePage {
         if (mCommunity != null) mCommunity.setVisibility(View.GONE);
         mHeading.setText(R.string.lemurx_muse_files);
         mNewChat.setVisibility(View.INVISIBLE);
+        LemurXConsoleShell.onPlaceChanged();
     }
 
     private ScrollView buildFiles(Context context) {
@@ -624,13 +642,116 @@ public class MusePage implements NativePage {
 
     private static @Nullable MusePage sFilesPage;
 
+    /**
+     * 盖住整个窗口的一层。底栏那一条不吃触摸，点别的格子能落到导航栏上，由导航栏自己收起这一层再过去。
+     */
+    private static final class Cover extends FrameLayout {
+        private @Nullable LinearLayout mBody;
+        private int mPadLeft;
+        private int mPadTop;
+        private int mPadRight;
+        private int mRestBottom;
+        private boolean mImeAnimating;
+
+        Cover(Context context) {
+            super(context);
+        }
+
+        /** 键盘弹出时把这一层抬到键盘上方，并收起底栏。平时留出底栏的高度。 */
+        void followKeyboard(LinearLayout body, int left, int top, int right, int restBottom) {
+            mBody = body;
+            mPadLeft = left;
+            mPadTop = top;
+            mPadRight = right;
+            mRestBottom = restBottom;
+            body.setPadding(left, top, right, restBottom);
+            setOnApplyWindowInsetsListener((v, insets) -> {
+                if (!mImeAnimating) applyIme(null);
+                return insets;
+            });
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setWindowInsetsAnimationCallback(
+                        new WindowInsetsAnimation.Callback(
+                                WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                            @Override
+                            public void onPrepare(WindowInsetsAnimation animation) {
+                                if ((animation.getTypeMask() & WindowInsets.Type.ime()) != 0) {
+                                    mImeAnimating = true;
+                                }
+                            }
+
+                            @Override
+                            public WindowInsets onProgress(
+                                    WindowInsets insets,
+                                    java.util.List<WindowInsetsAnimation> running) {
+                                if (mImeAnimating) applyIme(insets);
+                                return insets;
+                            }
+
+                            @Override
+                            public void onEnd(WindowInsetsAnimation animation) {
+                                if ((animation.getTypeMask() & WindowInsets.Type.ime()) != 0) {
+                                    mImeAnimating = false;
+                                    applyIme(null);
+                                }
+                            }
+                        });
+            }
+        }
+
+        void releaseKeyboard() {
+            mImeAnimating = false;
+            LemurXConsoleShell.setNavSuppressed(this, false);
+            if (mBody != null) mBody.setPadding(mPadLeft, mPadTop, mPadRight, mRestBottom);
+        }
+
+        private void applyIme(@Nullable WindowInsets insets) {
+            if (mBody == null) return;
+            int ime = 0;
+            try {
+                WindowInsets source = insets != null ? insets : getRootWindowInsets();
+                if (source != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    ime = source.getInsets(WindowInsets.Type.ime()).bottom;
+                }
+            } catch (RuntimeException e) {
+                ime = 0;
+            }
+            boolean keyboard = ime > 0 && getVisibility() == View.VISIBLE;
+            LemurXConsoleShell.setNavSuppressed(this, keyboard);
+            int bottom = keyboard ? ime + dp(getContext(), 12) : mRestBottom;
+            if (mBody.getPaddingBottom() != bottom) {
+                mBody.setPadding(mPadLeft, mPadTop, mPadRight, bottom);
+            }
+        }
+
+        @Override
+        public boolean dispatchTouchEvent(MotionEvent ev) {
+            if (LemurXConsoleShell.touchInNav(this, ev)) return false;
+            return super.dispatchTouchEvent(ev);
+        }
+    }
+
     /** 发帖页正盖着广场。返回键先收它。 */
     public static boolean closeCommunityCompose() {
         return MuseCommunityView.closeCompose();
     }
 
-    private static @Nullable FrameLayout sPlaza;
+    private static @Nullable Cover sPlaza;
     private static @Nullable MuseCommunityView sPlazaView;
+    private static @Nullable Cover sComputer;
+    private static LemurXComputer.@Nullable Page sComputerPage;
+    /**
+     * 打开电脑页时记下的对话线程。页内跑完的命令只挂回这一路，不靠 windowToken 猜标签页。
+     */
+    private static @Nullable String sComputerThreadId;
+
+    /** 底栏要去别处：社区、电脑、文件架、发帖页都先让开，底下原来的页面还在。 */
+    public static void dismissCovers() {
+        closeCommunityCompose();
+        closeCommunity();
+        closeComputer();
+        closeFiles();
+    }
 
     /** 社区是独立的一层，不写进任何标签页。 */
     public static void showCommunity(Context context) {
@@ -638,17 +759,20 @@ public class MusePage implements NativePage {
         if (activity == null) return;
         ViewGroup content = activity.findViewById(android.R.id.content);
         if (content == null) return;
+        closeComputer();
         if (sPlaza == null || sPlaza.getParent() != content) {
             if (sPlaza != null && sPlaza.getParent() instanceof ViewGroup) {
                 ((ViewGroup) sPlaza.getParent()).removeView(sPlaza);
             }
-            sPlaza = new FrameLayout(activity);
+            sPlaza = new Cover(activity);
             sPlaza.setBackgroundColor(bg(activity));
             sPlaza.setClickable(true);
             LinearLayout column = new LinearLayout(activity);
             column.setOrientation(LinearLayout.VERTICAL);
-            column.setPadding(dp(activity, 16), LemurXConsoleShell.statusInsetPx() + dp(activity, 8),
-                    dp(activity, 12), dp(activity, 72));
+            int padLeft = dp(activity, 16);
+            int padTop = LemurXConsoleShell.statusInsetPx() + dp(activity, 8);
+            int padRight = dp(activity, 12);
+            sPlaza.followKeyboard(column, padLeft, padTop, padRight, dp(activity, 72));
             LinearLayout bar = new LinearLayout(activity);
             bar.setGravity(Gravity.CENTER_VERTICAL);
             TextView title = new TextView(activity);
@@ -678,18 +802,34 @@ public class MusePage implements NativePage {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
         sPlaza.setVisibility(View.VISIBLE);
+        sPlaza.requestApplyInsets();
         sPlaza.bringToFront();
+        LemurXConsoleShell.onPlaceChanged();
         if (sPlazaView != null) sPlazaView.refreshNow();
+    }
+
+    /** 盖在窗口上的社区。分享从对话进来时，往这一层的发帖页填草稿。 */
+    static @Nullable MuseCommunityView communityCover() {
+        return sPlazaView;
     }
 
     public static boolean communityOpen() {
         return sPlaza != null && sPlaza.getVisibility() == View.VISIBLE;
     }
 
+    /** 盖在网页上的那一层（电脑或社区）。标签卡片要截这一层，而不是底下的网页。 */
+    public static @Nullable View foregroundCover() {
+        if (computerOpen()) return sComputer;
+        if (communityOpen()) return sPlaza;
+        return null;
+    }
+
     /** 收起社区这一层。没开着时返回 false。 */
     public static boolean closeCommunity() {
         if (!communityOpen() || sPlaza == null) return false;
+        sPlaza.releaseKeyboard();
         sPlaza.setVisibility(View.GONE);
+        LemurXConsoleShell.onPlaceChanged();
         return true;
     }
 
@@ -707,7 +847,98 @@ public class MusePage implements NativePage {
         page.mFiles = null;
         sFilesPage = null;
         page.show(page.mSection);
+        LemurXConsoleShell.onPlaceChanged();
         return true;
+    }
+
+    /** 你的电脑这一层正盖着。它不属于任何标签页。 */
+    public static boolean computerOpen() {
+        return sComputer != null && sComputer.getVisibility() == View.VISIBLE;
+    }
+
+    /** 收起电脑这一层。底下原来的网页或对话还在。没开着时返回 false。 */
+    public static boolean closeComputer() {
+        if (!computerOpen() || sComputer == null) return false;
+        sComputer.releaseKeyboard();
+        sComputer.setVisibility(View.GONE);
+        LemurXConsoleShell.onPlaceChanged();
+        return true;
+    }
+
+    /** 你的电脑。和社区一样盖在所有标签页上，不改当前标签的地址。 */
+    public static void showComputer() {
+        showComputer(null, null);
+    }
+
+    /** 打开电脑页；{@code runId} 非空时聚焦对话或页内登记的那一次运行。 */
+    public static void showComputer(@Nullable String runId) {
+        showComputer(runId, null);
+    }
+
+    /**
+     * 打开电脑页。{@code threadId} 是页内新跑命令要挂回的对话；点卡片打开时应传入该卡片所在线程。
+     */
+    public static void showComputer(@Nullable String runId, @Nullable String threadId) {
+        Activity activity = LemurXConsoleShell.activity();
+        if (activity == null) return;
+        ViewGroup content = activity.findViewById(android.R.id.content);
+        if (content == null) return;
+        if (threadId != null && !threadId.isEmpty()) {
+            sComputerThreadId = threadId;
+        }
+        closeCommunityCompose();
+        closeCommunity();
+        if (sComputer == null || sComputer.getParent() != content) {
+            if (sComputer != null && sComputer.getParent() instanceof ViewGroup) {
+                ((ViewGroup) sComputer.getParent()).removeView(sComputer);
+            }
+            sComputer = new Cover(activity);
+            sComputer.setBackgroundColor(bg(activity));
+            sComputer.setClickable(true);
+            LinearLayout column = new LinearLayout(activity);
+            column.setOrientation(LinearLayout.VERTICAL);
+            int padTop = LemurXConsoleShell.statusInsetPx() + dp(activity, 8);
+            sComputer.followKeyboard(column, 0, padTop, 0, dp(activity, 72));
+            TextView title = new TextView(activity);
+            title.setText(R.string.lemurx_muse_computer);
+            title.setTextColor(text(activity));
+            title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            title.setPadding(dp(activity, 16), 0, dp(activity, 12), dp(activity, 8));
+            column.addView(title);
+            sComputerPage = new LemurXComputer.Page(activity);
+            column.addView(sComputerPage, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+            sComputer.addView(column, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            content.addView(sComputer, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        sComputer.setVisibility(View.VISIBLE);
+        sComputer.requestApplyInsets();
+        sComputer.bringToFront();
+        if (runId != null && sComputerPage != null) sComputerPage.focusRun(runId);
+        LemurXConsoleShell.onPlaceChanged();
+    }
+
+    /** 电脑页开跑时用的 originating thread；没有就返回 null，不强行猜。 */
+    static @Nullable String computerThreadId() {
+        return sComputerThreadId;
+    }
+
+    /**
+     * 页内跑完的命令：只挂到 {@code threadId} 对应的对话。多标签页时不会串到别的会话。
+     */
+    static void offerComputerRun(String runId, String command, @Nullable String threadId) {
+        ThreadUtils.assertOnUiThread();
+        String target = threadId != null && !threadId.isEmpty() ? threadId : sComputerThreadId;
+        if (target == null || target.isEmpty()) return;
+        for (MuseChatView chat : sChats.values()) {
+            if (target.equals(chat.threadId())) {
+                chat.offerComputerRun(runId, command);
+                return;
+            }
+        }
     }
 
     /** 抽屉正开着。外壳的返回键先问这个。 */

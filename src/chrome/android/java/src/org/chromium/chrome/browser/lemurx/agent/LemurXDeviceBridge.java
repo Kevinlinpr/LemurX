@@ -1428,6 +1428,12 @@ public final class LemurXDeviceBridge {
         } else if ("login".equals(kind)) {
             fillSavedLogin(tab.id, body.optString("username", ""));
             ok = true;
+        } else if ("list_credentials".equals(kind)) {
+            // 只回不透明引用 + 用户名标签；口令永不离开本机。
+            return listCredentialRefs(tab.id);
+        } else if ("fill_secret".equals(kind)) {
+            // 云端只给 ref + 1-based index；本机取值填入，回执不含字符本身。
+            return fillSecretRef(tab.id, body);
         } else if ("scroll".equals(kind) && body.has("deltaY")
                 && Math.abs(body.optDouble("deltaY", 0)) <= 5000) {
             pace();
@@ -1568,6 +1574,113 @@ public final class LemurXDeviceBridge {
             sleep(80);
         }
         return e;
+    }
+
+    /** 当前页可填的不透明凭证引用。返回值绝无 password 字段。 */
+    private static JSONObject listCredentialRefs(int tabId) throws SessionError {
+        String pageUrl = onUi(() -> {
+            Tab t = findTab(tabId);
+            if (t == null) return "";
+            GURL url = t.getUrl();
+            return url == null ? "" : url.getSpec();
+        });
+        Profile profile = onUi(() -> {
+            Tab t = findTab(tabId);
+            return t == null ? null : t.getProfile();
+        });
+        if (profile == null || pageUrl == null || pageUrl.isEmpty()) {
+            throw new SessionError(502, "INPUT_FAILED", "The page is not ready for input.");
+        }
+        java.util.List<LemurXPasswords.Ref> refs = LemurXPasswords.listRefs(profile, pageUrl);
+        JSONObject view = new JSONObject();
+        try {
+            JSONArray list = new JSONArray();
+            for (LemurXPasswords.Ref ref : refs) {
+                JSONObject row = new JSONObject();
+                row.put("ref", ref.ref);
+                row.put("host", ref.host);
+                row.put("username", ref.username);
+                list.put(row);
+            }
+            view.put("credentials", list);
+            view.put("receipt", "listed " + list.length() + " credential refs");
+        } catch (Exception ignored) {
+            // 键是常量
+        }
+        return view;
+    }
+
+    /**
+     * 引用协议：云端传来 {@code ref} + 1-based {@code index}，本机解析出那一个字符填入焦点框，
+     * 只回 {@code receipt}（例如 filled digit 3）。解析值不进日志、不进返回 JSON、不进崩溃上报字段。
+     */
+    private static JSONObject fillSecretRef(int tabId, JSONObject body) throws SessionError {
+        String ref = body.optString("ref", "").trim();
+        int index = body.optInt("index", 0);
+        if (!LemurXPasswords.isPasswordRef(ref)) {
+            throw new SessionError(400, "INVALID_INPUT", "A credential ref is required.");
+        }
+        if (index < 1 || index > 256) {
+            throw new SessionError(400, "INVALID_INPUT", "index must be a 1-based digit position.");
+        }
+        Profile profile = onUi(() -> {
+            Tab t = findTab(tabId);
+            return t == null ? null : t.getProfile();
+        });
+        if (profile == null) {
+            throw new SessionError(502, "INPUT_FAILED", "The page is not ready for input.");
+        }
+        LemurXPasswords.Lookup found = LemurXPasswords.lookupRef(profile, ref);
+        if (found.kind == LemurXPasswords.MANY) {
+            throw new SessionError(409, "MULTIPLE_ACCOUNTS",
+                    "Several saved accounts match this ref: " + found.choices
+                            + ". Pass a ref that includes the username.");
+        }
+        if (found.kind != LemurXPasswords.ONE || found.login == null) {
+            throw new SessionError(404, "NO_SAVED_LOGIN",
+                    "No saved password for this ref on this phone.");
+        }
+        String secret = found.login.password;
+        found.login = null;
+        if (secret == null || index > secret.length()) {
+            throw new SessionError(409, "INDEX_OUT_OF_RANGE",
+                    "That digit index is outside the saved secret.");
+        }
+        String ch = secret.substring(index - 1, index);
+        secret = null;
+        try {
+            if (body.has("target")) {
+                focusTarget(tabId, body.opt("target"));
+            }
+            sFieldChecked = false;
+            sFieldMatched = false;
+            sFieldValue = null;
+            int typed = typeText(tabId, ch);
+            ch = null;
+            if (typed == TYPE_NO_FOCUS) {
+                hideKeyboard();
+                throw new SessionError(409, "NO_INPUT_FOCUS",
+                        "No text field is focused. Click the field first, then fill the digit.");
+            }
+            if (typed != TYPE_OK) {
+                throw new SessionError(502, "INPUT_FAILED", "Could not type the referenced digit.");
+            }
+        } finally {
+            ch = null;
+            secret = null;
+            sFieldValue = null;
+            sFieldChecked = false;
+            sFieldMatched = false;
+        }
+        JSONObject view = new JSONObject();
+        try {
+            view.put("receipt", "filled digit " + index);
+            view.put("ref", ref);
+            view.put("index", index);
+        } catch (Exception ignored) {
+            // 键是常量
+        }
+        return view;
     }
 
     /**

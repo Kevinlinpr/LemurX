@@ -52,6 +52,7 @@ final class MuseDrawer {
     private boolean mOpen;
     private boolean mClosing;
     private @Nullable Runnable mFilesAction;
+    private @Nullable Runnable mComputerAction;
     private final ArrayList<View> mPushed = new ArrayList<>();
     private final ArrayList<Float> mPushedFrom = new ArrayList<>();
 
@@ -93,6 +94,12 @@ final class MuseDrawer {
                     close();
                     if (mFilesAction != null) mFilesAction.run();
                 }));
+        column.addView(row(context, R.drawable.lemurx_muse_ic_server,
+                R.string.lemurx_muse_computer, R.string.lemurx_muse_computer_hint,
+                v -> {
+                    close();
+                    if (mComputerAction != null) mComputerAction.run();
+                }));
 
         column.addView(label(context, R.string.lemurx_muse_settings_browser));
         column.addView(row(context, R.drawable.lemurx_muse_ic_key,
@@ -133,6 +140,11 @@ final class MuseDrawer {
         mFilesAction = action;
     }
 
+    /** 用户自己的电脑。同样等抽屉收起再打开。 */
+    void setComputerAction(Runnable action) {
+        mComputerAction = action;
+    }
+
     /** 有没有一扇抽屉正开着（含正在滑回去）。返回键要先收它。 */
     static boolean isOpen() {
         MuseDrawer drawer = sOpen;
@@ -149,17 +161,19 @@ final class MuseDrawer {
 
     void open() {
         if (mOpen || mClosing) return;
+        FrameLayout stage = stage();
+        int stageW = stage.getWidth();
         int parentW = mHost.getWidth();
-        if (parentW <= 0) {
-            mHost.post(this::open);
+        if (stageW <= 0 && parentW <= 0) {
+            View waiter = stageW <= 0 ? stage : mHost;
+            waiter.post(this::open);
             return;
         }
         applyTopInset();
         MuseDrawer previous = sOpen;
         if (previous != null && previous != this) previous.dismiss();
         sOpen = this;
-        FrameLayout stage = stage();
-        int stageW = stage.getWidth() > 0 ? stage.getWidth() : parentW;
+        if (stageW <= 0) stageW = parentW;
         int width = Math.min(Math.round(stageW * 0.86f), MusePage.dp(mHost.getContext(), 360));
         width = Math.max(width, Math.min(stageW, MusePage.dp(mHost.getContext(), 280)));
         if (mScrim.getParent() != stage) {
