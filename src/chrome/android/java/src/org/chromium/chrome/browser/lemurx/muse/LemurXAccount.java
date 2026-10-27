@@ -57,7 +57,7 @@ import java.util.concurrent.Executors;
  *       服务器资料里对应字段为空时沿用（PaipaiAccountSyncer.rememberGoogleFallback 的做法）。
  *       这个 token 是浏览器会话，只能调资料接口，不能拿去登记手机。
  *   <li>{@code POST user/aero/login} 同一份 Google id token，换智能体会话用的 aero 票据。
- *       票据和浏览器 token 分开存。测服只认这张票据签发的 {@code user:} 会话，游客会话登记会被拒绝。
+ *       票据和浏览器 token 分开存。票据必须由和当前 Aero 同一环境的网关签发，测试网关的票在生产环境验签会失败。游客会话登记会被拒绝。
  *   <li>{@code POST user/browser/token/refresh} {refreshToken}
  *   <li>{@code POST user/browser/logout}
  *   <li>{@code GET user/current/user} → {id, userNo, username, nickname, avatar, email, bio}
@@ -90,11 +90,17 @@ public final class LemurXAccount {
 
     /**
      * 账号网关。登录接口挂在这个地址的 {@code /api/v1/} 下，所以这里不带路径。
-     * 测服是 http://192.168.1.111:6666/api/v1 。
+     * 正式包用生产网关，它签的票和生产 Aero 是同一把密钥。
+     * 测试网关是 http://192.168.1.111:6666 。
      */
-    public static final String DEFAULT_GATEWAY = "http://192.168.1.111:6666";
-    /** 上一版写进偏好里的生产网关。读到就清掉，否则改默认值也不会生效。 */
-    private static final String PREVIOUS_GATEWAY = "https://gateway.paipai.life";
+    public static final String DEFAULT_GATEWAY = "https://gateway.paipai.life";
+    /**
+     * 0.1.10 默认写进偏好的测试网关。读到就清掉，并丢掉它签发的登录态，
+     * 否则改默认值也不会生效，旧票还会在生产环境报签名无效。
+     */
+    private static final String RETIRED_GATEWAY = "http://192.168.1.111:6666";
+    /** 已经做过测试网关迁移。避免每次启动都清掉一次登录态。 */
+    private static final String KEY_GATEWAY_MIGRATED = "gateway_migrated_prod";
 
     private static final String API_PREFIX = "/api/v1/";
     /** PaipaiAuthApi.LOGIN_TYPE_GOOGLE。 */
@@ -146,11 +152,32 @@ public final class LemurXAccount {
 
     // ---------------------------------------------------------------- 状态
 
+    /** 去掉末尾斜杠和 {@code /api/v1}，用来认出旧的测试网关。 */
+    private static boolean sameOrigin(@Nullable String saved, String retired) {
+        if (TextUtils.isEmpty(saved)) return false;
+        String url = saved.trim();
+        while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
+        if (url.endsWith("/api/v1")) url = url.substring(0, url.length() - "/api/v1".length());
+        return url.equals(retired);
+    }
+
     public static String gateway() {
-        String url = prefs().getString(KEY_GATEWAY, null);
-        if (PREVIOUS_GATEWAY.equals(url)) {
-            prefs().edit().remove(KEY_GATEWAY).apply();
+        SharedPreferences preferences = prefs();
+        String url = preferences.getString(KEY_GATEWAY, null);
+        boolean retired = sameOrigin(url, RETIRED_GATEWAY);
+        if (retired || (!preferences.getBoolean(KEY_GATEWAY_MIGRATED, false) && TextUtils.isEmpty(url))) {
+            // 测试网关签发的浏览器会话和 aero 票据，生产环境都验不过。
+            preferences
+                    .edit()
+                    .remove(KEY_GATEWAY)
+                    .remove(KEY_TOKEN)
+                    .remove(KEY_REFRESH)
+                    .remove(KEY_AERO_TICKET)
+                    .putBoolean(KEY_GATEWAY_MIGRATED, true)
+                    .apply();
             url = null;
+        } else if (!preferences.getBoolean(KEY_GATEWAY_MIGRATED, false)) {
+            preferences.edit().putBoolean(KEY_GATEWAY_MIGRATED, true).apply();
         }
         if (TextUtils.isEmpty(url)) url = DEFAULT_GATEWAY;
         while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
