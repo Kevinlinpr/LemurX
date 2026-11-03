@@ -20,9 +20,6 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import androidx.fragment.app.Fragment;
-
-import org.chromium.base.version_info.VersionInfo;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
@@ -35,8 +32,10 @@ import org.chromium.components.browser_ui.settings.SettingsNavigation.SettingsFr
 import java.util.ArrayList;
 
 /**
- * 左上角 ☰ 拉出的设置。整个界面往右让开，抽屉停在让出来的左侧，不再盖在页面上。
+ * 底部导航三条线拉出的设置。整个界面往右让开，抽屉停在让出来的左侧，不再盖在页面上。
  * 颜色和字号跟控制台同一套。点某一行要进 Chromium 自己的页面时，那一页才另开。
+ * 从这里点进同一窗口的二级页再返回，抽屉回到点进去之前的打开状态，包括滚到哪里。
+ * 用量和系统设置是另一扇窗口，抽屉留在底下，返回时还是离开前的样子。
  */
 @NullMarked
 final class MuseDrawer {
@@ -51,7 +50,17 @@ final class MuseDrawer {
     private ImageView mAccountIcon;
     private boolean mOpen;
     private boolean mClosing;
-    private @Nullable Runnable mFilesAction;
+    /** 收起动画结束才真正摘掉。中途被重新打开时清掉，避免结束回调把刚打开的抽屉拆掉。 */
+    private boolean mDismissOnEnd;
+    private ScrollView mScroll;
+    /** 离开去盖层之前，抽屉滚到了这里。回来时贴回去。 */
+    private int mReturnScroll;
+    private boolean mApplyScroll;
+    /** 从二级页回来时直接停在打开的位置，不再从左边滑入。 */
+    private boolean mSnapOpen;
+    private static boolean sReturnCover;
+    private static @Nullable MuseDrawer sReturnDrawer;
+    private @Nullable Runnable mArchiveAction;
     private @Nullable Runnable mComputerAction;
     private final ArrayList<View> mPushed = new ArrayList<>();
     private final ArrayList<Float> mPushedFrom = new ArrayList<>();
@@ -70,7 +79,8 @@ final class MuseDrawer {
         mPanel.setElevation(MusePage.dp(context, 8));
         mPanel.setClickable(true);
 
-        ScrollView scroll = new ScrollView(context);
+        mScroll = new ScrollView(context);
+        ScrollView scroll = mScroll;
         scroll.setVerticalScrollBarEnabled(false);
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
@@ -84,42 +94,35 @@ final class MuseDrawer {
         LinearLayout account = accountRow(context);
         column.addView(account);
 
-        column.addView(label(context, R.string.lemurx_muse_data));
-        column.addView(row(context, R.drawable.lemurx_muse_ic_data,
-                R.string.lemurx_muse_settings_data, R.string.lemurx_muse_settings_data_hint,
-                v -> openFragment(LemurXDataFragment.class)));
-        column.addView(row(context, R.drawable.lemurx_muse_ic_file_text,
-                R.string.lemurx_muse_files, 0,
+        column.addView(label(context, R.string.lemurx_drawer_general));
+        column.addView(row(context, R.drawable.lemurx_muse_ic_user,
+                R.string.lemurx_archive, R.string.lemurx_archive_hint,
                 v -> {
-                    close();
-                    if (mFilesAction != null) mFilesAction.run();
+                    leaveForCover();
+                    if (mArchiveAction != null) mArchiveAction.run();
                 }));
         column.addView(row(context, R.drawable.lemurx_muse_ic_server,
                 R.string.lemurx_muse_computer, R.string.lemurx_muse_computer_hint,
                 v -> {
-                    close();
+                    if (!stayForSignIn()) return;
+                    leaveForCover();
                     if (mComputerAction != null) mComputerAction.run();
                 }));
-
-        column.addView(label(context, R.string.lemurx_muse_settings_browser));
-        column.addView(row(context, R.drawable.lemurx_muse_ic_key,
-                R.string.lemurx_muse_settings_autofill, 0,
-                v -> openChrome(SettingsFragment.AUTOFILL_AND_PASSWORDS)));
-        column.addView(row(context, R.drawable.lemurx_console_ic_search,
-                R.string.lemurx_muse_settings_search_engine, 0,
-                v -> openChrome(SettingsFragment.SEARCH_ENGINE)));
-        column.addView(row(context, R.drawable.lemurx_muse_ic_shield,
-                R.string.lemurx_muse_settings_privacy, 0,
-                v -> openChrome(SettingsFragment.PRIVACY)));
+        column.addView(row(context, R.drawable.lemurx_console_ic_community,
+                R.string.lemurx_muse_community, R.string.lemurx_drawer_community_hint,
+                v -> {
+                    if (!stayForSignIn()) return;
+                    leaveForCover();
+                    LemurXConsoleShell.goCommunity();
+                }));
+        // 用量和系统设置盖住当前窗口。抽屉不收，返回时还停在原来的位置。
+        column.addView(row(context, R.drawable.lemurx_muse_ic_card,
+                R.string.lemurx_billing_heading, 0,
+                v -> SettingsNavigationFactory.createSettingsNavigation()
+                        .startSettings(context, LemurXBillingFragment.class)));
         column.addView(row(context, R.drawable.lemurx_muse_ic_settings,
                 R.string.lemurx_muse_settings_all, 0,
                 v -> openChrome(SettingsFragment.MAIN)));
-
-        column.addView(label(context, R.string.lemurx_muse_settings_about));
-        column.addView(versionLine(context, R.drawable.lemurx_muse_ic_app,
-                R.string.lemurx_muse_version_app, appVersion(context)));
-        column.addView(versionLine(context, R.drawable.lemurx_muse_ic_cpu,
-                R.string.lemurx_muse_version_kernel, VersionInfo.getProductVersion()));
 
         scroll.addView(column, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -135,14 +138,61 @@ final class MuseDrawer {
                 MusePage.dp(context, 24));
     }
 
-    /** 文件架。抽屉收起后再打开，避免两层一起动。 */
-    void setFilesAction(Runnable action) {
-        mFilesAction = action;
+    /** 档案库。先记下抽屉现在的样子再收起，返回时按这个样子打开。 */
+    void setArchiveAction(Runnable action) {
+        mArchiveAction = action;
     }
 
-    /** 用户自己的电脑。同样等抽屉收起再打开。 */
+    /** 用户自己的电脑。同样先记下抽屉，返回时再打开。 */
     void setComputerAction(Runnable action) {
         mComputerAction = action;
+    }
+
+    /**
+     * 侧边栏里点进同一窗口的二级页。先记住滚到哪里，再收起。
+     * 用户按返回离开那一页时，侧边栏回到现在这个样子。
+     */
+    private void leaveForCover() {
+        mReturnScroll = mScroll.getScrollY();
+        sReturnDrawer = this;
+        sReturnCover = true;
+        close();
+    }
+
+    /** 电脑和社区要账号。没登录就停在打开的侧边栏上，只拉起登录。 */
+    private boolean stayForSignIn() {
+        if (LemurXAccount.isSignedIn()) return true;
+        Activity activity = LemurXConsoleShell.activity();
+        if (activity != null) LemurXSignIn.showFromBrowser(activity);
+        return false;
+    }
+
+    /** 二级页被返回关掉。只有从侧边栏进去的那次才把抽屉直接打回打开的位置。 */
+    static void restoreAfterCover() {
+        if (!sReturnCover || sReturnDrawer == null) return;
+        MuseDrawer drawer = sReturnDrawer;
+        sReturnCover = false;
+        sReturnDrawer = null;
+        drawer.mApplyScroll = true;
+        drawer.mSnapOpen = true;
+        drawer.open(true);
+    }
+
+    /** 底栏换页、去登录网页这类往前走的操作：不要在回来时再把侧边栏打开。 */
+    static void dropReturn() {
+        sReturnCover = false;
+        if (sReturnDrawer != null) {
+            sReturnDrawer.mApplyScroll = false;
+            sReturnDrawer.mSnapOpen = false;
+        }
+        sReturnDrawer = null;
+    }
+
+    /** 去付款页时侧边栏不该还停在打开。立刻拿掉，也不再等返回。 */
+    static void abandon() {
+        dropReturn();
+        MuseDrawer drawer = sOpen;
+        if (drawer != null) drawer.dismiss();
     }
 
     /** 有没有一扇抽屉正开着（含正在滑回去）。返回键要先收它。 */
@@ -160,13 +210,32 @@ final class MuseDrawer {
     }
 
     void open() {
-        if (mOpen || mClosing) return;
+        open(false);
+    }
+
+    /**
+     * 从二级页返回时 {@code restoring} 为真：侧边栏直接停在离开前的位置，不再从左边滑入。
+     * 自己点开侧边栏时清掉还没回来的那次记录，避免稍后又被自动打开。
+     */
+    private void open(boolean restoring) {
+        mDismissOnEnd = false;
+        if (mClosing) {
+            mPanel.animate().cancel();
+            mClosing = false;
+        }
+        if (!restoring && sReturnDrawer == this) {
+            sReturnCover = false;
+            sReturnDrawer = null;
+            mApplyScroll = false;
+            mSnapOpen = false;
+        }
+        if (mOpen) return;
         FrameLayout stage = stage();
         int stageW = stage.getWidth();
         int parentW = mHost.getWidth();
         if (stageW <= 0 && parentW <= 0) {
             View waiter = stageW <= 0 ? stage : mHost;
-            waiter.post(this::open);
+            waiter.post(() -> open(restoring));
             return;
         }
         applyTopInset();
@@ -199,13 +268,27 @@ final class MuseDrawer {
         }
         refreshAccount();
         mScrim.setAlpha(1f);
-        mPanel.setTranslationX(-width);
         mScrim.setVisibility(View.VISIBLE);
         mPanel.setVisibility(View.VISIBLE);
         mOpen = true;
-        mPanel.animate().translationX(0f).setDuration(320)
-                .setInterpolator(new DecelerateInterpolator(1.6f)).start();
-        pushContent(stage, width);
+        boolean snap = mSnapOpen;
+        mSnapOpen = false;
+        mPanel.animate().cancel();
+        if (snap) {
+            mPanel.setTranslationX(0f);
+            snapContent(stage, width);
+        } else {
+            mPanel.setTranslationX(-width);
+            mPanel.animate().translationX(0f).setDuration(320)
+                    .setInterpolator(new DecelerateInterpolator(1.6f)).start();
+            pushContent(stage, width);
+        }
+        if (mApplyScroll) {
+            int y = mReturnScroll;
+            mApplyScroll = false;
+            mScroll.scrollTo(0, y);
+            mScroll.post(() -> mScroll.scrollTo(0, y));
+        }
         BackPressManager.lemurXConsoleStateChanged();
         if (LemurXAccount.isSignedIn()) {
             LemurXAccount.refreshProfile(error -> refreshAccount());
@@ -216,16 +299,21 @@ final class MuseDrawer {
         if (!mOpen || mClosing) return;
         mClosing = true;
         mOpen = false;
+        mDismissOnEnd = true;
         float width = mPanel.getWidth() > 0 ? mPanel.getWidth() : mPanel.getTranslationX();
         if (width <= 0) width = mPanel.getLayoutParams().width;
         mPanel.animate().translationX(-Math.abs(width)).setDuration(240)
-                .setInterpolator(new DecelerateInterpolator()).withEndAction(this::dismiss).start();
+                .setInterpolator(new DecelerateInterpolator())
+                .withEndAction(() -> {
+                    if (mDismissOnEnd) dismiss();
+                }).start();
         pullContent();
         BackPressManager.lemurXConsoleStateChanged();
     }
 
     /** 页面销毁时直接拿掉，不再做动画。 */
     void dismiss() {
+        mDismissOnEnd = false;
         mPanel.animate().cancel();
         mScrim.animate().cancel();
         mOpen = false;
@@ -254,6 +342,29 @@ final class MuseDrawer {
             if (content instanceof FrameLayout) return (FrameLayout) content;
         }
         return mHost;
+    }
+
+    /** 返回二级页时内容已经让开，不再做滑入。收起动画进行到一半时，按离开前的起点摆回去。 */
+    private void snapContent(FrameLayout stage, float dx) {
+        if (!mPushed.isEmpty()) {
+            for (int i = 0; i < mPushed.size(); i++) {
+                View child = mPushed.get(i);
+                child.animate().cancel();
+                child.setTranslationX(mPushedFrom.get(i) + dx);
+            }
+            return;
+        }
+        mPushed.clear();
+        mPushedFrom.clear();
+        for (int i = 0; i < stage.getChildCount(); i++) {
+            View child = stage.getChildAt(i);
+            if (child == mPanel) continue;
+            float from = child.getTranslationX();
+            mPushed.add(child);
+            mPushedFrom.add(from);
+            child.animate().cancel();
+            child.setTranslationX(from + dx);
+        }
     }
 
     private void pushContent(FrameLayout stage, float dx) {
@@ -356,20 +467,12 @@ final class MuseDrawer {
         if (activity != null) LemurXGoogleSignIn.signOut(activity);
         LemurXAccount.signOut(error -> {
             MuseApi.rebind();
+            LemurXConsoleShell.onSignedOut();
             refreshAccount();
         });
     }
 
     // ---------------------------------------------------------------- 往下走的页面
-
-    private void openFragment(Class<? extends Fragment> fragment) {
-        try {
-            SettingsNavigationFactory.createSettingsNavigation()
-                    .startSettings(mHost.getContext(), fragment);
-        } catch (RuntimeException ignored) {
-            // 设置页打不开时抽屉留着
-        }
-    }
 
     private void openChrome(@SettingsFragment int fragment) {
         try {
@@ -450,26 +553,6 @@ final class MuseDrawer {
                     MusePage.dp(context, 18), MusePage.dp(context, 18)));
         }
         return row;
-    }
-
-    /** 关于里的一行：标题是软件或内核，副标题是版本号。两种用不同的图标。 */
-    private View versionLine(android.content.Context context, int icon, int title, String version) {
-        View row = row(context, icon, title, 0, null);
-        LinearLayout texts = (LinearLayout) ((LinearLayout) row).getChildAt(1);
-        TextView hint = (TextView) texts.getChildAt(1);
-        hint.setText(version == null ? "" : version);
-        hint.setVisibility(View.VISIBLE);
-        return row;
-    }
-
-    private static String appVersion(android.content.Context context) {
-        try {
-            String name = context.getPackageManager()
-                    .getPackageInfo(context.getPackageName(), 0).versionName;
-            return name == null ? "" : name;
-        } catch (Exception e) {
-            return "";
-        }
     }
 
     private LinearLayout texts(android.content.Context context, String title, String hint) {

@@ -18,10 +18,12 @@ import android.graphics.drawable.GradientDrawable;
 import android.util.Base64;
 import android.util.Rational;
 import android.util.TypedValue;
+import android.net.Uri;
 import android.os.Build;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.ViewConfiguration;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
@@ -59,8 +61,10 @@ import org.chromium.chrome.browser.layouts.LayoutStateProvider.LayoutStateObserv
 import org.chromium.chrome.browser.layouts.LayoutType;
 import org.chromium.chrome.browser.back_press.BackPressManager;
 import org.chromium.chrome.browser.lemurx.agent.LemurXDeviceBridge;
+import org.chromium.chrome.browser.lemurx.muse.LemurXWelcome;
 import org.chromium.chrome.browser.lemurx.muse.MusePage;
 import org.chromium.chrome.browser.lemurx.muse.MuseUrls;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.lifecycle.DestroyObserver;
 import org.chromium.chrome.browser.omnibox.OmniboxStub;
 import org.chromium.chrome.browser.omnibox.UrlFocusChangeListener;
@@ -79,7 +83,10 @@ import org.chromium.components.omnibox.AutocompleteInput;
 import org.chromium.components.omnibox.OmniboxFocusReason;
 import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.GestureStateListener;
+import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.components.embedder_support.util.UrlUtilities;
+import org.chromium.components.search_engines.TemplateUrlService;
+import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
@@ -115,14 +122,14 @@ import java.util.Set;
  *       TabBrowserControlsConstraintsHelper#getConstraints} 先问 {@link #controlsConstraint()}，
  *       平时是 HIDDEN，只有用户主动唤起地址栏那一小会儿是 SHOWN。这是硬约束，加载中、出错页、
  *       换渲染进程这些会把工具栏拉出来的时机都不例外，所以不会再"莫名其妙地出现"。
- *   <li>新标签页就是一轮新对话（{@link LemurXChromeHost#newTabUrlOverride} →
- *       {@link #launchUrl()} = {@code chrome-native://lemurx/chat/<新 id>}）。
+ *   <li>新标签页就是 Agent 界面（{@link LemurXChromeHost#newTabUrlOverride} →
+ *       {@link #launchUrl()} = {@code chrome-native://lemurx/chat/<新 id>}）。没登录时输入框只打开网址或搜索。
  *   <li>在每一页底部浮一条 LemurX 导航栏（白色药丸、lucide 图标、选中格 #F0F1F2）。
  *       网页上从左侧长出前进和后退。不是网页时不显示前进后退，最左一格固定成当前页面的图标并选中，
  *       让人知道自己在哪。其余是网页、标签页、对话、搜索、社区。标签页管理（Hub）、地址栏打开期间、
  *       原生页面里软键盘弹出期间收起来。
- *   <li>浏览网页时底栏优先级最高：盖在网页上面，不跟着滚动收起，网页自己的底部抽屉和确认框
- *       让开。原生页面（对话 / 社区）上同样始终显示。
+ *   <li>浏览网页时底栏盖在网页上面。手指往下滚过一小段就收起，往上滚一点或回到页顶就出现；
+ *       程序自己滚的不算。对话、社区这些原生页面上不跟着滚收起。
  *   <li>每个标签页就是一个智能体，所以从网页切到对话 / 社区时先把当前网页截一张图记在标签页上
  *       （{@link #tabScreenshot}），对话发消息时随消息一起交给模型，让它看得到"这个标签页正在看
  *       什么"。
@@ -147,6 +154,10 @@ public final class LemurXConsoleShell {
     private static final String KEY_ENABLED = "enabled";
     /** 标签页 id → 会话 id，进程被杀后还要能回到同一轮对话。 */
     private static final String KEY_TAB_THREADS = "tab_threads";
+    /** 上次停住的页面。重新打开时直接回到这里，不另起一个空对话。 */
+    private static final String KEY_LAST_URL = "last_url";
+    private static final String KEY_LAST_SECTION = "last_section";
+    private static final String KEY_LAST_THREAD = "last_thread";
     private static final String KEY_HOME = "home_url";
 
     /** OpenMuse 网页版（Expo web 构建）的默认地址。 */
@@ -338,6 +349,9 @@ public final class LemurXConsoleShell {
     /** 离开对话 / 社区 / 电脑时的画面。标签卡片用它，不用底下那张网页。 */
     private static final Map<Integer, Bitmap> sCards = new HashMap<>();
 
+    /** 人停在 Agent 对话上时的画面。标签管理用它，不用底下那张网页。 */
+    private static final Map<Integer, Bitmap> sChatCards = new HashMap<>();
+
     /** 打开标签管理前刚截下的那一页。下一帧的缩略图采集直接用它。 */
     private static int sFrozenCardTab = Tab.INVALID_TAB_ID;
 
@@ -346,6 +360,8 @@ public final class LemurXConsoleShell {
 
     /** 软键盘正在做进出动画：这期间底部内边距跟着每一帧走，不吃 onApplyWindowInsets 的终值。 */
     private static boolean sOverlayImeAnimating;
+    /** 键盘动画时把网页合成层藏起来，避免它从对话底下闪出来。 */
+    private static boolean sCompositorHiddenForIme;
 
     /** 网页 / 社区 / 对话，下标是 CELL_*；用来点亮选中的那格。视觉顺序里社区在最右。 */
     private static @Nullable View[] sSectionCells;
@@ -382,6 +398,9 @@ public final class LemurXConsoleShell {
 
     /** 用户正通过搜索按钮使用地址栏：这期间工具栏露出来，导航栏收起。 */
     private static boolean sOmniboxOpen;
+    private static boolean sSearchBlank;
+    private static float sSearchX;
+    private static float sSearchY;
 
     /**
      * 从原生页面（对话 / 社区）点搜索时先回到这个标签页的网页再聚焦地址栏，让搜索基于网页
@@ -472,17 +491,17 @@ public final class LemurXConsoleShell {
     }
 
     /**
-     * 新标签页实际加载的地址：一轮全新的原生对话（{@code chrome-native://lemurx/chat/<新 id>}）。
-     * 每个新标签页都是新会话，标签管理里"新增标签"开出来的就是一个全新的对话。
+     * 新标签页实际加载的地址：一轮 Agent 界面（{@code chrome-native://lemurx/chat/<新 id>}）。
+     * 每个新标签页都是新会话。没登录时这个界面的输入框只打开网址或搜索。
      */
     public static String launchUrl() {
         return MuseUrls.newChatUrl();
     }
 
     /**
-     * 新标签页内容不再显示：LemurX 的主体是 Agent 对话，任何要加载原生 NTP 的地方（新标签、主页键、
-     * 手输 chrome://newtab、恢复的会话条目）都改成这个标签页自己的对话。标签页已经有会话就接着那轮，
-     * 没有就新开一轮并记到标签页上。无痕窗口和外壳关着时不改，返回 null。
+     * 新标签页就是 Agent 界面：任何要加载原生 NTP 的地方（新标签、主页键、手输 chrome://newtab、
+     * 恢复的会话条目）都改成这个标签页自己的对话。标签页已经有会话就接着那轮，没有就新开一轮并记到
+     * 标签页上。无痕窗口或外壳关着时不改，返回 null。
      *
      * @param tab 正在加载 NTP 的标签页；用来复用它已经记着的会话。没有（不该发生）就新开一轮。
      * @return 要改成的对话地址；不用改返回 null。
@@ -708,6 +727,7 @@ public final class LemurXConsoleShell {
         if (!isEnabled()) return;
         if (sActivity == activity && sNav != null) {
             refresh();
+            LemurXWelcome.maybeShow(activity);
             return;
         }
         detach();
@@ -752,12 +772,14 @@ public final class LemurXConsoleShell {
         }
         applyControls(false);
         refresh();
+        LemurXWelcome.maybeShow(activity);
         LemurXKillSwitch.attach(activity);
         LemurXAppUpdate.attach(activity);
     }
 
     /** 窗口销毁或重新挂接前：撤掉所有观察者和视图。 */
     private static void detach() {
+        MusePage.dropDrawerReturn();
         ChromeTabbedActivity activity = sActivity;
         if (activity != null) LemurXKillSwitch.detach(activity);
         if (activity != null) LemurXAppUpdate.detach(activity);
@@ -845,6 +867,7 @@ public final class LemurXConsoleShell {
             }
         }
         sPipCard = null;
+        LemurXWelcome.detach();
         BackPressManager.setLemurXConsoleInterceptor(null, null);
         detachOverlayView();
         for (MusePage page : sOverlays.values()) {
@@ -863,6 +886,7 @@ public final class LemurXConsoleShell {
                 // 同上
             }
         }
+        concealCompositorForIme(false);
         sOverlayHost = null;
         if (sProgress != null && sProgress.getParent() instanceof ViewGroup) {
             try {
@@ -1163,9 +1187,158 @@ public final class LemurXConsoleShell {
 
     // ---------------------------------------------------------------- 动作
 
+    /** 退出登录：停掉正在跑的 Agent，放开屏幕锁。界面仍留在对话，输入框改回网址和搜索。 */
+    public static void onSignedOut() {
+        MusePage.stopAgentWork();
+        LemurXDeviceBridge.releaseScreen();
+        MusePage.applyAccountMode();
+    }
+
     /** 回到对话：等同于按导航栏的"对话"格。 */
     public static void goHome() {
         goChat();
+    }
+
+    private static int sPresentTries;
+
+    /**
+     * 冷启动回到上次停下的地方。上次是盖在网页上的对话，就还盖那一轮，不新开一轮。
+     * 上次就是网页或原生对话，Chrome 恢复的那一页已经是它，这里不再改。
+     */
+    public static void presentAgent() {
+        sPresentTries = 0;
+        presentAgentSoon();
+    }
+
+    private static void presentAgentSoon() {
+        ChromeTabbedActivity activity = sActivity;
+        if (activity == null || sPresentTries++ > 40) return;
+        if (!tabsReady()) {
+            ThreadUtils.postOnUiThreadDelayed(LemurXConsoleShell::presentAgentSoon, 50);
+            return;
+        }
+        try {
+            if (!MuseUrls.SECTION_CHAT.equals(prefs().getString(KEY_LAST_SECTION, ""))) return;
+            Tab current = activity.getActivityTab();
+            if (current == null) return;
+            String savedUrl = prefs().getString(KEY_LAST_URL, "");
+            String currentUrl = current.getUrl().getSpec();
+            if (!TextUtils.isEmpty(savedUrl) && !savedUrl.equals(currentUrl)) return;
+            if (showingChat(current)) return;
+            String thread = prefs().getString(KEY_LAST_THREAD, "");
+            if (!TextUtils.isEmpty(thread)) setTabThread(current, thread);
+            showOverlay(current, MuseUrls.SECTION_CHAT);
+        } catch (Exception e) {
+            logi("presentAgent", e.getMessage());
+        }
+    }
+
+    /** 标签页恢复完、前台那一页已经在了。启动封面用它决定能不能揭开。 */
+    public static boolean tabsReady() {
+        ChromeTabbedActivity activity = sActivity;
+        if (activity == null || !activity.areTabModelsInitialized()) return false;
+        try {
+            return activity.getTabModelSelector().isTabStateInitialized()
+                    && activity.getActivityTab() != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 上次停在对话上时，要等对话画出来再揭封面。上次是网页，恢复完就可以揭。 */
+    public static boolean startupCoverReady(boolean chatVisible) {
+        if (!tabsReady()) return false;
+        return !lastPlaceWasChat() || chatVisible;
+    }
+
+    private static boolean lastPlaceWasChat() {
+        try {
+            if (MuseUrls.SECTION_CHAT.equals(prefs().getString(KEY_LAST_SECTION, ""))) return true;
+            return MuseUrls.SECTION_CHAT.equals(
+                    MuseUrls.sectionOf(prefs().getString(KEY_LAST_URL, "")));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 记住现在这一页。恢复还没完成时不写，免得临时的新标签盖掉上次的记录。 */
+    private static void rememberForeground(Tab tab, @Nullable String overlaySection) {
+        if (!tabsReady()) return;
+        try {
+            String url = tab.getUrl().getSpec();
+            if (TextUtils.isEmpty(url) || "about:blank".equals(url)) return;
+            String section = overlaySection;
+            if (section == null && MuseUrls.SECTION_CHAT.equals(MuseUrls.sectionOf(url))) {
+                section = MuseUrls.SECTION_CHAT;
+            }
+            if (section == null) section = "";
+            String thread = threadOfTab(tab);
+            if (thread == null) thread = "";
+            prefs().edit()
+                    .putString(KEY_LAST_URL, url)
+                    .putString(KEY_LAST_SECTION, section)
+                    .putString(KEY_LAST_THREAD, thread)
+                    .apply();
+        } catch (Exception e) {
+            logi("rememberForeground", e.getMessage());
+        }
+    }
+
+    /**
+     * 搜索开着时，点在地址栏和建议以外的空白：收起键盘并退出搜索。
+     *
+     * @return true 这次触摸已经处理，不要再交给下面的网页。
+     */
+    public static boolean consumeSearchBlank(MotionEvent event) {
+        if (!sOmniboxOpen) {
+            sSearchBlank = false;
+            return false;
+        }
+        ChromeTabbedActivity activity = sActivity;
+        if (activity == null) return false;
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            sSearchBlank = !touchInSearchChrome(activity, event);
+            sSearchX = event.getRawX();
+            sSearchY = event.getRawY();
+            return sSearchBlank;
+        }
+        if (!sSearchBlank) return false;
+        if (action == MotionEvent.ACTION_MOVE) {
+            float dx = event.getRawX() - sSearchX;
+            float dy = event.getRawY() - sSearchY;
+            int slop = ViewConfiguration.get(activity).getScaledTouchSlop();
+            if (dx * dx + dy * dy > (float) slop * slop) sSearchBlank = false;
+            return sSearchBlank;
+        }
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            boolean close = action == MotionEvent.ACTION_UP && sSearchBlank;
+            sSearchBlank = false;
+            if (close && sOmniboxStub != null) {
+                try {
+                    sOmniboxStub.onScrimClicked();
+                } catch (Exception e) {
+                    logi("searchBlank", e.getMessage());
+                }
+            }
+            return true;
+        }
+        return sSearchBlank;
+    }
+
+    private static boolean touchInSearchChrome(ChromeTabbedActivity activity, MotionEvent event) {
+        if (touchInView(activity.findViewById(R.id.control_container), event)) return true;
+        return touchInView(activity.findViewById(R.id.omnibox_suggestions_dropdown), event);
+    }
+
+    private static boolean touchInView(@Nullable View view, MotionEvent event) {
+        if (view == null || view.getVisibility() != View.VISIBLE || view.getWidth() == 0) return false;
+        int[] loc = new int[2];
+        view.getLocationOnScreen(loc);
+        float x = event.getRawX();
+        float y = event.getRawY();
+        return x >= loc[0] && x < loc[0] + view.getWidth()
+                && y >= loc[1] && y < loc[1] + view.getHeight();
     }
 
     /**
@@ -1199,12 +1372,14 @@ public final class LemurXConsoleShell {
     /** 社区是盖在所有标签页上的一层，不改当前标签的地址。 */
     public static void goCommunity() {
         if (sActivity == null) return;
+        if (!MusePage.requireAccount()) return;
         MusePage.closeFiles();
+        MusePage.closeArchive();
         MusePage.showCommunity(sActivity);
         refresh();
     }
 
-    /** 网页底栏最右一格：侧边栏。这一格只在选中网页时占着社区的位置。 */
+    /** 底部导航最右一格：侧边栏。对话页和网页都走这一格。 */
     public static void openSidebar() {
         ChromeTabbedActivity activity = sActivity;
         if (activity == null) return;
@@ -1213,7 +1388,13 @@ public final class LemurXConsoleShell {
             if (!activity.areTabModelsInitialized()) return;
             Tab current = activity.getActivityTab();
             if (current == null) return;
-            MusePage page = sOverlays.get(current.getId());
+            // 眼前就是对话页时，抽屉开在这一页上。另盖一层的话，档案会画到看不见的页面上。
+            Object nativePage = current.getNativePage();
+            if (nativePage instanceof MusePage) {
+                ((MusePage) nativePage).openDrawer();
+                return;
+            }
+            MusePage page = sOverlayAttached != null ? sOverlayAttached : sOverlays.get(current.getId());
             if (page == null) {
                 String thread = tabThread(current);
                 if (thread == null) {
@@ -1603,6 +1784,22 @@ public final class LemurXConsoleShell {
      */
     public static @Nullable Bitmap tabCardBitmap(Tab tab, float scale) {
         if (tab == null) return null;
+        if (showingChat(tab)) {
+            rememberAttachedChat();
+            Bitmap chat = sChatCards.get(tab.getId());
+            if (chat != null && !chat.isRecycled()) return chat;
+            Bitmap kept = sCards.get(tab.getId());
+            if (kept != null && !kept.isRecycled()) return kept;
+            View live = cardSource(tab);
+            if (live != null) {
+                Bitmap drawn = drawCard(live, cardScale(scale));
+                if (drawn != null) {
+                    stashChat(tab.getId(), drawn);
+                    return drawn;
+                }
+            }
+            return blankCard();
+        }
         if (tab.getId() == sFrozenCardTab) {
             sFrozenCardTab = Tab.INVALID_TAB_ID;
             Bitmap frozen = sCards.get(tab.getId());
@@ -1662,6 +1859,8 @@ public final class LemurXConsoleShell {
                 && sOverlayAttached != null
                 && host.getVisibility() == View.VISIBLE
                 && host.getWidth() > 0) {
+            // 截里面的对话页，不要把盖在外面的空边一起带上。
+            if (host.getChildCount() > 0) return host.getChildAt(0);
             return host;
         }
         try {
@@ -1683,14 +1882,29 @@ public final class LemurXConsoleShell {
     }
 
     private static @Nullable Bitmap drawCard(View view, float scale) {
-        int width = Math.max(1, Math.round(view.getWidth() * scale));
-        int height = Math.max(1, Math.round(view.getHeight() * scale));
+        // 状态栏和底栏是页面自己留出的空边。卡片只留中间的内容，否则会像被裁短一截。
+        int cropLeft = view.getPaddingLeft();
+        int cropTop = view.getPaddingTop();
+        int cropRight = view.getPaddingRight();
+        int cropBottom = view.getPaddingBottom();
+        int contentW = view.getWidth() - cropLeft - cropRight;
+        int contentH = view.getHeight() - cropTop - cropBottom;
+        if (contentW < view.getWidth() / 2 || contentH < view.getHeight() / 2) {
+            cropLeft = 0;
+            cropTop = 0;
+            contentW = view.getWidth();
+            contentH = view.getHeight();
+        }
+        int width = Math.max(1, Math.round(contentW * scale));
+        int height = Math.max(1, Math.round(contentH * scale));
         if (width <= 1 || height <= 1) return null;
         try {
             Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
             Canvas canvas = new Canvas(bitmap);
             canvas.drawColor(MusePage.bg(view.getContext()));
             canvas.scale(scale, scale);
+            canvas.translate(-cropLeft, -cropTop);
+            canvas.clipRect(cropLeft, cropTop, cropLeft + contentW, cropTop + contentH);
             view.draw(canvas);
             return bitmap;
         } catch (OutOfMemoryError e) {
@@ -1714,7 +1928,39 @@ public final class LemurXConsoleShell {
     private static void dropCard(int tabId) {
         Bitmap previous = sCards.remove(tabId);
         if (previous != null && !previous.isRecycled()) previous.recycle();
+        Bitmap chat = sChatCards.remove(tabId);
+        if (chat != null && !chat.isRecycled()) chat.recycle();
         if (sFrozenCardTab == tabId) sFrozenCardTab = Tab.INVALID_TAB_ID;
+    }
+
+    /** 眼前这层是 Agent 对话时，记下它的画面，标签卡片不再用底下的网页。 */
+    private static void rememberAttachedChat() {
+        MusePage page = sOverlayAttached;
+        FrameLayout host = sOverlayHost;
+        if (page == null || host == null) return;
+        if (!MuseUrls.SECTION_CHAT.equals(sOverlaySection.get(page.tabId()))) return;
+        if (host.getVisibility() != View.VISIBLE || host.getWidth() <= 0 || host.getHeight() <= 0) {
+            return;
+        }
+        View source = host.getChildCount() > 0 ? host.getChildAt(0) : host;
+        Bitmap drawn = drawCard(source, cardScale(0f));
+        if (drawn != null) stashChat(page.tabId(), drawn);
+    }
+
+    private static void stashChat(int tabId, Bitmap bitmap) {
+        Bitmap previous = sChatCards.put(tabId, bitmap);
+        if (previous != null && previous != bitmap && !previous.isRecycled()) previous.recycle();
+    }
+
+    /** 这个标签眼前是 Agent 对话（覆盖层或原生对话页），不是网页。 */
+    private static boolean showingChat(Tab tab) {
+        if (MuseUrls.SECTION_CHAT.equals(sOverlaySection.get(tab.getId()))) return true;
+        try {
+            GURL url = tab.getUrl();
+            return url != null && MuseUrls.SECTION_CHAT.equals(MuseUrls.sectionOf(url.getSpec()));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** 只记 http(s) 网页；原生页面、about:blank、chrome:// 之类都不算"网页"。 */
@@ -1870,6 +2116,7 @@ public final class LemurXConsoleShell {
 
     /** 打开标签页管理（Hub）。 */
     public static void openTabSwitcher() {
+        rememberAttachedChat();
         freezeCard();
         MusePage.dismissCovers();
         ChromeTabbedActivity activity = sActivity;
@@ -1957,8 +2204,6 @@ public final class LemurXConsoleShell {
         View[] sectionCells = new View[3];
         sectionCells[CELL_WEB] = cell(activity, R.drawable.lemurx_console_ic_web,
                 R.string.lemurx_console_web, iconSize, cellHeight, v -> goWeb());
-        sectionCells[CELL_COMMUNITY] = cell(activity, R.drawable.lemurx_console_ic_community,
-                R.string.lemurx_console_community, iconSize, cellHeight, v -> goCommunity());
         sectionCells[CELL_CHAT] = cell(activity, R.drawable.lemurx_console_ic_chat,
                 R.string.lemurx_console_chat, iconSize, cellHeight, v -> goChat());
         sSectionCells = sectionCells;
@@ -1969,10 +2214,8 @@ public final class LemurXConsoleShell {
         pill.addView(sectionCells[CELL_CHAT]);
         pill.addView(cell(activity, R.drawable.lemurx_console_ic_search,
                 R.string.lemurx_console_search, iconSmall, cellHeight, v -> openSearch()));
-        pill.addView(sectionCells[CELL_COMMUNITY]);
         View menu = cell(activity, R.drawable.lemurx_muse_ic_menu,
                 R.string.lemurx_console_menu, iconSize, cellHeight, v -> openSidebar());
-        applySlotWeight(menu, 0f);
         sMenuCell = menu;
         pill.addView(menu);
 
@@ -2011,6 +2254,8 @@ public final class LemurXConsoleShell {
         // Agent 覆盖层的容器：铺满内容区，压在网页上、导航栏下。
         FrameLayout overlayHost = new FrameLayout(activity);
         overlayHost.setVisibility(View.GONE);
+        // 底色铺满，键盘把对话垫高时底下不会露出网页。
+        overlayHost.setBackgroundColor(MusePage.bg(activity));
         // Chrome 的根布局是 edge-to-edge 的，软键盘弹出时不会把 android.R.id.content 挤矮，
         // 网页那边是 Chrome 自己调视口。覆盖层要自己按键盘高度留出底部内边距，输入栏才会
         // 贴着键盘；有键盘动画时逐帧跟着走，落在键盘上而不是先跳到终点再等键盘。
@@ -2027,6 +2272,9 @@ public final class LemurXConsoleShell {
                         public void onPrepare(WindowInsetsAnimation animation) {
                             if ((animation.getTypeMask() & WindowInsets.Type.ime()) != 0) {
                                 sOverlayImeAnimating = true;
+                                if (overlayHost.getVisibility() == View.VISIBLE) {
+                                    concealCompositorForIme(true);
+                                }
                             }
                         }
 
@@ -2067,9 +2315,13 @@ public final class LemurXConsoleShell {
                     @Override
                     public void onChildViewAdded(View parent, View child) {
                         LinearLayout bar = sNav;
-                        if (bar == null || child == bar || bar.getVisibility() != View.VISIBLE) {
+                        if (bar == null || child == bar) return;
+                        // Agent 操作时锁在底栏上面，子视图增减不能把底栏抬回来。
+                        if (LemurXDeviceBridge.isDriving()) {
+                            LemurXDeviceBridge.keepLockOnTop();
                             return;
                         }
+                        if (bar.getVisibility() != View.VISIBLE) return;
                         bar.bringToFront();
                     }
 
@@ -2108,8 +2360,9 @@ public final class LemurXConsoleShell {
     }
 
     /**
-     * 盯着前台网页的滚动。底栏不再随滚动收起，这里只在回到页顶时保证它是展开的。
-     * 要订阅根滚动偏移的每次变化（ALL_UPDATES），否则回调里的 scrollOffsetY 只是缓存值。
+     * 盯着前台网页的滚动。往下滚过 {@code NAV_HIDE_DP} 收起底栏，往上滚过 {@code NAV_SHOW_DP}
+     * 或回到页顶就出现。要订阅根滚动偏移的每次变化（ALL_UPDATES），否则回调里的 scrollOffsetY
+     * 只是缓存值。
      */
     private static void watchGesture(@Nullable Tab tab) {
         WebContents contents = null;
@@ -2195,10 +2448,8 @@ public final class LemurXConsoleShell {
     }
 
     private static void setWebCollapsed(boolean collapsed) {
-        // 浏览网页时底栏不让位。往下滚也不收起，只接受展开。
-        if (collapsed) return;
-        if (!sWebCollapsed) return;
-        sWebCollapsed = false;
+        if (sWebCollapsed == collapsed) return;
+        sWebCollapsed = collapsed;
         refresh();
     }
 
@@ -2228,7 +2479,10 @@ public final class LemurXConsoleShell {
         }
     }
 
-    /** 触摸是否落在可见子视图上（含再下一层）。空白内边距要漏给底下的发送钮。 */
+    /**
+     * 触摸是否落在可见子视图上（含再下一层）。药丸外面的空白内边距要漏给底下的发送钮。
+     * 栏里每一格已经按可见图标平分了宽度，点在这一格的任意位置都算点中，不要求正好点在图标上。
+     */
     private static boolean touchHitsVisibleChild(ViewGroup parent, MotionEvent ev) {
         float x = ev.getX() + parent.getScrollX();
         float y = ev.getY() + parent.getScrollY();
@@ -2239,6 +2493,7 @@ public final class LemurXConsoleShell {
                     || y >= child.getBottom()) {
                 continue;
             }
+            if (child.isClickable()) return true;
             if (child instanceof ViewGroup) {
                 MotionEvent shifted = MotionEvent.obtain(ev);
                 shifted.offsetLocation(-child.getLeft(), -child.getTop());
@@ -2265,6 +2520,7 @@ public final class LemurXConsoleShell {
         cell.setContentDescription(context.getString(desc));
         cell.setOnClickListener(
                 v -> {
+                    if (LemurXDeviceBridge.isDriving()) return;
                     LemurXHaptics.tick(v);
                     MusePage.closeDrawer();
                     onClick.onClick(v);
@@ -2289,6 +2545,7 @@ public final class LemurXConsoleShell {
         cell.setContentDescription(context.getString(R.string.lemurx_console_tabs));
         cell.setOnClickListener(
                 v -> {
+                    if (LemurXDeviceBridge.isDriving()) return;
                     LemurXHaptics.tick(v);
                     MusePage.closeDrawer();
                     openTabSwitcher();
@@ -2361,8 +2618,12 @@ public final class LemurXConsoleShell {
      * 没有原生页面要求收起（软键盘）、前台有标签，且不是"没带外壳标记的旧网页首页"
      * （那种首页由网页自己画栏）。浏览网页时底栏保持在最上面，不随滚动收起。
      */
-    /** 独立层把自己抬到最前之后，底栏仍要留在上面，点得到。 */
+    /** 独立层把自己抬到最前之后，底栏仍要留在上面，点得到。Agent 锁着的时候不抬。 */
     public static void liftNav() {
+        if (LemurXDeviceBridge.isDriving()) {
+            LemurXDeviceBridge.keepLockOnTop();
+            return;
+        }
         View nav = sNav;
         if (nav != null && nav.getVisibility() == View.VISIBLE) nav.bringToFront();
     }
@@ -2418,11 +2679,8 @@ public final class LemurXConsoleShell {
                     // 恢复会话回来的标签页没经过导航回调，这里顺手把正在看的网页记下。
                     if (active == CELL_WEB) rememberWebUrl(tab, tab.getUrl());
                     hasWeb = active == CELL_WEB || tabWebUrl(tab) != null;
-                    if (MusePage.computerOpen()) {
-                        active = PLACE_COMPUTER;
-                    } else if (MusePage.filesOpen()) {
-                        active = PLACE_FILES;
-                    } else if (MusePage.communityOpen()) {
+                    // 侧边栏打开的文件架和电脑是盖层，不改底栏选中项；底栏在那两层打开时收起。
+                    if (MusePage.communityOpen()) {
                         active = CELL_COMMUNITY;
                     } else if (overlayTab == tab && overlaySection != null) {
                         active = MuseUrls.SECTION_COMMUNITY.equals(overlaySection)
@@ -2452,7 +2710,9 @@ public final class LemurXConsoleShell {
             // 这个标签页还没看过网页：网页格压暗（点了会唤起地址栏）。
             cells[CELL_WEB].setAlpha(hasWeb ? 1f : 0.4f);
             for (int i = 0; i < cells.length; i++) {
-                boolean selected = i == active;
+                if (cells[i] == null) continue;
+                // 正在看网页时地球格会收起，底栏不保持一个默认选中项。
+                boolean selected = i == active && !webMode;
                 if (cells[i].isSelected() != selected || cells[i].getTag() == null) {
                     cells[i].setSelected(selected);
                     cells[i].setBackgroundResource(selected
@@ -2473,13 +2733,24 @@ public final class LemurXConsoleShell {
             notifyNavListeners();
         }
         // 每次刷新都抬到最上面。网页合成层和后来加上的覆盖层不能盖住底栏。
-        if (vis == View.VISIBLE) nav.bringToFront();
+        // Agent 正在操作时反过来：锁盖住底栏，接管之前底栏不能点。
+        if (vis == View.VISIBLE && !LemurXDeviceBridge.isDriving()) nav.bringToFront();
+        LemurXDeviceBridge.keepLockOnTop();
         updateTabCount();
+        if (!sOmniboxOpen && tabsReady()) {
+            try {
+                Tab fg = activity.getActivityTab();
+                if (fg != null) rememberForeground(fg, sOverlaySection.get(fg.getId()));
+            } catch (Exception e) {
+                logi("rememberForeground", e.getMessage());
+            }
+        }
     }
 
     /**
-     * 网页模式：前进后退从左侧长出来，标签格收进去，最右边的社区换成侧边栏入口。
-     * 对话模式反过来，社区回来，侧边栏入口收回去。weight 0↔1 + 透明度 + 轻微缩放，280ms FastOutSlowIn。
+     * 网页模式：前进后退从左侧长出来，地球格收起来，不默认选中任何一格，标签按钮留着。
+     * 对话模式反过来，地球回来。侧边栏三条线两种模式都留在最右边。
+     * weight 0↔1 + 透明度 + 轻微缩放，280ms FastOutSlowIn。
      */
     private static void morphWebChrome(boolean webChrome) {
         View back = sBackCell;
@@ -2511,13 +2782,13 @@ public final class LemurXConsoleShell {
         applySlotWeight(sForwardCell, chrome);
         applySlotWeight(sHereCell, 1f - chrome);
         View[] cells = sSectionCells;
-        applySlotWeight(sTabsCell, 1f - chrome);
-        applySlotWeight(sMenuCell, chrome);
+        // 标签按钮两种模式都在。网页上不再用地球图标占一个默认选中位。
+        applySlotWeight(sTabsCell, 1f);
+        applySlotWeight(sMenuCell, 1f);
         if (cells != null) {
-            // 当前页已经占住最左一格时，不再在后面重复同一个图标。
-            float community = sPlace == CELL_COMMUNITY ? 0f : (1f - chrome);
+            // 当前页已经占住最左一格时，不再在后面重复同一个图标。社区在侧边栏里。
             float chat = sPlace == CELL_CHAT ? chrome : 1f;
-            applySlotWeight(cells[CELL_COMMUNITY], community);
+            applySlotWeight(cells[CELL_WEB], 1f - chrome);
             applySlotWeight(cells[CELL_CHAT], chat);
         }
         LinearLayout nav = sNav;
@@ -2595,6 +2866,8 @@ public final class LemurXConsoleShell {
     public static void onPlaceChanged() {
         refresh();
         liftNav();
+        // 社区、档案这些盖层不经过内置返回处理器，盖上或揭开时要自己刷新返回键是否该由我们接住。
+        BackPressManager.lemurXConsoleStateChanged();
     }
 
     /** 网页模式下按历史点亮 / 压暗前进后退。 */
@@ -3029,6 +3302,79 @@ public final class LemurXConsoleShell {
         status.setVisibility(View.VISIBLE);
     }
 
+    /**
+     * 没登录时输入框提交的内容：像网址就打开，否则用默认搜索引擎搜。盖着的对话让开，让用户看见页面。
+     */
+    /** 付款页开在当前标签上，对话盖层让开，设置页自己关掉。 */
+    public static void openBillingPage(String url) {
+        if (TextUtils.isEmpty(url)) return;
+        // 付款页是往前走，不是从用量页返回。侧边栏不要留在打开的位置。
+        MusePage.abandonDrawer();
+        ChromeTabbedActivity activity = sActivity;
+        if (activity == null) return;
+        try {
+            Tab tab = activity.getActivityTab();
+            if (tab == null) return;
+            sOverlaySection.remove(tab.getId());
+            sWebCollapsed = false;
+            tab.loadUrl(new LoadUrlParams(url));
+            refresh();
+        } catch (Exception e) {
+            logi("openBillingPage", e.getMessage());
+        }
+    }
+
+    public static void openTyped(Tab tab, String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty()) return;
+        try {
+            String url = typedUrl(tab, text);
+            if (TextUtils.isEmpty(url)) return;
+            sOverlaySection.remove(tab.getId());
+            sWebCollapsed = false;
+            tab.loadUrl(new LoadUrlParams(url));
+            refresh();
+        } catch (Exception e) {
+            logi("openTyped", e.getMessage());
+        }
+    }
+
+    /** 有点、有协议、或是本机地址时当成网址；其余交给默认搜索引擎。 */
+    private static String typedUrl(Tab tab, String text) {
+        if (looksLikeUrl(text)) {
+            GURL fixed = UrlFormatter.fixupUrl(text);
+            if (fixed != null && fixed.isValid() && !fixed.getSpec().isEmpty()) return fixed.getSpec();
+        }
+        try {
+            Profile profile = tab.getProfile();
+            if (profile != null) {
+                TemplateUrlService service = TemplateUrlServiceFactory.getForProfile(profile);
+                if (service != null && service.isLoaded()) {
+                    String search = service.getUrlForSearchQuery(text);
+                    if (!TextUtils.isEmpty(search)) return search;
+                }
+            }
+        } catch (Exception e) {
+            logi("typed search", e.getMessage());
+        }
+        return "https://www.google.com/search?q=" + Uri.encode(text);
+    }
+
+    private static boolean looksLikeUrl(String text) {
+        if (text.startsWith("http://") || text.startsWith("https://")
+                || text.startsWith("chrome://") || text.startsWith("chrome-native://")
+                || text.startsWith("about:") || text.startsWith("file:")) {
+            return true;
+        }
+        if (text.indexOf(' ') >= 0 || text.indexOf('\n') >= 0) return false;
+        if (text.startsWith("localhost") || text.startsWith("127.")) return true;
+        int slash = text.indexOf('/');
+        String host = slash >= 0 ? text.substring(0, slash) : text;
+        int colon = host.indexOf(':');
+        if (colon >= 0) host = host.substring(0, colon);
+        return host.indexOf('.') > 0 && !host.endsWith(".");
+    }
+
     /** 对话框申请麦克风：和网页权限走同一条系统弹窗。 */
     public static @Nullable WindowAndroid windowAndroid() {
         ChromeTabbedActivity activity = sActivity;
@@ -3075,24 +3421,27 @@ public final class LemurXConsoleShell {
         }
     }
 
-    /** 当前前台是不是正盖着附件预览、设置抽屉，或者 Agent（返回键要先收它们）。 */
+    /** 当前前台是不是正盖着附件预览、设置抽屉、社区，或者 Agent（返回键要先收它们）。 */
     private static boolean overlayVisible() {
         if (MusePage.previewOpen()) return true;
         if (MusePage.drawerOpen()) return true;
         if (MusePage.filesOpen()) return true;
+        if (MusePage.archiveOpen()) return true;
         if (MusePage.computerOpen()) return true;
+        if (MusePage.communityOpen()) return true;
         return sOverlayAttached != null && sOverlayHost != null
                 && sOverlayHost.getVisibility() == View.VISIBLE;
     }
 
-    /** 返回键：先收附件预览，再收设置抽屉，再收发帖页，再收盖在网页上的 Agent。 */
+    /** 返回键：先收附件预览，再收设置抽屉，再收盖层。从侧边栏点进去的盖层，关掉后抽屉回到打开的状态。 */
     private static boolean consumeBack() {
+        if (LemurXWelcome.consumeBack()) return true;
         if (MusePage.closePreview()) return true;
         if (MusePage.closeDrawer()) return true;
-        if (MusePage.closeComputer()) return true;
+        if (MusePage.backFromComputer()) return true;
         if (MusePage.closeFiles()) return true;
-        if (MusePage.closeCommunityCompose()) return true;
-        if (MusePage.closeCommunity()) return true;
+        if (MusePage.backFromArchive()) return true;
+        if (MusePage.backFromCommunity()) return true;
         if (!overlayVisible()) return false;
         ChromeTabbedActivity activity = sActivity;
         if (activity == null) return false;
@@ -3205,14 +3554,17 @@ public final class LemurXConsoleShell {
         MusePage page = tab != null ? sOverlays.get(tab.getId()) : null;
         if (page == null) {
             if (sOverlayAttached != null || host.getVisibility() != View.GONE) {
+                rememberAttachedChat();
                 detachOverlayView();
                 host.setVisibility(View.GONE);
+                concealCompositorForIme(false);
                 // 没有内置 handler 在这一刻改状态，要自己告诉返回键管理器重新算一遍。
                 BackPressManager.lemurXConsoleStateChanged();
             }
             return;
         }
         if (sOverlayAttached != page) {
+            rememberAttachedChat();
             detachOverlayView();
             View view = page.getView();
             if (view != null) {
@@ -3236,6 +3588,10 @@ public final class LemurXConsoleShell {
             hideProgress();
             BackPressManager.lemurXConsoleStateChanged();
         }
+        host.post(
+                () -> {
+                    if (sOverlayHost == host) rememberAttachedChat();
+                });
     }
 
     /** 覆盖层底部留出软键盘的高度；insets 为 null 时用窗口当前的那份。 */
@@ -3250,6 +3606,28 @@ public final class LemurXConsoleShell {
             logi("applyOverlayIme", e.getMessage());
         }
         if (host.getPaddingBottom() != ime) host.setPadding(0, 0, 0, ime);
+        concealCompositorForIme(host.getVisibility() == View.VISIBLE && ime > 0);
+    }
+
+    /**
+     * 对话盖在网页上时，键盘一打开网页合成层会跟着视口往上挪，从垫高的那一截里露出来。
+     * 键盘开着就先把合成层藏住，合上再放回来。对话本身不在这一层里。
+     */
+    private static void concealCompositorForIme(boolean conceal) {
+        CompositorViewHolder holder = compositor();
+        if (holder == null) {
+            sCompositorHiddenForIme = false;
+            return;
+        }
+        if (conceal) {
+            if (sCompositorHiddenForIme) return;
+            sCompositorHiddenForIme = true;
+            holder.setVisibility(View.INVISIBLE);
+            return;
+        }
+        if (!sCompositorHiddenForIme) return;
+        sCompositorHiddenForIme = false;
+        holder.setVisibility(View.VISIBLE);
     }
 
     private static void detachOverlayView() {

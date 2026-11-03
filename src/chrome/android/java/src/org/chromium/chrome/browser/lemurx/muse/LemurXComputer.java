@@ -7,10 +7,12 @@ package org.chromium.chrome.browser.lemurx.muse;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Typeface;
+import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -33,11 +35,14 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 用户自己的电脑。Aero 不提供云主机。这一页登录 Tailscale 之后，这个账号就是网络里的一台终端，
- * 下面列出同一账号的机器。对话里的 {@code use_own_computer} 在已经组好的网络里执行。
+ * 用户自己的电脑。Aero 不提供云主机。账号共享一台 Tailscale 节点：任一已登录设备交
+ * joinToken 即可让节点上线，后交 key 的设备不会顶掉已在线的节点。
  *
  * <p>Wave 4：命令全文输出只留本机（{@link LemurXVault}）；服务端 own-computer-runs 只有
- * metadata。Tailscale master auth key 也只进本机 vault，交给云端的是一次性 joinToken。
+ * metadata。交给云端的是一次性 joinToken，用完即丢。
+ *
+ * <p>Wave 5：节点离线时服务端自动重置 statedir；本页 inline 展示离线并提供「让 Aero 进去」
+ * 重新交 key，不自动弹窗。电脑 :8770 的 deviceToken 按账号共享，换机不覆盖。
  */
 @NullMarked
 final class LemurXComputer {
@@ -370,7 +375,55 @@ final class LemurXComputer {
         return value == null ? "" : value;
     }
 
-    /** 只存在这部手机上。脚本里那一把钥匙和它相同，请求头带上，电脑才执行。 */
+    /** 对话里当前要操作的对象。本机浏览器，或某台已经被控制的电脑地址。 */
+    static final String TARGET_BROWSER = "browser";
+
+    /**
+     * 对话打开时默认是本机浏览器。电脑页记下的那台机器只决定命令打到哪里，
+     * 不会自动变成这里的选中项。上一版误把那台机器当成默认，进来时清一次。
+     */
+    static String operateTarget(Context context) {
+        SharedPreferences stored = prefs(context);
+        if (!stored.getBoolean("operate_defaults_browser", false)) {
+            stored.edit()
+                    .putString("operate", TARGET_BROWSER)
+                    .putBoolean("operate_defaults_browser", true)
+                    .apply();
+            return TARGET_BROWSER;
+        }
+        String value = stored.getString("operate", TARGET_BROWSER);
+        return value == null || value.isEmpty() ? TARGET_BROWSER : value;
+    }
+
+    /**
+     * 这台是不是命令真正打过去的电脑。网上别的节点（手机、别的机器）不算。
+     * 地址可以是 IP、主机名，或带尾巴的 DNS 名。
+     */
+    static boolean isControlledComputer(JSONObject device, String host) {
+        if (device == null || device.optBoolean("self", false)) return false;
+        if (host == null) return false;
+        String want = host.trim();
+        if (want.isEmpty()) return false;
+        String ip = device.optString("ip", "");
+        if (ip.isEmpty()) return false;
+        String name = device.optString("name", "");
+        String dns = device.optString("dns", "");
+        if (want.equalsIgnoreCase(ip) || want.equalsIgnoreCase(name) || want.equalsIgnoreCase(dns)) {
+            return true;
+        }
+        String lower = want.toLowerCase(Locale.US);
+        return dns.toLowerCase(Locale.US).startsWith(lower + ".");
+    }
+
+    static void saveOperateTarget(Context context, String target) {
+        String cleaned = target == null || target.isEmpty() ? TARGET_BROWSER : target;
+        prefs(context).edit().putString("operate", cleaned).apply();
+    }
+
+    /**
+     * 账号共享的电脑 :8770 Bearer。本机没有时才生成；服务端若已有账号 token，会通过
+     * join/host 响应写回 {@link #saveToken}，后到的手机不得覆盖服务端那一把。
+     */
     static String token(Context context) {
         SharedPreferences prefs = prefs(context);
         String current = prefs.getString("token", "");
@@ -390,13 +443,29 @@ final class LemurXComputer {
         prefs(context).edit().putString("host", host).apply();
     }
 
-    /** 这一页只负责登录和列出机器。命令由对话在已经组好的网络里执行。 */
+    /** 同步服务端返回的账号级 deviceToken，使各手机脚本钥匙一致。 */
+    static void saveToken(Context context, String token) {
+        if (token == null || token.length() < 8) return;
+        prefs(context).edit().putString("token", token).apply();
+    }
+
+    /**
+     * 登录 / 列出机器 / 离线时 inline 交 joinToken。命令由对话在已经组好的网络里执行。
+     * 不自动弹窗；用户点「让 Aero 进去」才交 key。
+     */
     static final class Page extends ScrollView {
         private final TextView mLogin;
         private final ImageView mLoginIcon;
+        private final LinearLayout mJoin;
+        private final TextView mJoinHint;
+        private final EditText mKey;
+        private final EditText mHost;
+        private final TextView mHand;
         private final LinearLayout mDevices;
         private boolean mAwaitingLogin;
-        private final Runnable mPollDevices = this::loadDevices;
+        private boolean mNeedsJoin;
+        private @Nullable String mStatusHost;
+        private final Runnable mPollDevices = this::refresh;
         private final TextView mStatus;
 
         Page(Context context) {
@@ -437,6 +506,52 @@ final class LemurXComputer {
             });
             column.addView(login, gap(context));
 
+            mJoin = new LinearLayout(context);
+            mJoin.setOrientation(LinearLayout.VERTICAL);
+            int joinPad = MusePage.dp(context, 12);
+            mJoin.setPadding(joinPad, joinPad, joinPad, joinPad);
+            mJoin.setBackground(MusePage.rounded(MusePage.surface(context), 12, context));
+            mJoinHint = body(context, context.getString(R.string.lemurx_muse_computer_needs_join));
+            mJoin.addView(mJoinHint);
+            TextView keyHint = body(context, context.getString(R.string.lemurx_muse_computer_key_hint));
+            mJoin.addView(keyHint, gap(context));
+            mKey = new EditText(context);
+            mKey.setHint(R.string.lemurx_muse_computer_key);
+            mKey.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+            mKey.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            mKey.setTextColor(MusePage.text(context));
+            mKey.setHintTextColor(MusePage.muted(context));
+            mJoin.addView(mKey, gap(context));
+            mHost = new EditText(context);
+            mHost.setHint(R.string.lemurx_muse_computer_host);
+            mHost.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+            mHost.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            mHost.setTextColor(MusePage.text(context));
+            mHost.setHintTextColor(MusePage.muted(context));
+            String known = host(context);
+            if (!known.isEmpty()) mHost.setText(known);
+            mJoin.addView(mHost, gap(context));
+            LinearLayout hand = new LinearLayout(context);
+            hand.setOrientation(LinearLayout.HORIZONTAL);
+            hand.setGravity(Gravity.CENTER);
+            hand.setPadding(inset, inset, inset, inset);
+            hand.setBackground(MusePage.rounded(MusePage.accent(context), 14, context));
+            hand.setClickable(true);
+            hand.setFocusable(true);
+            mHand = new TextView(context);
+            mHand.setText(R.string.lemurx_muse_computer_hand);
+            mHand.setTextColor(MusePage.onAccent(context));
+            mHand.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            mHand.setTypeface(Typeface.DEFAULT_BOLD);
+            hand.addView(mHand);
+            hand.setOnClickListener(v -> {
+                LemurXHaptics.tick(v);
+                handOver();
+            });
+            mJoin.addView(hand, gap(context));
+            mJoin.setVisibility(View.GONE);
+            column.addView(mJoin, gap(context));
+
             mDevices = new LinearLayout(context);
             mDevices.setOrientation(LinearLayout.VERTICAL);
             column.addView(mDevices, gap(context));
@@ -447,7 +562,7 @@ final class LemurXComputer {
 
             addView(column, new LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            post(this::loadDevices);
+            post(this::refresh);
         }
 
         @Override
@@ -475,6 +590,8 @@ final class LemurXComputer {
                 String url = body.optString("authUrl", "");
                 if (body.optBoolean("joined", false)) {
                     mAwaitingLogin = false;
+                    mNeedsJoin = false;
+                    showJoin(false);
                     paintLogin(true);
                     return;
                 }
@@ -487,8 +604,9 @@ final class LemurXComputer {
                     mAwaitingLogin = true;
                     mLogin.setText(R.string.lemurx_muse_computer_waiting);
                     status("");
-                    // 登录页是 Aero 的标签。先把这一层让开，登完再回到机器列表。
+                    // 登录页是 Aero 的标签。先把这一层让开，登完再回到机器列表。这是往前走，不把侧边栏再打开。
                     MusePage.closeComputer();
+                    MusePage.dropDrawerReturn();
                     removeCallbacks(mPollDevices);
                     postDelayed(mPollDevices, 2000);
                     return;
@@ -507,6 +625,56 @@ final class LemurXComputer {
                     : R.drawable.lemurx_muse_ic_login);
         }
 
+        private void showJoin(boolean show) {
+            mJoin.setVisibility(show ? View.VISIBLE : View.GONE);
+            if (show) {
+                mJoinHint.setText(R.string.lemurx_muse_computer_needs_join);
+                String known = host(getContext());
+                if (known.isEmpty() && mStatusHost != null && !mStatusHost.isEmpty()) {
+                    known = mStatusHost;
+                }
+                if (!known.isEmpty() && (mHost.getText() == null || mHost.getText().length() == 0)) {
+                    mHost.setText(known);
+                }
+                boolean needHost = known.isEmpty();
+                mHost.setVisibility(needHost ? View.VISIBLE : View.GONE);
+            }
+        }
+
+        /** 账号级状态 + 设备列表；离线时展示 inline 交 key，不弹窗。 */
+        private void refresh() {
+            if (!isAttachedToWindow()) return;
+            MuseApi.get().get("/api/tailnet", (value, error) -> {
+                if (!isAttachedToWindow()) return;
+                if (error != null || !(value instanceof JSONObject)) {
+                    loadDevices();
+                    return;
+                }
+                JSONObject body = (JSONObject) value;
+                boolean joined = body.optBoolean("joined", false);
+                boolean needsJoin = body.optBoolean("needsJoin", !joined);
+                // 旧服务不带 online。不能把缺字段当成节点掉线，否则外网一重启就要求重新登录。
+                boolean online = body.has("online") ? body.optBoolean("online") : joined;
+                String statusHost = body.optString("host", "");
+                if (!statusHost.isEmpty()) {
+                    mStatusHost = statusHost;
+                    if (host(getContext()).isEmpty()) saveHost(getContext(), statusHost);
+                }
+                mNeedsJoin = needsJoin || !joined || !online;
+                if (mNeedsJoin) {
+                    paintLogin(false);
+                    showJoin(true);
+                    if (!online && joined) {
+                        status(getContext().getString(R.string.lemurx_muse_computer_node_offline));
+                    }
+                } else {
+                    showJoin(false);
+                    paintLogin(true);
+                }
+                loadDevices();
+            });
+        }
+
         private void loadDevices() {
             if (!isAttachedToWindow()) return;
             MuseApi.get().get("/api/tailnet/devices", (value, error) -> {
@@ -516,10 +684,18 @@ final class LemurXComputer {
                 }
                 JSONObject body = (JSONObject) value;
                 boolean joined = body.optBoolean("joined", false);
-                paintDevices(body.optJSONArray("devices"), joined);
-                if (joined) {
+                boolean needsJoin = body.optBoolean("needsJoin", false);
+                if (needsJoin) {
+                    mNeedsJoin = true;
+                    showJoin(true);
+                    paintLogin(false);
+                }
+                paintDevices(body.optJSONArray("devices"), joined && !needsJoin);
+                if (joined && !needsJoin) {
                     boolean waiting = mAwaitingLogin;
                     mAwaitingLogin = false;
+                    mNeedsJoin = false;
+                    showJoin(false);
                     paintLogin(true);
                     if (waiting) MusePage.showComputer();
                     return;
@@ -530,25 +706,38 @@ final class LemurXComputer {
 
         private void paintDevices(@Nullable JSONArray devices, boolean joined) {
             mDevices.removeAllViews();
-            if (!joined || devices == null || devices.length() == 0) return;
+            if (!joined || devices == null) return;
             Context context = getContext();
+            if (devices.length() == 0) {
+                mDevices.addView(body(context, context.getString(R.string.lemurx_muse_computer_none)));
+                return;
+            }
+            boolean selfOffline = false;
+            String controlled = host(context);
+            boolean shown = false;
             for (int i = 0; i < devices.length(); i++) {
                 JSONObject device = devices.optJSONObject(i);
                 if (device == null) continue;
                 boolean self = device.optBoolean("self", false);
-                String name = device.optString("name", "");
-                String ip = device.optString("ip", "");
                 boolean online = device.optBoolean("online", false);
+                // Aero 自己的节点只用来判断网络还在不在，不占这一页。
+                if (self) {
+                    if (!online) selfOffline = true;
+                    continue;
+                }
+                // 网上其他设备也不列。这一页只放已经接上、命令可以打过去的那台电脑。
+                if (!isControlledComputer(device, controlled)) continue;
+                shown = true;
+                String name = device.optString("name", "");
                 LinearLayout row = new LinearLayout(context);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 int inset = MusePage.dp(context, 12);
                 row.setPadding(inset, inset, inset, inset);
-                int ink = self ? MusePage.onAccent(context) : MusePage.text(context);
-                row.setBackground(MusePage.rounded(
-                        self ? MusePage.accent(context) : MusePage.surface(context), 12, context));
+                int ink = MusePage.text(context);
+                row.setBackground(MusePage.rounded(MusePage.surface(context), 12, context));
                 ImageView icon = new ImageView(context);
-                icon.setImageResource(deviceIcon(device.optString("os", ""), self));
+                icon.setImageResource(deviceIcon(device.optString("os", ""), false));
                 icon.setColorFilter(ink);
                 int size = MusePage.dp(context, 28);
                 LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(size, size);
@@ -558,24 +747,25 @@ final class LemurXComputer {
                 String state = context.getString(online
                         ? R.string.lemurx_muse_computer_online
                         : R.string.lemurx_muse_computer_offline);
-                String who = self ? context.getString(R.string.lemurx_muse_computer_self) : ip;
-                label.setText(name + "\n" + state + " · " + who);
+                label.setText(name + "\n" + state);
                 label.setTextColor(ink);
                 label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
                 row.addView(label, new LinearLayout.LayoutParams(
                         0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                if (!self && !ip.isEmpty()) {
-                    row.setOnClickListener(v -> {
-                        LemurXHaptics.tick(v);
-                        chooseDevice(ip, name);
-                    });
-                }
                 mDevices.addView(row, gap(context));
+            }
+            if (!shown) {
+                mDevices.addView(body(context, context.getString(R.string.lemurx_muse_computer_none)));
+            }
+            if (selfOffline) {
+                mNeedsJoin = true;
+                showJoin(true);
+                status(context.getString(R.string.lemurx_muse_computer_node_offline));
             }
         }
 
-        /** 机器种类：这个账号、手机、电脑。 */
-        private static int deviceIcon(String os, boolean self) {
+    /** 机器种类：这个账号、手机、电脑。对话里的按钮也用这一套。 */
+    static int deviceIcon(String os, boolean self) {
             if (self) return R.drawable.lemurx_muse_ic_server;
             String kind = os.toLowerCase(Locale.US);
             if (kind.contains("android") || kind.contains("ios") || kind.contains("iphone")) {
@@ -584,19 +774,51 @@ final class LemurXComputer {
             return R.drawable.lemurx_muse_ic_monitor;
         }
 
-        private void chooseDevice(String ip, String name) {
+        /** 一次性 joinToken；成功后清输入框，不落库、不打日志。 */
+        private void handOver() {
             Context context = getContext();
-            saveHost(context, ip);
-            status(context.getString(R.string.lemurx_muse_computer_picked, name));
-            JSONObject body = new JSONObject();
-            try {
-                body.put("host", ip);
-                body.put("token", token(context));
-            } catch (org.json.JSONException e) {
+            String key = mKey.getText() == null ? "" : mKey.getText().toString().trim();
+            if (!key.startsWith("tskey-auth-") || key.length() < 20) {
+                status(context.getString(R.string.lemurx_muse_computer_bad_key));
                 return;
             }
-            MuseApi.get().send("POST", "/api/tailnet/host", body, (value, error) -> {
-                if (error != null) status(error);
+            String rawHost = mHost.getText() == null ? "" : mHost.getText().toString();
+            if (rawHost.isEmpty()) rawHost = host(context);
+            if (rawHost.isEmpty() && mStatusHost != null) rawHost = mStatusHost;
+            String cleaned = normalize(rawHost);
+            if (!allowed(cleaned)) {
+                status(context.getString(R.string.lemurx_muse_computer_bad));
+                mHost.setVisibility(View.VISIBLE);
+                return;
+            }
+            mHand.setText(R.string.lemurx_muse_computer_handing);
+            JSONObject body = new JSONObject();
+            try {
+                body.put("joinToken", key);
+                body.put("host", cleaned);
+                body.put("token", token(context));
+            } catch (org.json.JSONException e) {
+                mHand.setText(R.string.lemurx_muse_computer_hand);
+                return;
+            }
+            MuseApi.get().send("POST", "/api/tailnet", body, (value, error) -> {
+                mHand.setText(R.string.lemurx_muse_computer_hand);
+                if (error != null || !(value instanceof JSONObject)) {
+                    status(error == null
+                            ? context.getString(R.string.lemurx_muse_computer_hand_fail)
+                            : error);
+                    return;
+                }
+                JSONObject res = (JSONObject) value;
+                mKey.setText("");
+                saveHost(context, cleaned);
+                String accountToken = res.optString("deviceToken", "");
+                if (!accountToken.isEmpty()) saveToken(context, accountToken);
+                mNeedsJoin = false;
+                showJoin(false);
+                paintLogin(true);
+                status(context.getString(R.string.lemurx_muse_computer_hand_ok));
+                refresh();
             });
         }
 

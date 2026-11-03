@@ -33,9 +33,8 @@ public class LemurXChromeHost {
 
     /** 供 ChromeTabCreator 调用：null 表示用原生新标签页。 */
     public static @Nullable String newTabUrlOverride() {
-        // LemurX 控制台外壳启用时，新标签页就是一轮原生对话（chrome-native://lemurx/chat/<新 id>，
-        // 见 LemurXConsoleShell.launchUrl），冷启动第一个标签也一样；外壳关掉才用这里设的地址 /
-        // 原生 NTP。
+        // 外壳启用时，新标签页就是 Agent 界面（chrome-native://lemurx/chat/<新 id>，
+        // 见 LemurXConsoleShell.launchUrl），没登录也一样；外壳关掉才用这里设的地址 / 原生 NTP。
         if (LemurXConsoleShell.isEnabled()) {
             return LemurXConsoleShell.launchUrl();
         }

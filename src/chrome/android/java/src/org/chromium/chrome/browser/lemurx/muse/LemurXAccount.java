@@ -29,6 +29,7 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -197,6 +198,49 @@ public final class LemurXAccount {
 
     public static boolean isSignedIn() {
         return !TextUtils.isEmpty(prefs().getString(KEY_TOKEN, null));
+    }
+
+    /**
+     * 本机档案的分桶。已登录用账号 id，未登录用 local。数据只写在这台设备上，换账号就换一份。
+     */
+    public static String localBucket() {
+        String id = accountId();
+        if (id == null) return "local";
+        StringBuilder safe = new StringBuilder();
+        for (int i = 0; i < id.length() && safe.length() < 80; i++) {
+            char c = id.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                    || c == '-' || c == '_') {
+                safe.append(c);
+            }
+        }
+        return safe.length() == 0 ? "local" : safe.toString();
+    }
+
+    /**
+     * {@code folder/name} 是升级前的那一份。已登录且这个账号还没有自己的文件时，把那一份认过来。
+     * 未登录的读写进 local，不动那一份，以免登进去之前被别的身份拿走。
+     */
+    public static File localFile(Context context, String folder, String name) {
+        File root = context.getFilesDir();
+        String bucket = localBucket();
+        File current = new File(new File(new File(root, folder), bucket), name);
+        if ("local".equals(bucket)) return current;
+        File legacy = new File(new File(root, folder), name);
+        if (current.isFile() || !legacy.isFile()) return current;
+        File parent = current.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return current;
+        if (legacy.renameTo(current)) return current;
+        try (FileInputStream in = new FileInputStream(legacy);
+                FileOutputStream out = new FileOutputStream(current)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            legacy.delete();
+        } catch (IOException e) {
+            Log.i(TAG, "adopt %s: %s", name, e.getMessage());
+        }
+        return current;
     }
 
     /** 网关用户 id，给智能体当登录主人。未登录为 null。 */

@@ -1,15 +1,15 @@
 diff --git a/chrome/android/chrome_java_sources.gni b/chrome/android/chrome_java_sources.gni
-index 1a541dcb25..2f3b8052c4 100644
+index 1a541dcb25..a06f937395 100644
 --- a/chrome/android/chrome_java_sources.gni
 +++ b/chrome/android/chrome_java_sources.gni
-@@ -22,6 +22,38 @@ chrome_java_sources = [
+@@ -22,6 +22,54 @@ chrome_java_sources = [
    "java/src/org/chromium/chrome/browser/ChromeStrictMode.java",
    "java/src/org/chromium/chrome/browser/ChromeStringConstants.java",
    "java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java",
-+  "java/src/org/chromium/chrome/browser/lemurx/LemurXAppUpdate.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXChromeHost.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXConsoleShell.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXDiscoverStream.java",
++  "java/src/org/chromium/chrome/browser/lemurx/LemurXAppUpdate.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXHaptics.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXKillSwitch.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/agent/LemurXAgentKeyboard.java",
@@ -30,16 +30,23 @@ index 1a541dcb25..2f3b8052c4 100644
 +  "java/src/org/chromium/chrome/browser/lemurx/favorites/LemurXFavoritesStore.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/favorites/LemurXMultiCircleView.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXAccount.java",
-+  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXComputer.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXArchive.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXDataFragment.java",
-+  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXDocument.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXComputer.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXVault.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXFiles.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXDocument.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXGoogleSignIn.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXBilling.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXBillingFragment.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXBillingView.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXSettingsFragment.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXSignIn.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXWelcome.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXBootCover.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXSettingsIcons.java",
-+  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXVault.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/MuseApi.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/MuseArchiveView.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/MuseChatView.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/MuseCommunityView.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/MuseDataView.java",

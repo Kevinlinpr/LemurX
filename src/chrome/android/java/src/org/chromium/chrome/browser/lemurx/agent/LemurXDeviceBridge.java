@@ -33,6 +33,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -306,6 +307,12 @@ public final class LemurXDeviceBridge {
     /** 这个 Agent 正在操作的那一个标签。跳转都落在这里，页面自己弹出的标签会被折回来。 */
     private static int sAnchorTab = Tab.INVALID_TAB_ID;
     private static volatile boolean sHoldInTab;
+    /** 页面上出现验证码：先停手，等用户在对话里把验证码发回来。 */
+    private static volatile boolean sCaptchaHold;
+    /** 当前这一页的地址。用户答过之后，同一地址不再打断。 */
+    private static @Nullable String sCaptchaUrl;
+    /** 用户已经在对话里答过的那一页。换了地址才重新检查。 */
+    private static @Nullable String sCaptchaPassedUrl;
     private static boolean sFolding;
     private static @Nullable TabModelSelector sWatchedTabs;
     /** 正在向服务端登记这台手机，避免看门狗每 3 秒再发一次。 */
@@ -346,8 +353,17 @@ public final class LemurXDeviceBridge {
     private static boolean sFieldChecked;
     private static boolean sFieldMatched;
     private static @Nullable String sFieldValue;
+    /** 本机刚按密码库填过的引用。下一次回执带上它，然后清掉。口令不放这里。 */
+    private static @Nullable String sLoginRef;
     private static final Runnable sHideKeyboard = LemurXDeviceBridge::hideKeyboardNow;
     private static int sBannerTab = Tab.INVALID_TAB_ID;
+    /** 这一轮在本机浏览器上的步骤。对话和网页上的半透明日志读的是同一份。 */
+    private static final ArrayList<String> sActionLog = new ArrayList<>();
+    /** 网页上的操作日志默认收起，只留一行，用户点开才展开。 */
+    private static boolean sLogOpen;
+    private static final ArrayList<Runnable> sActionListeners = new ArrayList<>();
+    /** keepLockOnTop 抬锁时会再次触发层级监听，用它打断来回把底栏抬上来。 */
+    private static boolean sLiftingLock;
 
     private LemurXDeviceBridge() {}
 
@@ -1067,15 +1083,18 @@ public final class LemurXDeviceBridge {
         session.updatedAt = nowIso();
         sessions.put(id, session);
         saveSessions();
-        showBanner(tab.id, ContextUtils.getApplicationContext().getString(
-                R.string.lemurx_agent_opening));
+        holdPage(tab.id, ContextUtils.getApplicationContext().getString(
+                R.string.lemurx_agent_log_open, briefUrl(url)));
         waitUntilSettled(tab.id);
-        showBanner(tab.id, ContextUtils.getApplicationContext().getString(
-                R.string.lemurx_agent_working));
         TabInfo after = onUi(() -> {
             Tab t = findTab(tab.id);
             return t == null ? null : TabInfo.of(t);
         });
+        String shownTitle = after != null && !TextUtils.isEmpty(after.title)
+                ? after.title : briefUrl(url);
+        String shownUrl = after != null && !TextUtils.isEmpty(after.url) ? after.url : url;
+        note(ContextUtils.getApplicationContext().getString(
+                R.string.lemurx_agent_log_open_done, clipLine(shownTitle, 40), briefUrl(shownUrl)));
         if (after != null) {
             session.url = TextUtils.isEmpty(after.url) ? session.url : after.url;
             session.title = after.title;
@@ -1192,12 +1211,15 @@ public final class LemurXDeviceBridge {
     }
 
     private static JSONObject readSession(String id) throws SessionError {
+        requireNoCaptcha();
         Session s = getSession(id);
         TabInfo tab = useContent(s);
         if (tab == null) {
             throw new SessionError(502, "READ_FAILED",
                     "The page did not return any text (still loading, or not an http page).");
         }
+        holdPage(tab.id, ContextUtils.getApplicationContext().getString(
+                R.string.lemurx_agent_log_read, pageName(tab.title, tab.url)));
         waitUntilSettled(tab.id);
         // 先看对话框：JS alert()/confirm()/prompt() 把渲染进程主线程卡住了，无障碍树快照只会等到
         // 超时，所以有模态对话框时不拍快照，正文留空、把对话框描述出来即可。
@@ -1217,6 +1239,19 @@ public final class LemurXDeviceBridge {
             if (!TextUtils.isEmpty(snap.url)) s.url = snap.url;
             if (!TextUtils.isEmpty(snap.title)) s.title = snap.title;
         }
+        Context readContext = ContextUtils.getApplicationContext();
+        if (rendererBlocked && dialog != null) {
+            String message = dialog.optString("message", dialog.optString("title", ""));
+            if (!message.isEmpty()) {
+                note(readContext.getString(
+                        R.string.lemurx_agent_log_read_dialog, clipLine(message, 80)));
+            }
+        } else if (snap != null) {
+            String readTitle = !TextUtils.isEmpty(snap.title) ? snap.title : pageName(s.title, s.url);
+            note(readContext.getString(
+                    R.string.lemurx_agent_log_read_done,
+                    clipLine(readTitle, 40), excerpt(snap.text)));
+        }
         s.status = "active";
         s.updatedAt = nowIso();
         saveSessions();
@@ -1235,26 +1270,37 @@ public final class LemurXDeviceBridge {
                 out.put("pageScale", Math.round(snap.pageScale * 100) / 100.0);
             }
             if (dialog != null) out.put("dialog", dialog);
+            attachCredentialHint(out, tab.id, out.optString("url", s.url), hasPasswordField(snap));
         } catch (Exception ignored) {
             // 键是常量
         }
         // 阅读停顿：真人读完一屏字再动手，正文越长停得越久（下一条输入前生效）。
         int len = snap == null ? 0 : snap.text.length();
         sDwellUntil = SystemClock.uptimeMillis() + (long) clamp(len / 50.0, 400, 2_500);
+        considerCaptcha(tab.id, s.url, s.title, snap);
         return out;
     }
 
     /** GET /sessions/:id/elements：可操作元素清单（1280x800 画布坐标）。 */
     private static JSONObject elementsSession(String id) throws SessionError {
+        requireNoCaptcha();
         Session s = getSession(id);
         TabInfo tab = useContent(s);
         if (tab == null) {
             throw new SessionError(502, "READ_FAILED", "The page is not ready.");
         }
+        holdPage(tab.id, ContextUtils.getApplicationContext().getString(
+                R.string.lemurx_agent_log_scan, pageName(tab.title, tab.url)));
         LemurXPage.Snapshot snap = snapshot(tab.id);
         if (snap == null) {
             throw new SessionError(502, "READ_FAILED", "The page is not ready.");
         }
+        String examples = exampleNames(snap);
+        Context scanContext = ContextUtils.getApplicationContext();
+        note(examples.isEmpty()
+                ? scanContext.getString(R.string.lemurx_agent_log_scan_unnamed, snap.elements.size())
+                : scanContext.getString(
+                        R.string.lemurx_agent_log_scan_done, snap.elements.size(), examples));
         JSONObject out = new JSONObject();
         try {
             out.put("url", snap.url);
@@ -1264,20 +1310,26 @@ public final class LemurXDeviceBridge {
             out.put("pageScale", Math.round(snap.pageScale * 100) / 100.0);
             JSONObject dialog = dialog(tab.id);
             if (dialog != null) out.put("dialog", dialog);
+            attachCredentialHint(out, tab.id, snap.url, hasPasswordField(snap));
         } catch (Exception ignored) {
             // 键是常量
         }
+        considerCaptcha(tab.id, snap.url, snap.title, snap);
         return out;
     }
 
     // ---------------------------------------------------------------- 截图
 
     private static String screenshotSession(String id) throws SessionError {
+        requireNoCaptcha();
         Session s = getSession(id);
         TabInfo tab = useContent(s);
         if (tab == null) {
             throw new SessionError(502, "SCREENSHOT_FAILED", "Aero could not capture the tab.");
         }
+        holdPage(tab.id, ContextUtils.getApplicationContext().getString(
+                R.string.lemurx_agent_log_look, pageName(tab.title, tab.url)));
+        considerCaptcha(tab.id, tab.url, tab.title, null);
         // JPEG：接管控制台每 2 秒拉一帧，PNG 在手机分辨率下 base64 后会有几 MB。
         // 合成器拷贝输出：只有网页视口本身，不含 agent 自己的手指 / 键盘 / 横幅；页面无感。
         String data = captureJpeg(tab.id, 70);
@@ -1324,6 +1376,20 @@ public final class LemurXDeviceBridge {
             throw new SessionError(502, "INPUT_FAILED", "The page is not ready for input.");
         }
         String kind = body.optString("type", "");
+        if (!"yield".equals(kind) && !"resume".equals(kind)) {
+            requireNoCaptcha();
+            String target = body.optString("name", "")
+                    + " "
+                    + body.optString("placeholder", "")
+                    + " "
+                    + body.optString("selector", "");
+            if (captchaToken(target, false)) {
+                considerCaptcha(tab.id, tab.url, tab.title, null);
+            }
+            // 先锁住整屏再动手，底栏和页面在接管之前都不能点。
+            // 对话框把页面上的原文写进这一步，点按钮之前用户能看到在回应哪一句。
+            holdPage(tab.id, "dialog".equals(kind) ? describeDialog(tab.id, body) : describeInput(body));
+        }
         if (!"yield".equals(kind)) {
             // 用户填完验证码之后 Agent 接着干：先收回页面，再按住系统键盘。
             if (sYielded) {
@@ -1403,21 +1469,48 @@ public final class LemurXDeviceBridge {
                 throw new SessionError(400, "INVALID_INPUT", "Unsupported browser input.");
             }
             pace();
+            LemurXPage.Element focusedField = null;
             if (body.has("target")) {
                 // 先把焦点点进目标输入框（已经聚焦就不再点）。
-                LemurXPage.Element e = focusTarget(tab.id, body.opt("target"));
-                resolved = LemurXPage.brief(e);
+                focusedField = focusTarget(tab.id, body.opt("target"));
+                resolved = LemurXPage.brief(focusedField);
             }
-            sFieldChecked = false;
-            sFieldMatched = false;
-            sFieldValue = null;
-            int r = typeText(tab.id, text);
-            if (r == TYPE_NO_FOCUS) {
-                hideKeyboard();
-                throw new SessionError(409, "NO_INPUT_FOCUS",
-                        "No text field is focused. Click the field first, then type.");
+            // 密码框：库里有账号就只按引用在本机填，云端传来的正文丢掉。库里没有才用这一次的输入，并且不回传。
+            if (isPasswordField(tab.id, body, focusedField)) {
+                redactSecretLog(text);
+                int saved = savedLoginKind(tab.id, body.optString("username", ""));
+                if (saved == LemurXPasswords.ONE || saved == LemurXPasswords.MANY) {
+                    fillSavedLogin(tab.id, body.optString("username", ""));
+                    ok = true;
+                } else {
+                    sFieldChecked = false;
+                    sFieldMatched = false;
+                    sFieldValue = null;
+                    int r = typeText(tab.id, text);
+                    if (r == TYPE_NO_FOCUS) {
+                        hideKeyboard();
+                        throw new SessionError(409, "NO_INPUT_FOCUS",
+                                "No text field is focused. Click the field first, then type.");
+                    }
+                    ok = r == TYPE_OK;
+                    sFieldChecked = false;
+                    sFieldValue = null;
+                }
+                sFieldChecked = false;
+                sFieldMatched = false;
+                sFieldValue = null;
+            } else {
+                sFieldChecked = false;
+                sFieldMatched = false;
+                sFieldValue = null;
+                int r = typeText(tab.id, text);
+                if (r == TYPE_NO_FOCUS) {
+                    hideKeyboard();
+                    throw new SessionError(409, "NO_INPUT_FOCUS",
+                            "No text field is focused. Click the field first, then type.");
+                }
+                ok = r == TYPE_OK;
             }
-            ok = r == TYPE_OK;
         } else if ("key".equals(kind) && body.has("key")) {
             String name = body.optString("key", "");
             if (!LemurXHumanInput.isKnownKey(name)) {
@@ -1485,6 +1578,22 @@ public final class LemurXDeviceBridge {
         s.status = "active";
         s.updatedAt = nowIso();
         saveSessions();
+        // 点中之后补一句真正点到的控件。请求里往往只有编号，名字要等页面认出来才有。
+        if ("click".equals(kind) && resolved != null) {
+            String phrase = targetPhrase(resolved);
+            if (!phrase.isEmpty()) {
+                note(ContextUtils.getApplicationContext().getString(
+                        R.string.lemurx_agent_log_clicked, phrase));
+            }
+        } else if ("text".equals(kind) && resolved != null
+                && !secretTarget(body.opt("target")) && !secretTarget(resolved)) {
+            String phrase = targetPhrase(resolved);
+            String typed = clipLine(body.optString("text", ""), 48);
+            if (!phrase.isEmpty() && !typed.isEmpty()) {
+                note(ContextUtils.getApplicationContext().getString(
+                        R.string.lemurx_agent_log_type, phrase, typed));
+            }
+        }
         showBanner(tab.id, ContextUtils.getApplicationContext().getString(
                 R.string.lemurx_agent_working));
         JSONObject view = s.view();
@@ -1492,8 +1601,15 @@ public final class LemurXDeviceBridge {
             if (resolved != null) view.put("target", resolved);
             if ("text".equals(kind) && sFieldChecked) {
                 view.put("fieldMatched", sFieldMatched);
-                // 对上了就不把内容再带回服务端。没对上才带回去，让模型改。
-                if (!sFieldMatched && sFieldValue != null) view.put("fieldValue", sFieldValue);
+                // 对上了就不把内容再带回服务端。没对上才带回去，让模型改。密码永远不带回。
+                if (!sFieldMatched && sFieldValue != null && !isPasswordField(tab.id, body, null)) {
+                    view.put("fieldValue", sFieldValue);
+                }
+            }
+            if (sLoginRef != null) {
+                view.put("ref", sLoginRef);
+                view.put("receipt", "filled on device from " + sLoginRef);
+                sLoginRef = null;
             }
             JSONObject dialog = dialog(tab.id);
             if (dialog != null) view.put("dialog", dialog);
@@ -1576,6 +1692,101 @@ public final class LemurXDeviceBridge {
         return e;
     }
 
+    /** 快照里有没有密码框。没有快照时不当成登录页。 */
+    private static boolean hasPasswordField(LemurXPage.@Nullable Snapshot snap) {
+        if (snap == null) return false;
+        for (LemurXPage.Element element : snap.elements) {
+            if ("password".equalsIgnoreCase(element.inputType)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 这一下是不是在填密码。云端只应拿到引用；真正的字由本机密码库填。
+     * 目标已经解析出来就看它的类型，否则看当前焦点。
+     */
+    private static boolean isPasswordField(
+            int tabId, JSONObject body, LemurXPage.@Nullable Element resolved) {
+        if (secretTarget(body.opt("target"))) return true;
+        if (resolved != null) return "password".equalsIgnoreCase(resolved.inputType);
+        if (body.has("target")) return false;
+        LemurXPage.Snapshot snap = snapshot(tabId);
+        LemurXPage.Element focused = snap == null ? null : snap.focused();
+        return focused != null && "password".equalsIgnoreCase(focused.inputType);
+    }
+
+    /** 这个标签页的密码库里有没有可用账号。NONE / ONE / MANY，不取出明文。 */
+    private static int savedLoginKind(int tabId, String username) {
+        String pageUrl = onUi(() -> {
+            Tab t = findTab(tabId);
+            if (t == null || t.getUrl() == null) return "";
+            return t.getUrl().getSpec();
+        });
+        Profile profile = onUi(() -> {
+            Tab t = findTab(tabId);
+            return t == null ? null : t.getProfile();
+        });
+        if (profile == null || pageUrl == null || pageUrl.isEmpty()) return LemurXPasswords.NONE;
+        return LemurXPasswords.lookup(profile, pageUrl, username == null ? "" : username).kind;
+    }
+
+    /** 操作记录里如果带上了密码正文，换成一句不含内容的话。 */
+    private static void redactSecretLog(@Nullable String secret) {
+        if (secret == null || secret.isEmpty() || sActionLog.isEmpty()) return;
+        String clipped = clipLine(secret, 48);
+        if (clipped.isEmpty()) return;
+        int last = sActionLog.size() - 1;
+        if (!sActionLog.get(last).contains(clipped)) return;
+        sActionLog.set(
+                last,
+                ContextUtils.getApplicationContext().getString(R.string.lemurx_agent_log_type_secret));
+        publishActionLog();
+    }
+
+    /**
+     * 告诉云端这个网站在本机有哪些账号引用。只有 ref、用户名和是否主要账号，没有口令。
+     * 填写必须走本机的 login，云端不能把密码再传回来。
+     */
+    private static void attachCredentialHint(
+            JSONObject out, int tabId, @Nullable String pageUrl, boolean passwordField) {
+        if (pageUrl == null || pageUrl.isEmpty()) return;
+        Profile profile = onUi(() -> {
+            Tab t = findTab(tabId);
+            return t == null ? null : t.getProfile();
+        });
+        if (profile == null) return;
+        java.util.List<LemurXPasswords.Ref> refs = LemurXPasswords.listRefs(profile, pageUrl);
+        try {
+            if (!refs.isEmpty()) {
+                JSONArray list = new JSONArray();
+                for (LemurXPasswords.Ref ref : refs) {
+                    JSONObject row = new JSONObject();
+                    row.put("ref", ref.ref);
+                    row.put("host", ref.host);
+                    row.put("username", ref.username);
+                    row.put("primary", ref.primary);
+                    list.put(row);
+                }
+                out.put("credentials", list);
+                out.put(
+                        "credentialHint",
+                        "Opaque refs for accounts saved on this phone. Fill with input "
+                                + "{\"type\":\"login\"} or {\"type\":\"login\",\"username\":\"...\"}. "
+                                + "The phone looks the password up and types it. Do not send, request, "
+                                + "or repeat the password.");
+                return;
+            }
+            if (passwordField) {
+                out.put(
+                        "credentialHint",
+                        "No Aero login is saved for this site. Do not send the password. "
+                                + "After a successful sign-in the phone asks to store it on device.");
+            }
+        } catch (Exception ignored) {
+            // 键是常量
+        }
+    }
+
     /** 当前页可填的不透明凭证引用。返回值绝无 password 字段。 */
     private static JSONObject listCredentialRefs(int tabId) throws SessionError {
         String pageUrl = onUi(() -> {
@@ -1600,6 +1811,7 @@ public final class LemurXDeviceBridge {
                 row.put("ref", ref.ref);
                 row.put("host", ref.host);
                 row.put("username", ref.username);
+                row.put("primary", ref.primary);
                 list.put(row);
             }
             view.put("credentials", list);
@@ -1709,10 +1921,10 @@ public final class LemurXDeviceBridge {
         }
         if (found.kind != LemurXPasswords.ONE || found.login == null) {
             throw new SessionError(404, "NO_SAVED_LOGIN",
-                    "No saved password for this site. Sign in once and accept the save prompt. "
-                            + "Aero keeps it in the same store as Chrome, on this phone.");
+                    "No saved Aero login for this site. Sign in once and accept the on-device save prompt.");
         }
         LemurXPasswords.Login login = found.login;
+        String filledRef = LemurXPasswords.refOf(LemurXPasswords.hostOf(pageUrl), login.username);
         try {
             LemurXPage.Snapshot snap = snapshot(tabId);
             if (snap == null) {
@@ -1759,6 +1971,7 @@ public final class LemurXDeviceBridge {
             if (typed != TYPE_OK) {
                 throw new SessionError(502, "INPUT_FAILED", "Could not type the saved password.");
             }
+            sLoginRef = filledRef;
         } finally {
             // 打字核对会把框里的字记下来给模型改。登录不能把密码带回服务端。
             sFieldValue = null;
@@ -2248,8 +2461,8 @@ public final class LemurXDeviceBridge {
         sWatchdog.postDelayed(sImeWatch, 200);
     }
 
-    /** Agent 锁着页面、且没有把填写权交给用户。 */
-    private static boolean isDriving() {
+    /** Agent 锁着页面、且没有把填写权交给用户。这时整屏包括底栏都不能点。 */
+    public static boolean isDriving() {
         View lock = sBanner;
         return lock != null && lock.getVisibility() == View.VISIBLE && !sYielded;
     }
@@ -2537,13 +2750,19 @@ public final class LemurXDeviceBridge {
         return lock != null && lock.getVisibility() == View.VISIBLE;
     }
 
-    /** 底栏 / 覆盖层把自己抬到最前之后，把锁和手指层再抬回去。 */
+    /** 底栏 / 覆盖层把自己抬到最前之后，把锁和手指层再抬回去。锁的高度压过底栏。 */
     public static void keepLockOnTop() {
         ThreadUtils.assertOnUiThread();
+        if (sLiftingLock) return;
         View lock = sBanner;
         if (lock == null || lock.getVisibility() != View.VISIBLE) return;
-        lock.bringToFront();
-        if (sOverlay != null) sOverlay.bringToFront();
+        sLiftingLock = true;
+        try {
+            lock.bringToFront();
+            if (sOverlay != null) sOverlay.bringToFront();
+        } finally {
+            sLiftingLock = false;
+        }
     }
 
     static boolean userActive() {
@@ -2787,7 +3006,337 @@ public final class LemurXDeviceBridge {
                         /* allowDialog= */ false);
     }
 
-    // ---------------------------------------------------------------- 接管胶囊 / 通知（UI 线程）
+    // ---------------------------------------------------------------- 接管胶囊 / 步骤日志（UI 线程）
+
+    /** 记下这一步，并锁住页面。对话里的日志和网页上的面板读同一条。 */
+    private static void holdPage(int tabId, String line) {
+        note(line);
+        showBanner(tabId, line);
+    }
+
+    private static void note(String line) {
+        if (line == null || line.isEmpty()) return;
+        ThreadUtils.runOnUiThread(() -> {
+            // 同一句连着出现（反复看同一页）不再往下堆，屏幕上仍停在这一步。
+            if (!sActionLog.isEmpty() && line.equals(sActionLog.get(sActionLog.size() - 1))) {
+                publishActionLog();
+                return;
+            }
+            sActionLog.add(line);
+            while (sActionLog.size() > 40) sActionLog.remove(0);
+            publishActionLog();
+        });
+    }
+
+    /** 新的一轮对话开始时清掉上一轮的步骤。 */
+    public static void clearActionLog() {
+        ThreadUtils.runOnUiThread(() -> {
+            sActionLog.clear();
+            publishActionLog();
+        });
+    }
+
+    public static void addActionListener(Runnable listener) {
+        if (listener == null || sActionListeners.contains(listener)) return;
+        sActionListeners.add(listener);
+    }
+
+    public static void removeActionListener(Runnable listener) {
+        sActionListeners.remove(listener);
+    }
+
+    public static ArrayList<String> actionLog() {
+        return new ArrayList<>(sActionLog);
+    }
+
+    private static void publishActionLog() {
+        ThreadUtils.assertOnUiThread();
+        paintActionLog();
+        for (Runnable listener : new ArrayList<>(sActionListeners)) {
+            try {
+                listener.run();
+            } catch (Exception ignored) {
+                // 对话视图拆掉了也不影响网页上的日志
+            }
+        }
+    }
+
+    private static void paintActionLog() {
+        ThreadUtils.assertOnUiThread();
+        View lock = sBanner;
+        if (lock == null) return;
+        LinearLayout box = lock.findViewWithTag("log");
+        if (box == null) return;
+        box.removeAllViews();
+        Context context = box.getContext();
+        for (String line : sActionLog) {
+            TextView row = new TextView(context);
+            row.setText(line);
+            row.setTextColor(0xE6FFFFFF);
+            row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            row.setLineSpacing(dp(context, 2), 1f);
+            row.setPadding(0, dp(context, 4), 0, dp(context, 4));
+            box.addView(row);
+        }
+        ScrollView scroll = lock.findViewWithTag("logScroll");
+        boolean open = sLogOpen && !sActionLog.isEmpty();
+        if (scroll != null) {
+            scroll.setVisibility(open ? View.VISIBLE : View.GONE);
+            if (open) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+        }
+        TextView toggle = lock.findViewWithTag("logToggle");
+        if (toggle != null) toggle.setText(open ? "▾" : "▸");
+        TextView label = lock.findViewWithTag("label");
+        if (label != null) {
+            if (open) {
+                label.setMaxLines(3);
+                label.setText(sActionLog.get(sActionLog.size() - 1));
+            } else {
+                label.setMaxLines(1);
+                label.setText(context.getString(R.string.lemurx_agent_working));
+            }
+        }
+    }
+
+    /** 网页上的步骤列表：点标题或箭头展开，再点收起。 */
+    private static void toggleActionLog() {
+        sLogOpen = !sLogOpen;
+        paintActionLog();
+    }
+
+    private static String describeInput(JSONObject body) {
+        Context context = ContextUtils.getApplicationContext();
+        String kind = body.optString("type", "");
+        switch (kind) {
+            case "dialog":
+                return context.getString(R.string.lemurx_agent_log_dialog_plain);
+            case "click":
+                String who = targetPhrase(body.opt("target"));
+                if (!who.isEmpty()) return context.getString(R.string.lemurx_agent_log_click, who);
+                if (body.has("x") && body.has("y")) {
+                    return context.getString(R.string.lemurx_agent_log_click_at, placeName(body));
+                }
+                return context.getString(R.string.lemurx_agent_log_click_page);
+            case "select":
+                return context.getString(
+                        R.string.lemurx_agent_log_select, clipLine(body.optString("text", ""), 48));
+            case "text":
+                if (secretTarget(body.opt("target"))) {
+                    return context.getString(R.string.lemurx_agent_log_type_secret);
+                }
+                String typed = clipLine(body.optString("text", ""), 48);
+                String field = targetPhrase(body.opt("target"));
+                return field.isEmpty()
+                        ? context.getString(R.string.lemurx_agent_log_type_here, typed)
+                        : context.getString(R.string.lemurx_agent_log_type, field, typed);
+            case "key":
+                return context.getString(R.string.lemurx_agent_log_key, keyName(body.optString("key", "")));
+            case "login":
+            case "fill_secret":
+                return context.getString(R.string.lemurx_agent_log_type_secret);
+            case "scroll":
+                return context.getString(body.optDouble("deltaY", 0) >= 0
+                        ? R.string.lemurx_agent_log_scroll_down
+                        : R.string.lemurx_agent_log_scroll_up);
+            case "pinch":
+                return context.getString(R.string.lemurx_agent_log_zoom);
+            default:
+                return context.getString(R.string.lemurx_agent_working);
+        }
+    }
+
+    /** 对话框这一步带上原文，以及准备点的那个按钮。 */
+    private static String describeDialog(int tabId, JSONObject body) {
+        Context context = ContextUtils.getApplicationContext();
+        JSONObject dialog = dialog(tabId);
+        String message = dialog == null ? "" : dialog.optString("message", dialog.optString("title", ""));
+        message = clipLine(message, 80);
+        String choice = dialogChoice(dialog, body);
+        if (!message.isEmpty() && !choice.isEmpty()) {
+            return context.getString(R.string.lemurx_agent_log_dialog_choice, message, choice);
+        }
+        if (!message.isEmpty()) return context.getString(R.string.lemurx_agent_log_dialog, message);
+        return context.getString(R.string.lemurx_agent_log_dialog_plain);
+    }
+
+    private static String dialogChoice(@Nullable JSONObject dialog, JSONObject body) {
+        if (dialog == null) return "";
+        org.json.JSONArray buttons = dialog.optJSONArray("buttons");
+        if (buttons == null || buttons.length() == 0) return "";
+        String action = body.optString("action", "accept");
+        int index = "dismiss".equals(action) ? 1 : 0;
+        if (index >= buttons.length()) index = 0;
+        return clipLine(buttons.optString(index, ""), 24);
+    }
+
+    /** 页面标题；还没有标题时用网址，让人知道在哪一页。 */
+    private static String pageName(@Nullable String title, @Nullable String url) {
+        if (title != null && !title.trim().isEmpty()) return clipLine(title, 36);
+        if (url != null && !url.isEmpty()) return briefUrl(url);
+        return ContextUtils.getApplicationContext().getString(R.string.lemurx_agent_log_this_page);
+    }
+
+    /** 正文开头的一小段，空行折成一句话。 */
+    private static String excerpt(@Nullable String text) {
+        Context context = ContextUtils.getApplicationContext();
+        if (text == null) return context.getString(R.string.lemurx_agent_log_excerpt_empty);
+        String cleaned = text.replace('\n', ' ').replaceAll("\\s+", " ").trim();
+        if (cleaned.isEmpty()) return context.getString(R.string.lemurx_agent_log_excerpt_empty);
+        return clipLine(cleaned, 72);
+    }
+
+    /** 挑几个写了名字的控件，让「找到 N 处」能对上屏幕上的字。 */
+    private static String exampleNames(LemurXPage.Snapshot snap) {
+        Context context = ContextUtils.getApplicationContext();
+        String join = context.getString(R.string.lemurx_agent_log_join);
+        StringBuilder out = new StringBuilder();
+        int count = 0;
+        for (LemurXPage.Element element : snap.elements) {
+            String name = element.name.isEmpty() ? element.placeholder : element.name;
+            if (name.isEmpty()) continue;
+            if (count > 0) out.append(join);
+            out.append(clipLine(name, 16));
+            count++;
+            if (count >= 4) break;
+        }
+        return out.toString();
+    }
+
+    /**
+     * 把控件说成用户能对上屏幕的话：「登录」按钮、密码框。
+     * 只有编号、没有名字时返回空，调用方改用画面位置来描述。
+     */
+    private static String targetPhrase(@Nullable Object target) {
+        Context context = ContextUtils.getApplicationContext();
+        if (secretTarget(target)) return context.getString(R.string.lemurx_agent_log_role_password);
+        if (target instanceof JSONObject) {
+            JSONObject object = (JSONObject) target;
+            String name = firstText(object, "name", "text", "label", "placeholder");
+            String role = roleWord(object.optString("role", ""));
+            if (!name.isEmpty() && !role.isEmpty()) {
+                return context.getString(R.string.lemurx_agent_log_named, clipLine(name, 28), role);
+            }
+            if (!name.isEmpty()) {
+                return context.getString(R.string.lemurx_agent_log_quoted, clipLine(name, 28));
+            }
+            return role;
+        }
+        if (target instanceof String) {
+            String text = ((String) target).trim();
+            if (text.isEmpty() || text.matches("\\d+")) return "";
+            return context.getString(R.string.lemurx_agent_log_quoted, clipLine(text, 28));
+        }
+        return "";
+    }
+
+    private static String firstText(JSONObject object, String... keys) {
+        for (String key : keys) {
+            String value = object.optString(key, "").trim();
+            if (!value.isEmpty()) return value;
+        }
+        return "";
+    }
+
+    private static boolean secretTarget(@Nullable Object target) {
+        if (!(target instanceof JSONObject)) return false;
+        JSONObject object = (JSONObject) target;
+        String blob = (object.optString("name", "") + " " + object.optString("label", "") + " "
+                + object.optString("placeholder", "") + " " + object.optString("role", "") + " "
+                + object.optString("inputType", "") + " " + object.optString("type", ""))
+                .toLowerCase(java.util.Locale.ROOT);
+        return blob.contains("password") || blob.contains("passwd") || blob.contains("密码");
+    }
+
+    private static String roleWord(String role) {
+        Context context = ContextUtils.getApplicationContext();
+        switch (role.toLowerCase(java.util.Locale.ROOT)) {
+            case "button":
+            case "submit":
+                return context.getString(R.string.lemurx_agent_log_role_button);
+            case "link":
+                return context.getString(R.string.lemurx_agent_log_role_link);
+            case "textbox":
+            case "searchbox":
+            case "textarea":
+            case "input":
+                return context.getString(R.string.lemurx_agent_log_role_field);
+            case "checkbox":
+            case "radio":
+            case "switch":
+                return context.getString(R.string.lemurx_agent_log_role_check);
+            case "menuitem":
+            case "option":
+                return context.getString(R.string.lemurx_agent_log_role_menu);
+            case "image":
+            case "img":
+                return context.getString(R.string.lemurx_agent_log_role_image);
+            default:
+                return "";
+        }
+    }
+
+    /** 坐标落在画面九宫格的哪一格，给没有名字的点击用。 */
+    private static String placeName(JSONObject body) {
+        double x = body.optDouble("x", CONSOLE_W / 2) / CONSOLE_W;
+        double y = body.optDouble("y", CONSOLE_H / 2) / CONSOLE_H;
+        int col = x < 0.34 ? 0 : x < 0.67 ? 1 : 2;
+        int row = y < 0.34 ? 0 : y < 0.67 ? 1 : 2;
+        int[][] ids = {
+            {R.string.lemurx_agent_log_at_tl, R.string.lemurx_agent_log_at_tc,
+                    R.string.lemurx_agent_log_at_tr},
+            {R.string.lemurx_agent_log_at_ml, R.string.lemurx_agent_log_at_mc,
+                    R.string.lemurx_agent_log_at_mr},
+            {R.string.lemurx_agent_log_at_bl, R.string.lemurx_agent_log_at_bc,
+                    R.string.lemurx_agent_log_at_br},
+        };
+        return ContextUtils.getApplicationContext().getString(ids[row][col]);
+    }
+
+    private static String keyName(String key) {
+        Context context = ContextUtils.getApplicationContext();
+        switch (key) {
+            case "Enter":
+                return context.getString(R.string.lemurx_agent_log_key_enter);
+            case "Backspace":
+                return context.getString(R.string.lemurx_agent_log_key_backspace);
+            case "Tab":
+                return context.getString(R.string.lemurx_agent_log_key_tab);
+            case "Escape":
+                return context.getString(R.string.lemurx_agent_log_key_esc);
+            case "ArrowUp":
+                return context.getString(R.string.lemurx_agent_log_key_up);
+            case "ArrowDown":
+                return context.getString(R.string.lemurx_agent_log_key_down);
+            case "ArrowLeft":
+                return context.getString(R.string.lemurx_agent_log_key_left);
+            case "ArrowRight":
+                return context.getString(R.string.lemurx_agent_log_key_right);
+            case "Space":
+            case " ":
+                return context.getString(R.string.lemurx_agent_log_key_space);
+            default:
+                return clipLine(key, 24);
+        }
+    }
+
+    private static String clipLine(String text, int max) {
+        String cleaned = text.replace('\n', ' ').trim();
+        if (cleaned.length() <= max) return cleaned;
+        return cleaned.substring(0, max) + "…";
+    }
+
+    private static String briefUrl(String url) {
+        try {
+            android.net.Uri uri = android.net.Uri.parse(url);
+            String host = uri.getHost();
+            if (host == null || host.isEmpty()) return clipLine(url, 48);
+            String path = uri.getPath();
+            if (path == null || path.isEmpty() || "/".equals(path)) return host;
+            return clipLine(host + path, 48);
+        } catch (Exception e) {
+            return clipLine(url, 48);
+        }
+    }
 
     private static void showBanner(int tabId, String text) {
         showBanner(tabId, text, false);
@@ -2810,8 +3359,10 @@ public final class LemurXDeviceBridge {
             if (label != null) label.setText(text);
             sBanner.setVisibility(View.VISIBLE);
             sBannerTab = tabId;
+            sBanner.setTranslationZ(64f * activity.getResources().getDisplayMetrics().density);
             applyBannerChip();
             applyLockMode();
+            paintActionLog();
             if (yield) {
                 hideKeyboardNow();
             } else {
@@ -2835,6 +3386,7 @@ public final class LemurXDeviceBridge {
         ViewGroup content = activity.findViewById(android.R.id.content);
         if (content == null) return null;
         sOverlay = new LemurXTouchOverlay(activity);
+        sOverlay.setTranslationZ(72f * activity.getResources().getDisplayMetrics().density);
         content.addView(sOverlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         keepLockOnTop();
@@ -2878,7 +3430,7 @@ public final class LemurXDeviceBridge {
         chip.setVisibility(sHideBannerChip ? View.GONE : View.VISIBLE);
     }
 
-    /** 全屏透明锁：吃掉页面和底栏的触摸，中间只放一粒接管胶囊。 */
+    /** 全屏透明锁：吃掉页面和底栏的触摸。底下是半透明步骤日志，只有「接管」能点。 */
     private static View buildLock(Context context) {
         FrameLayout lock = new FrameLayout(context) {
             @Override
@@ -2889,9 +3441,34 @@ public final class LemurXDeviceBridge {
         };
         lock.setClickable(true);
         lock.setFocusable(false);
-        View chip = buildBanner(context);
-        lock.addView(chip, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        lock.setTranslationZ(64f * context.getResources().getDisplayMetrics().density);
+        LinearLayout panel = new LinearLayout(context);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable panelBg = new GradientDrawable();
+        panelBg.setColor(0xB3132631);
+        panelBg.setCornerRadius(dp(context, 18));
+        panel.setBackground(panelBg);
+        panel.setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10));
+        panel.addView(buildBanner(context), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        ScrollView scroll = new ScrollView(context);
+        scroll.setTag("logScroll");
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout lines = new LinearLayout(context);
+        lines.setOrientation(LinearLayout.VERTICAL);
+        lines.setTag("log");
+        scroll.addView(lines, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 220));
+        scrollLp.topMargin = dp(context, 6);
+        scroll.setVisibility(View.GONE);
+        panel.addView(scroll, scrollLp);
+        FrameLayout.LayoutParams panelLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+        int side = dp(context, 12);
+        panelLp.setMargins(side, 0, side, side);
+        lock.addView(panel, panelLp);
         return lock;
     }
 
@@ -2899,14 +3476,8 @@ public final class LemurXDeviceBridge {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        // 半透明墨色玻璃：挡的面积只是中间一粒胶囊，网页还看得见。
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xA6132631);
-        bg.setCornerRadius(dp(context, 22));
-        bg.setStroke(Math.max(1, dp(context, 1)), 0x662EE6D6);
-        row.setBackground(bg);
-        row.setElevation(dp(context, 10));
-        row.setPadding(dp(context, 14), dp(context, 8), dp(context, 8), dp(context, 8));
+        // 外层已经是半透明日志面板，这里只排「正在做的那一步」和接管按钮。
+        row.setPadding(dp(context, 4), dp(context, 2), dp(context, 2), dp(context, 2));
         View dot = new View(context);
         GradientDrawable dotBg = new GradientDrawable();
         dotBg.setShape(GradientDrawable.OVAL);
@@ -2923,9 +3494,17 @@ public final class LemurXDeviceBridge {
         label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         label.setMaxLines(1);
         label.setEllipsize(TextUtils.TruncateAt.END);
-        row.addView(label,
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        label.setOnClickListener(v -> toggleActionLog());
+        row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView toggle = new TextView(context);
+        toggle.setTag("logToggle");
+        toggle.setText("▸");
+        toggle.setTextColor(0xF0FFFFFF);
+        toggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        toggle.setPadding(dp(context, 8), 0, dp(context, 4), 0);
+        toggle.setOnClickListener(v -> toggleActionLog());
+        row.addView(toggle, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         Button take = new Button(context);
         take.setTag("take");
         take.setText(R.string.lemurx_muse_take_over);
@@ -2957,17 +3536,100 @@ public final class LemurXDeviceBridge {
     }
 
     /**
-     * 验证码等要用户自己出值：缩小锁、放开系统键盘。先在对话里问过，再调这个。
+     * 验证码等要用户自己出值：回到 Agent 对话里问，用户答完再继续。
+     * 这一轮先停掉，发送按钮才能把验证码发出去。
      */
     private static void yieldToUser(int tabId, String reason) {
-        // 验证码和要用户看的结果都回到对话里问，不把人留在锁住的网页上。
+        sCaptchaHold = true;
         sHoldInTab = false;
         hideBanner();
         onUi(
                 () -> {
+                    Tab tab = findTab(tabId);
+                    if (tab != null && tab.getUrl() != null) sCaptchaUrl = tab.getUrl().getSpec();
                     LemurXConsoleShell.returnToChat(tabId);
+                    org.chromium.chrome.browser.lemurx.muse.MusePage.askCaptcha(tabId, reason);
                     return true;
                 });
+    }
+
+    /** 用户在对话里发出了下一条：验证码这轮结束，Agent 可以接着操作这一页。 */
+    public static void clearCaptcha() {
+        sCaptchaHold = false;
+        if (!TextUtils.isEmpty(sCaptchaUrl)) sCaptchaPassedUrl = sCaptchaUrl;
+    }
+
+    /** 还在等用户填验证码时，浏览和点击都停住。 */
+    private static void requireNoCaptcha() throws SessionError {
+        if (!sCaptchaHold) return;
+        throw new SessionError(
+                409,
+                "CAPTCHA",
+                "The page is showing a verification code. The user is typing it in the Agent chat. "
+                        + "Wait for their next message, then enter that code on the page and continue. "
+                        + "Do not guess the code.");
+    }
+
+    /**
+     * 标题、地址或控件名字像验证码时，回到对话让用户填写。
+     * 同一地址用户答过一次就不再打断，方便 Agent 把验证码填回去。
+     */
+    private static void considerCaptcha(
+            int tabId,
+            @Nullable String url,
+            @Nullable String title,
+            LemurXPage.@Nullable Snapshot snap)
+            throws SessionError {
+        if (sCaptchaHold) return;
+        String pageUrl = url;
+        String pageTitle = title;
+        if (snap != null) {
+            if (!TextUtils.isEmpty(snap.url)) pageUrl = snap.url;
+            if (!TextUtils.isEmpty(snap.title)) pageTitle = snap.title;
+        }
+        if (pageUrl != null && pageUrl.equals(sCaptchaPassedUrl)) return;
+        if (!looksLikeCaptcha(pageUrl, pageTitle, snap)) return;
+        sCaptchaUrl = pageUrl == null ? "" : pageUrl;
+        note(ContextUtils.getApplicationContext().getString(R.string.lemurx_agent_log_captcha));
+        yieldToUser(tabId, null);
+        throw new SessionError(
+                409,
+                "CAPTCHA",
+                "The page is showing a verification code. Ask stopped so the user can type it in the Agent chat. "
+                        + "Wait for their next message, then enter that code on the page and continue. "
+                        + "Do not guess the code.");
+    }
+
+    private static boolean looksLikeCaptcha(
+            @Nullable String url, @Nullable String title, LemurXPage.@Nullable Snapshot snap) {
+        if (captchaToken(url, true) || captchaToken(title, false)) return true;
+        if (snap == null) return false;
+        for (LemurXPage.Element element : snap.elements) {
+            if (captchaToken(element.name, false)
+                    || captchaToken(element.placeholder, false)
+                    || captchaToken(element.url, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 短标题和控件名才算，避免正文里随口出现这两个字就把整页打断。地址不限长度。 */
+    private static boolean captchaToken(@Nullable String value, boolean url) {
+        if (value == null || value.isEmpty()) return false;
+        if (!url && value.length() > 64) return false;
+        String text = value.toLowerCase(Locale.ROOT);
+        return text.contains("captcha")
+                || text.contains("recaptcha")
+                || text.contains("hcaptcha")
+                || text.contains("turnstile")
+                || text.contains("验证码")
+                || text.contains("人机验证")
+                || text.contains("verify you are human")
+                || text.contains("i'm not a robot")
+                || text.contains("im not a robot")
+                || text.contains("我不是机器人")
+                || text.contains("确认您是真人");
     }
 
     /** 用户填完了：收回页面，重新按住系统键盘。 */

@@ -279,6 +279,8 @@ public final class LemurXSignIn {
                                     }
                                     dismiss();
                                     MuseApi.rebind();
+                                    MusePage.applyAccountMode();
+                                    LemurXWelcome.onSignedIn();
                                 });
                     }
 

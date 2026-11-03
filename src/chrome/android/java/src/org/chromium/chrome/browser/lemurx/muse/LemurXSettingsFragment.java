@@ -29,6 +29,7 @@ import org.chromium.base.version_info.VersionInfo;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.lemurx.LemurXConsoleShell;
 import org.chromium.chrome.browser.settings.ChromeBaseSettingsFragment;
 import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.components.browser_ui.settings.EmbeddableSettingsPage;
@@ -64,6 +65,7 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
     private static final boolean SHOW_SERVER_SETTINGS = false;
 
     private @Nullable Preference mAccount;
+    private @Nullable Preference mBilling;
 
     /** Google 账号选择页的回执；必须在 fragment STARTED 之前注册，所以放在字段初始化里。 */
     private final ActivityResultLauncher<Intent> mGoogleLauncher =
@@ -76,6 +78,20 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
         Context context = getPreferenceManager().getContext();
         mPageTitle.set(context.getString(R.string.lemurx_muse_settings_title));
         PreferenceScreen screen = getPreferenceManager().createPreferenceScreen(context);
+
+        // ---- 词元额度。点进去升级或加购；数字是服务端本周已经记下的用量。
+        PreferenceCategory usage = category(context, screen, R.string.lemurx_billing_heading);
+        mBilling = new Preference(context);
+        mBilling.setKey("lemurx_billing");
+        mBilling.setTitle(R.string.lemurx_billing_loading);
+        LemurXSettingsIcons.set(mBilling, R.drawable.lemurx_muse_ic_card);
+        mBilling.setOnPreferenceClickListener(
+                p -> {
+                    SettingsNavigationFactory.createSettingsNavigation()
+                            .startSettings(context, LemurXBillingFragment.class);
+                    return true;
+                });
+        usage.addPreference(mBilling);
 
         // ---- 账号
         PreferenceCategory account = category(context, screen, R.string.lemurx_muse_settings_account);
@@ -283,6 +299,21 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
     public void onResume() {
         super.onResume();
         if (LemurXAccount.isSignedIn()) LemurXAccount.refreshProfile(error -> updateAccount());
+        refreshBilling();
+    }
+
+    /** 把本周额度和重置日写到设置第一组。读不到就留一句，不挡别的设置。 */
+    private void refreshBilling() {
+        Preference preference = mBilling;
+        if (preference == null) return;
+        LemurXBilling.load((json, error) -> {
+            if (!isAdded() || mBilling == null) return;
+            if (json == null) {
+                mBilling.setSummary(R.string.lemurx_billing_unavailable);
+                return;
+            }
+            LemurXBilling.bind(mBilling, json);
+        });
     }
 
     /** 登录底栏在 {@link LemurXSignIn}。设置页用自己的 Activity Result 打开 Google 账号选择页。 */
@@ -323,6 +354,7 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
                                     }
                                     LemurXSignIn.dismiss();
                                     MuseApi.rebind();
+                                    MusePage.applyAccountMode();
                                     updateAccount();
                                 });
                     }
@@ -347,6 +379,7 @@ public class LemurXSettingsFragment extends ChromeBaseSettingsFragment
         LemurXAccount.signOut(
                 error -> {
                     MuseApi.rebind();
+                    LemurXConsoleShell.onSignedOut();
                     updateAccount();
                 });
     }

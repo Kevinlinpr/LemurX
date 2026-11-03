@@ -326,17 +326,24 @@ class MuseCommunityView extends FrameLayout {
     }
 
     static boolean closeCompose() {
-        if (sOpen == null) return false;
-        if (sOpen.mZoom.getVisibility() == VISIBLE) {
-            sOpen.mZoom.setVisibility(GONE);
+        MuseCommunityView cover = MusePage.communityCover();
+        if (cover != null && cover.closeTop()) return true;
+        if (sOpen == null || sOpen == cover) return false;
+        return sOpen.closeTop();
+    }
+
+    /** 放大图、帖子详情、发帖页各算一层。只收最上面那一层。 */
+    private boolean closeTop() {
+        if (mZoom.getVisibility() == VISIBLE) {
+            mZoom.setVisibility(GONE);
             return true;
         }
-        if (sOpen.mDetail.getVisibility() == VISIBLE) {
-            sOpen.mDetail.setVisibility(GONE);
+        if (mDetail.getVisibility() == VISIBLE) {
+            mDetail.setVisibility(GONE);
             return true;
         }
-        if (sOpen.mCompose.getVisibility() != VISIBLE) return false;
-        sOpen.hideCompose();
+        if (mCompose.getVisibility() != VISIBLE) return false;
+        hideCompose();
         return true;
     }
 

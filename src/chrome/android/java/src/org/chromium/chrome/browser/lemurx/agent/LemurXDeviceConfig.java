@@ -26,9 +26,10 @@ import java.nio.charset.StandardCharsets;
  *
  * <ol>
  *   <li>SharedPreferences {@value #PREF_FILE}（将来设置页 / 登录后服务端下发的设备注册写在这里）；
- *   <li>apk 里的 {@code assets/lemurx/device.json}（部署时注入；仓库里的那份 token 为空，见
- *       chrome/lemurx/agent/device.json）；
- *   <li>服务端地址最后退回 {@link MuseApi#apiUrl()}——设备桥和对话用的是同一个 OpenMuse 服务。
+ *   <li>apk 里的 {@code assets/lemurx/device.json}（设备名、可见性；仓库里的 token 为空）；
+ *   <li>服务端地址始终跟 {@link MuseApi#apiUrl()}。对话和设备桥必须是同一台机器，
+ *       否则登记拿到的令牌会被另一台拒绝，读网页的结果回不去，界面停在 reading a page。
+ *       apk 里留下的测试地址不再拿来连桥。
  * </ol>
  *
  * <p>令牌是部署机密：不打日志、不进对话、不传给页面。
@@ -88,16 +89,22 @@ public final class LemurXDeviceConfig {
         return value == null ? "" : value;
     }
 
-    /** OpenMuse 服务端根地址（不带末尾斜杠）。 */
+    /** OpenMuse 服务端根地址（不带末尾斜杠）。和当前对话服务是同一台。 */
     public static String server() {
-        String url = pick(KEY_SERVER, MuseApi.apiUrl());
+        String url = MuseApi.apiUrl();
         while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
         return url;
     }
 
-    /** 上一版打包进去的公网地址。清掉之后才走现在的测服。 */
+    /**
+     * 旧包写进偏好或打进 apk 的测试地址。设备桥已经不再读它；留着是为了别的配置项还能认出退役地址。
+     */
     private static boolean previousServer(String url) {
-        return "https://api.aero.osmangroupx.com".equals(url);
+        if (url == null) return false;
+        String trimmed = url.trim();
+        while (trimmed.endsWith("/")) trimmed = trimmed.substring(0, trimmed.length() - 1);
+        return "https://api.aero.osmangroupx.com".equals(trimmed)
+                || "http://192.168.1.111:8787".equals(trimmed);
     }
 
     /** 旧的明文 IP 和临时隧道已经关了。 */

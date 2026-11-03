@@ -4,25 +4,17 @@
 
 package org.chromium.chrome.browser.lemurx.agent;
 
-import org.chromium.base.ThreadUtils;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
-import org.chromium.chrome.browser.password_manager.PasswordStoreBridge;
-import org.chromium.chrome.browser.password_manager.PasswordStoreBridge.PasswordStoreObserver;
-import org.chromium.chrome.browser.password_manager.PasswordStoreCredential;
+import org.chromium.chrome.browser.lemurx.muse.LemurXVault;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.url.GURL;
 
-import java.net.URI;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 /**
- * 站点账号走 Chromium 自己的密码库（和 Chrome 同一套：本机加密、保存提示、设置页里增删改）。
+ * 站点账号走 Aero 自己的本机保险库。每个网站可以有多套账号，其中一套是 Aero 主要使用的。
  * 这里只在手机上按当前站点取出一对，交给页面上的真人输入。密码不进日志、不进返回给服务端的 JSON。
  *
  * <p>云端只能看见不透明引用（{@link #refOf}）和位数下标；真正取值、填入、移动都在本机完成，
@@ -57,11 +49,13 @@ final class LemurXPasswords {
         final String ref;
         final String host;
         final String username;
+        final boolean primary;
 
-        Ref(String ref, String host, String username) {
+        Ref(String ref, String host, String username, boolean primary) {
             this.ref = ref;
             this.host = host;
             this.username = username;
+            this.primary = primary;
         }
     }
 
@@ -79,49 +73,13 @@ final class LemurXPasswords {
     }
 
     /**
-     * 按页面地址在密码库里找。不要在界面线程上调用：密码库是异步把清单送回来的，这里会等它。
+     * 按页面地址在 Aero 的本机账号里找。没有指定用户名时用这个网站上 Aero 主要使用的那一套。
+     * {@code profile} 不再参与取值，留着是为了调用处不用改。
      */
     static Lookup lookup(Profile profile, String pageUrl, String username) {
         Lookup lookup = new Lookup();
-        if (pageUrl == null || pageUrl.isEmpty()) return lookup;
-        PasswordStoreCredential[] credentials = loadAll(profile);
-        if (credentials == null) return lookup;
-        String wantHost = hostOf(pageUrl);
-        if (wantHost.isEmpty()) return lookup;
-        String wantUser = username == null ? "" : username.trim();
-        ArrayList<Login> matches = new ArrayList<>();
-        for (PasswordStoreCredential credential : credentials) {
-            if (credential == null) continue;
-            GURL url = credential.getUrl();
-            if (url == null || !wantHost.equals(hostOf(url.getSpec()))) continue;
-            String name = credential.getUsername();
-            String secret = credential.getPassword();
-            if (name == null || secret == null || secret.isEmpty()) continue;
-            if (!wantUser.isEmpty() && !wantUser.equalsIgnoreCase(name.trim())) continue;
-            matches.add(new Login(name, secret));
-        }
-        if (matches.isEmpty()) return lookup;
-        if (matches.size() == 1 || !wantUser.isEmpty()) {
-            lookup.kind = ONE;
-            lookup.login = matches.get(0);
-            return lookup;
-        }
-        LinkedHashSet<String> names = new LinkedHashSet<>();
-        for (Login login : matches) names.add(login.username);
-        if (names.size() == 1) {
-            lookup.kind = ONE;
-            lookup.login = matches.get(0);
-            return lookup;
-        }
-        lookup.kind = MANY;
-        StringBuilder text = new StringBuilder();
-        for (String name : names) {
-            if (text.length() > 0) text.append(", ");
-            if (text.length() > 300) break;
-            text.append(name);
-        }
-        lookup.choices = text.toString();
-        return lookup;
+        if (profile == null || pageUrl == null || pageUrl.isEmpty()) return lookup;
+        return pick(LemurXVault.hostOf(pageUrl), username == null ? "" : username.trim());
     }
 
     /**
@@ -136,34 +94,37 @@ final class LemurXPasswords {
         if (colon <= 0) return lookup;
         String host = body.substring(0, colon).trim().toLowerCase(Locale.ROOT);
         String username = body.substring(colon + 1).trim();
+        if (profile == null || host.isEmpty()) return lookup;
+        return pick(host, username);
+    }
+
+    private static Lookup pick(String host, String username) {
+        Lookup lookup = new Lookup();
         if (host.isEmpty()) return lookup;
-        PasswordStoreCredential[] credentials = loadAll(profile);
-        if (credentials == null) return lookup;
-        ArrayList<Login> matches = new ArrayList<>();
-        for (PasswordStoreCredential credential : credentials) {
-            if (credential == null) continue;
-            GURL url = credential.getUrl();
-            if (url == null || !host.equals(hostOf(url.getSpec()))) continue;
-            String name = credential.getUsername();
-            String secret = credential.getPassword();
-            if (name == null || secret == null || secret.isEmpty()) continue;
-            if (!username.isEmpty() && !username.equalsIgnoreCase(name.trim())) continue;
-            matches.add(new Login(name, secret));
+        ArrayList<LemurXVault.Account> matches = new ArrayList<>();
+        LemurXVault.Account main = null;
+        for (LemurXVault.Account account : LemurXVault.accounts()) {
+            if (!host.equals(account.host) || account.password.isEmpty()) continue;
+            if (!username.isEmpty() && !username.equalsIgnoreCase(account.username.trim())) continue;
+            matches.add(account);
+            if (account.primary) main = account;
         }
         if (matches.isEmpty()) return lookup;
-        if (matches.size() == 1 || !username.isEmpty()) {
+        LemurXVault.Account chosen = null;
+        if (!username.isEmpty() || matches.size() == 1) chosen = matches.get(0);
+        else if (main != null) chosen = main;
+        if (chosen != null) {
             lookup.kind = ONE;
-            lookup.login = matches.get(0);
+            lookup.login = new Login(chosen.username, chosen.password);
             return lookup;
         }
         lookup.kind = MANY;
-        LinkedHashSet<String> names = new LinkedHashSet<>();
-        for (Login login : matches) names.add(login.username);
         StringBuilder text = new StringBuilder();
-        for (String name : names) {
+        for (LemurXVault.Account account : matches) {
             if (text.length() > 0) text.append(", ");
             if (text.length() > 300) break;
-            text.append(name);
+            text.append(account.username.isEmpty() ? "(no name)" : account.username);
+            if (account.primary) text.append(" [primary]");
         }
         lookup.choices = text.toString();
         return lookup;
@@ -172,23 +133,21 @@ final class LemurXPasswords {
     /** 当前页站点可用的不透明引用清单（无口令）。 */
     static List<Ref> listRefs(Profile profile, String pageUrl) {
         ArrayList<Ref> out = new ArrayList<>();
-        if (pageUrl == null || pageUrl.isEmpty()) return out;
-        PasswordStoreCredential[] credentials = loadAll(profile);
-        if (credentials == null) return out;
+        if (profile == null || pageUrl == null || pageUrl.isEmpty()) return out;
         String wantHost = hostOf(pageUrl);
         if (wantHost.isEmpty()) return out;
-        LinkedHashSet<String> seen = new LinkedHashSet<>();
-        for (PasswordStoreCredential credential : credentials) {
-            if (credential == null) continue;
-            GURL url = credential.getUrl();
-            if (url == null || !wantHost.equals(hostOf(url.getSpec()))) continue;
-            String name = credential.getUsername();
-            String secret = credential.getPassword();
-            if (name == null || secret == null || secret.isEmpty()) continue;
-            String ref = refOf(wantHost, name);
-            if (!seen.add(ref)) continue;
-            out.add(new Ref(ref, wantHost, name));
+        ArrayList<LemurXVault.Account> rest = new ArrayList<>();
+        for (LemurXVault.Account account : LemurXVault.accounts()) {
+            if (!wantHost.equals(account.host) || account.password.isEmpty()) continue;
+            Ref ref = new Ref(refOf(wantHost, account.username), wantHost, account.username,
+                    account.primary);
+            if (account.primary) out.add(0, ref);
+            else rest.add(account);
+            if (out.size() + rest.size() >= 20) break;
+        }
+        for (LemurXVault.Account account : rest) {
             if (out.size() >= 20) break;
+            out.add(new Ref(refOf(wantHost, account.username), wantHost, account.username, false));
         }
         return out;
     }
@@ -207,58 +166,8 @@ final class LemurXPasswords {
         return secret.substring(index - 1, index);
     }
 
-    private static @Nullable PasswordStoreCredential[] loadAll(Profile profile) {
-        CountDownLatch ready = new CountDownLatch(1);
-        PasswordStoreObserver observer = new PasswordStoreObserver() {
-            @Override
-            public void onSavedPasswordsChanged(int count) {
-                ready.countDown();
-            }
-
-            @Override
-            public void onEdit(PasswordStoreCredential credential) {}
-        };
-        PasswordStoreBridge[] holder = new PasswordStoreBridge[1];
-        ThreadUtils.runOnUiThreadBlocking(() -> {
-            try {
-                PasswordStoreBridge bridge = new PasswordStoreBridge(profile);
-                holder[0] = bridge;
-                bridge.addObserver(observer, true);
-            } catch (RuntimeException e) {
-                ready.countDown();
-            }
-        });
-        try {
-            ready.await(2, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        return ThreadUtils.runOnUiThreadBlocking(() -> {
-            PasswordStoreBridge bridge = holder[0];
-            if (bridge == null) return new PasswordStoreCredential[0];
-            try {
-                bridge.removeObserver(observer);
-                return bridge.getAllCredentials();
-            } catch (RuntimeException e) {
-                return new PasswordStoreCredential[0];
-            } finally {
-                bridge.destroy();
-                holder[0] = null;
-            }
-        });
-    }
-
     /** 比较用的主机名：去掉 www，小写。没有主机名时返回空。 */
     static String hostOf(String url) {
-        if (url == null || url.isEmpty()) return "";
-        try {
-            String host = URI.create(url).getHost();
-            if (host == null || host.isEmpty()) return "";
-            host = host.toLowerCase(Locale.ROOT);
-            if (host.startsWith("www.")) host = host.substring(4);
-            return host;
-        } catch (RuntimeException e) {
-            return "";
-        }
+        return LemurXVault.hostOf(url);
     }
 }

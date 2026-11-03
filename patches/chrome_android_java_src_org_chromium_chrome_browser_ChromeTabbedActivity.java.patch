@@ -1,17 +1,18 @@
 diff --git a/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java b/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
-index 9ef575c93d..5c33618e7c 100644
+index 9ef575c93d..ce914d2750 100644
 --- a/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
 +++ b/chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
-@@ -109,6 +109,8 @@ import org.chromium.chrome.browser.auxiliary_search.AuxiliarySearchMetrics;
+@@ -109,6 +109,9 @@ import org.chromium.chrome.browser.auxiliary_search.AuxiliarySearchMetrics;
  import org.chromium.chrome.browser.auxiliary_search.module.AuxiliarySearchModuleBuilder;
  import org.chromium.chrome.browser.back_press.BackPressManager;
  import org.chromium.chrome.browser.back_press.MinimizeAppAndCloseTabBackPressHandler;
 +import org.chromium.chrome.browser.lemurx.LemurXConsoleShell;
 +import org.chromium.chrome.browser.lemurx.agent.LemurXDeviceBridge;
++import org.chromium.chrome.browser.lemurx.muse.LemurXBootCover;
  import org.chromium.chrome.browser.back_press.MinimizeAppAndCloseTabBackPressHandler.MinimizeAppAndCloseTabType;
  import org.chromium.chrome.browser.bookmarks.BookmarkModel;
  import org.chromium.chrome.browser.bookmarks.BookmarkPane;
-@@ -1657,6 +1659,11 @@ public class ChromeTabbedActivity extends ChromeActivity implements PreAttachInt
+@@ -1657,6 +1660,15 @@ public class ChromeTabbedActivity extends ChromeActivity implements PreAttachInt
  
              super.finishNativeInitialization();
  
@@ -19,11 +20,53 @@ index 9ef575c93d..5c33618e7c 100644
 +            // device bridge (this window becomes OpenMuse's browser worker) on this window.
 +            LemurXConsoleShell.attach(this);
 +            LemurXDeviceBridge.attach(this);
++            if (launchWantsAgent()) {
++                LemurXConsoleShell.presentAgent();
++                LemurXBootCover.releaseWhenReady(this);
++            }
 +
              TabbedStartupWindowPolicyDelegate.getInstance().initializeWithNative(profile);
  
              if (!ChromeFeatureList.sAndroidStartupImprovements.isEnabled()) {
-@@ -5450,6 +5457,14 @@ public class ChromeTabbedActivity extends ChromeActivity implements PreAttachInt
+@@ -3331,6 +3343,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements PreAttachInt
+     @Override
+     public void performPreInflationStartup() {
+         super.performPreInflationStartup();
++        if (launchWantsAgent()) LemurXBootCover.prepare(this);
+ 
+         if (isMainIntentLaunchPreOnResume()) {
+             StartupLatencyInjector startupLatencyInjector = new StartupLatencyInjector();
+@@ -3454,8 +3467,29 @@ public class ChromeTabbedActivity extends ChromeActivity implements PreAttachInt
+         return R.dimen.toolbar_height_no_shadow;
+     }
+ 
++    @Override
++    protected View getViewToBeDrawnBeforeInitializingNative() {
++        View cover = LemurXBootCover.view();
++        if (cover != null) return cover;
++        return super.getViewToBeDrawnBeforeInitializingNative();
++    }
++
++    /** 从桌面冷启动才先落到 Agent。点开一条链接时仍直接打开那个网页。 */
++    private boolean launchWantsAgent() {
++        if (!isColdStart()) return false;
++        Intent intent = getIntent();
++        if (intent == null) return true;
++        String action = intent.getAction();
++        if (Intent.ACTION_VIEW.equals(action) && intent.getData() != null) return false;
++        if (Intent.ACTION_SEND.equals(action) || Intent.ACTION_SEND_MULTIPLE.equals(action)) {
++            return false;
++        }
++        return true;
++    }
++
+     @Override
+     public void performPostInflationStartup() {
++        if (launchWantsAgent()) LemurXBootCover.show(this);
+         super.performPostInflationStartup();
+ 
+         if (isFinishing()) return;
+@@ -5450,6 +5484,15 @@ public class ChromeTabbedActivity extends ChromeActivity implements PreAttachInt
          }
      }
  
@@ -31,6 +74,7 @@ index 9ef575c93d..5c33618e7c 100644
 +    public boolean dispatchTouchEvent(android.view.MotionEvent event) {
 +        // LemurX: every touch that enters through the window is the user's (the agent's
 +        // synthetic finger goes straight to the tab view). The agent yields immediately.
++        if (LemurXConsoleShell.consumeSearchBlank(event)) return true;
 +        LemurXDeviceBridge.onUserTouch(event);
 +        return super.dispatchTouchEvent(event);
 +    }

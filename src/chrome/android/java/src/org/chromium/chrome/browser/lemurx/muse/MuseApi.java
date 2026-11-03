@@ -404,15 +404,25 @@ public final class MuseApi {
 
     // ---------------------------------------------------------------- 会话
 
-    /** GET /api/health。关停探测用；公网不通就改走局域网。结果回到 UI 线程。 */
+    /**
+     * GET /api/health。关停探测用。公网不通时，只有局域网自己也通了才改走局域网；
+     * 已经钉在局域网上又失败，就清掉，改回公网。结果回到 UI 线程。
+     */
     public void probeHealth(Callback<JSONObject> callback) {
         mExecutor.execute(
                 () -> {
                     try {
-                        JSONObject json = healthOnce(apiUrl());
-                        if (json == null && !LAN_API_URL.equals(apiUrl())) {
-                            preferReachable(LAN_API_URL);
-                            json = healthOnce(LAN_API_URL);
+                        String current = apiUrl();
+                        JSONObject json = healthOnce(current);
+                        if (json == null && LAN_API_URL.equals(current)) {
+                            preferReachable(null);
+                            json = healthOnce(DEFAULT_API_URL);
+                        } else if (json == null) {
+                            JSONObject lan = healthOnce(LAN_API_URL);
+                            if (lan != null) {
+                                preferReachable(LAN_API_URL);
+                                json = lan;
+                            }
                         }
                         if (json == null) {
                             ThreadUtils.postOnUiThread(() -> callback.onResult(null, "unreachable"));
@@ -719,7 +729,11 @@ public final class MuseApi {
                 return true;
             case "RUN_ERROR": {
                 String message = event.optString("message", "");
-                if (message.isEmpty()
+                if (LemurXBilling.CODE_QUOTA.equals(message)) {
+                    message =
+                            ContextUtils.getApplicationContext()
+                                    .getString(R.string.lemurx_billing_empty);
+                } else if (message.isEmpty()
                         || "fetch failed".equalsIgnoreCase(message)
                         || "fetched failed".equalsIgnoreCase(message)) {
                     message =

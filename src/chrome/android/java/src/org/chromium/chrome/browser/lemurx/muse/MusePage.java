@@ -167,7 +167,14 @@ public class MusePage implements NativePage {
     private final FrameLayout mRoot;
     private final FrameLayout mContent;
     private final TextView mHeading;
+    private final ImageView mMenu;
     private final View mNewChat;
+    /** 文件架盖着时用来收起底栏。这一页不占导航上的一格。 */
+    private static final Object FILES_NAV = new Object();
+    private static final Object ARCHIVE_NAV = new Object();
+    private static final Object COMMUNITY_NAV = new Object();
+    /** 电脑页盖着时用来收起底栏。这一页不占导航上的一格。 */
+    private static final Object COMPUTER_NAV = new Object();
     private final MuseDrawer mDrawer;
 
     /**
@@ -182,6 +189,7 @@ public class MusePage implements NativePage {
     private @Nullable MuseChatView mChat;
     private @Nullable MuseCommunityView mCommunity;
     private @Nullable ScrollView mFiles;
+    private @Nullable MuseArchiveView mArchive;
 
     private String mUrl = "";
     private String mSection = MuseUrls.SECTION_CHAT;
@@ -235,13 +243,9 @@ public class MusePage implements NativePage {
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(8), dp(6), dp(8), dp(6));
-        ImageView menu = iconButton(context, R.drawable.lemurx_muse_ic_menu, R.string.lemurx_muse_settings);
-        menu.setOnClickListener(
-                v -> {
-                    LemurXHaptics.click(v);
-                    openSettings();
-                });
-        header.addView(menu);
+        mMenu = iconButton(context, R.drawable.lemurx_muse_ic_menu, R.string.lemurx_muse_settings);
+        showMenuButton();
+        header.addView(mMenu);
 
         ImageView logo = new ImageView(context);
         logo.setImageResource(R.mipmap.app_icon);
@@ -296,10 +300,53 @@ public class MusePage implements NativePage {
         applyPadding();
         LemurXConsoleShell.addNavListener(mNavListener);
         mDrawer = new MuseDrawer(mRoot);
-        mDrawer.setFilesAction(this::openFiles);
+        mDrawer.setArchiveAction(this::openArchive);
         // 抽屉打开电脑页时带上本标签页的 threadId，页内跑完的命令只挂回这一路对话。
         mDrawer.setComputerAction(() -> showComputer(null, mThreadId));
         updateForUrl(url);
+    }
+
+    /**
+     * 主页面不在顶栏放三条线。侧边栏统一从底部导航打开，这一格先收起来，二级页再换成返回。
+     */
+    private void showMenuButton() {
+        mMenu.setVisibility(View.GONE);
+    }
+
+    /** 顶栏左上角换成返回。档案这类二级页会收起底栏，返回只能留在这里。 */
+    private void showBackButton(Runnable onBack) {
+        mMenu.setVisibility(View.VISIBLE);
+        mMenu.setImageResource(R.drawable.lemurx_console_ic_back);
+        mMenu.setContentDescription(mRoot.getContext().getString(R.string.lemurx_archive_back));
+        mMenu.setOnClickListener(
+                v -> {
+                    LemurXHaptics.tick(v);
+                    onBack.run();
+                });
+    }
+
+    /** 盖层顶栏：左上角返回，标题占中间。底栏不在这些页上出现。 */
+    private static LinearLayout coverBar(Context context, int title, Runnable onBack) {
+        LinearLayout bar = new LinearLayout(context);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(context, 4), 0, dp(context, 12), dp(context, 4));
+        ImageView back = iconButton(context, R.drawable.lemurx_console_ic_back, R.string.lemurx_archive_back);
+        back.setOnClickListener(
+                v -> {
+                    LemurXHaptics.tick(v);
+                    onBack.run();
+                });
+        bar.addView(back);
+        TextView heading = new TextView(context);
+        heading.setText(title);
+        heading.setTextColor(text(context));
+        heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        heading.setTypeface(Typeface.DEFAULT_BOLD);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        titleLp.setMarginStart(dp(context, 4));
+        bar.addView(heading, titleLp);
+        return bar;
     }
 
     static ImageView iconButton(Context context, int icon, int description) {
@@ -328,6 +375,20 @@ public class MusePage implements NativePage {
     @Override
     public View getView() {
         return mRoot;
+    }
+
+    /** 这个页面对应的标签。标签卡片要按标签记下对话画面。 */
+    public int tabId() {
+        return mTab.getId();
+    }
+
+    /**
+     * 页面上出现验证码：在这个标签的对话里问用户，并停掉正在跑的那一轮，
+     * 这样用户可以直接把验证码发回来。
+     */
+    public static void askCaptcha(int tabId, @Nullable String reason) {
+        MuseChatView chat = sChats.get(tabId);
+        if (chat != null) chat.askCaptcha(reason);
     }
 
     @Override
@@ -369,6 +430,15 @@ public class MusePage implements NativePage {
 
     private void show(String section) {
         mSection = section;
+        if (mArchive != null && mArchive.getVisibility() == View.VISIBLE) {
+            if (mChat != null) mChat.setVisibility(View.GONE);
+            if (mCommunity != null) mCommunity.setVisibility(View.GONE);
+            mHeading.setText(R.string.lemurx_archive);
+            mNewChat.setVisibility(View.INVISIBLE);
+            showBackButton(MusePage::backFromArchive);
+            return;
+        }
+        showMenuButton();
         if (mChat != null) mChat.setVisibility(View.GONE);
         if (mCommunity != null) mCommunity.setVisibility(View.GONE);
         if (mFiles != null) mFiles.setVisibility(View.GONE);
@@ -443,6 +513,20 @@ public class MusePage implements NativePage {
         ThreadUtils.assertOnUiThread();
         for (MuseChatView chat : new ArrayList<>(sChats.values())) {
             chat.suspendForBackground();
+        }
+    }
+
+    /** 登录状态变了：对话输入框在 Agent 和「搜索 / 网址」之间切换。 */
+    public static void applyAccountMode() {
+        ThreadUtils.assertOnUiThread();
+        for (MuseChatView chat : sChats.values()) chat.applyAccountMode();
+    }
+
+    /** 退出登录时停掉还在回复的对话。 */
+    public static void stopAgentWork() {
+        ThreadUtils.assertOnUiThread();
+        for (MuseChatView chat : new ArrayList<>(sChats.values())) {
+            chat.stop();
         }
     }
 
@@ -531,116 +615,35 @@ public class MusePage implements NativePage {
         LemurXConsoleShell.openNewSession();
     }
 
-    /** 顶栏 ☰：从左侧滑出设置，不另开一页。网页底栏在社区的位置也会走到这里。 */
+    /** 从左侧滑出设置，不另开一页。底部导航的三条线走到这里。 */
     public void openDrawer() {
         mDrawer.open();
     }
 
-    private void openSettings() {
-        openDrawer();
-    }
-
-    /**
-     * 文件架。这一页如果还没挂上屏幕（人在网页上打开侧边栏），先回到对话再盖上文件架，
-     * 否则列表加在一块看不见的页面上。
-     */
-    private void openFiles() {
+    /** 档案库。人在网页上打开侧边栏时，先回到对话再盖上，避免加在看不见的页面上。 */
+    private void openArchive() {
         if (mRoot.getParent() == null) LemurXConsoleShell.goChat();
-        showFiles();
+        showArchive();
     }
 
-    /** 文件架盖在当前分区上。返回键先收它，再收抽屉。 */
-    private void showFiles() {
+    private void showArchive() {
+        closeFiles();
         Context context = mRoot.getContext();
-        if (mFiles != null) mContent.removeView(mFiles);
-        mFiles = buildFiles(context);
-        mContent.addView(mFiles, fill());
-        sFilesPage = this;
+        if (mArchive != null) mContent.removeView(mArchive);
+        mArchive = new MuseArchiveView(context);
+        mContent.addView(mArchive, fill());
+        sArchivePage = this;
         if (mChat != null) mChat.setVisibility(View.GONE);
         if (mCommunity != null) mCommunity.setVisibility(View.GONE);
-        mHeading.setText(R.string.lemurx_muse_files);
+        mHeading.setText(R.string.lemurx_archive);
         mNewChat.setVisibility(View.INVISIBLE);
+        showBackButton(MusePage::backFromArchive);
+        LemurXConsoleShell.setNavSuppressed(ARCHIVE_NAV, true);
         LemurXConsoleShell.onPlaceChanged();
     }
 
-    private ScrollView buildFiles(Context context) {
-        ScrollView scroll = new ScrollView(context);
-        scroll.setVerticalScrollBarEnabled(false);
-        LinearLayout column = new LinearLayout(context);
-        column.setOrientation(LinearLayout.VERTICAL);
-        column.setPadding(dp(16), dp(8), dp(16), dp(24));
-        java.util.List<LemurXFiles.Entry> entries = LemurXFiles.load(context);
-        if (entries.isEmpty()) {
-            TextView empty = new TextView(context);
-            empty.setText(R.string.lemurx_muse_files_empty);
-            empty.setTextColor(muted(context));
-            empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-            column.addView(empty);
-        }
-        for (LemurXFiles.Entry entry : entries) {
-            column.addView(fileRow(context, entry));
-        }
-        scroll.addView(column, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        return scroll;
-    }
-
-    private View fileRow(Context context, LemurXFiles.Entry entry) {
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(12), dp(12), dp(12), dp(12));
-        row.setBackground(rounded(surface(context), 16, context));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(8);
-        row.setLayoutParams(lp);
-        ImageView icon = new ImageView(context);
-        int kindIcon = "pdf".equals(entry.kind)
-                ? R.drawable.lemurx_muse_ic_file_pdf
-                : "doc".equals(entry.kind)
-                        ? R.drawable.lemurx_muse_ic_file_doc
-                        : "image".equals(entry.kind)
-                                ? R.drawable.lemurx_muse_ic_file_image
-                                : R.drawable.lemurx_muse_ic_file_text;
-        icon.setImageResource(kindIcon);
-        icon.setColorFilter(text(context), android.graphics.PorterDuff.Mode.SRC_IN);
-        row.addView(icon, new LinearLayout.LayoutParams(dp(22), dp(22)));
-        LinearLayout texts = new LinearLayout(context);
-        texts.setOrientation(LinearLayout.VERTICAL);
-        TextView name = new TextView(context);
-        name.setText(entry.name);
-        name.setTextColor(text(context));
-        name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        name.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        name.setMaxLines(1);
-        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        TextView kind = new TextView(context);
-        int kindLabel = "pdf".equals(entry.kind)
-                ? R.string.lemurx_muse_file_pdf
-                : "doc".equals(entry.kind)
-                        ? R.string.lemurx_muse_file_word
-                        : "image".equals(entry.kind)
-                                ? R.string.lemurx_muse_file_image
-                                : R.string.lemurx_muse_file_note;
-        kind.setText(kindLabel);
-        kind.setTextColor(muted(context));
-        kind.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        texts.addView(name);
-        texts.addView(kind);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        tlp.setMarginStart(dp(12));
-        row.addView(texts, tlp);
-        row.setOnClickListener(v -> openStoredFile(context, entry));
-        return row;
-    }
-
-    private void openStoredFile(Context context, LemurXFiles.Entry entry) {
-        LemurXFiles.open(context, entry.name, entry.kind, entry.text);
-    }
-
     private static @Nullable MusePage sFilesPage;
+    private static @Nullable MusePage sArchivePage;
 
     /**
      * 盖住整个窗口的一层。底栏那一条不吃触摸，点别的格子能落到导航栏上，由导航栏自己收起这一层再过去。
@@ -745,12 +748,15 @@ public class MusePage implements NativePage {
      */
     private static @Nullable String sComputerThreadId;
 
-    /** 底栏要去别处：社区、电脑、文件架、发帖页都先让开，底下原来的页面还在。 */
+    /** 底栏要去别处：社区、电脑、文件架、发帖页都先让开，底下原来的页面还在。这不是返回，侧边栏不要跟着再打开。 */
     public static void dismissCovers() {
+        boolean had = communityOpen() || computerOpen() || archiveOpen() || filesOpen();
         closeCommunityCompose();
         closeCommunity();
         closeComputer();
         closeFiles();
+        closeArchive();
+        if (had) MuseDrawer.dropReturn();
     }
 
     /** 社区是独立的一层，不写进任何标签页。 */
@@ -769,18 +775,9 @@ public class MusePage implements NativePage {
             sPlaza.setClickable(true);
             LinearLayout column = new LinearLayout(activity);
             column.setOrientation(LinearLayout.VERTICAL);
-            int padLeft = dp(activity, 16);
             int padTop = LemurXConsoleShell.statusInsetPx() + dp(activity, 8);
-            int padRight = dp(activity, 12);
-            sPlaza.followKeyboard(column, padLeft, padTop, padRight, dp(activity, 72));
-            LinearLayout bar = new LinearLayout(activity);
-            bar.setGravity(Gravity.CENTER_VERTICAL);
-            TextView title = new TextView(activity);
-            title.setText(R.string.lemurx_muse_community);
-            title.setTextColor(text(activity));
-            title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-            title.setTypeface(Typeface.DEFAULT_BOLD);
-            bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            sPlaza.followKeyboard(column, 0, padTop, 0, dp(activity, 24));
+            LinearLayout bar = coverBar(activity, R.string.lemurx_muse_community, MusePage::backFromCommunity);
             TextView write = new TextView(activity);
             write.setText(R.string.lemurx_muse_community_write);
             write.setTextColor(onAccent(activity));
@@ -804,6 +801,7 @@ public class MusePage implements NativePage {
         sPlaza.setVisibility(View.VISIBLE);
         sPlaza.requestApplyInsets();
         sPlaza.bringToFront();
+        LemurXConsoleShell.setNavSuppressed(COMMUNITY_NAV, true);
         LemurXConsoleShell.onPlaceChanged();
         if (sPlazaView != null) sPlazaView.refreshNow();
     }
@@ -824,11 +822,23 @@ public class MusePage implements NativePage {
         return null;
     }
 
+    /**
+     * 手势或顶栏返回离开社区。发帖页还开着就只收发帖页。
+     * 从侧边栏进来的，整层关掉后回到当时开着的侧边栏。
+     */
+    public static boolean backFromCommunity() {
+        if (closeCommunityCompose()) return true;
+        if (!closeCommunity()) return false;
+        MuseDrawer.restoreAfterCover();
+        return true;
+    }
+
     /** 收起社区这一层。没开着时返回 false。 */
     public static boolean closeCommunity() {
         if (!communityOpen() || sPlaza == null) return false;
         sPlaza.releaseKeyboard();
         sPlaza.setVisibility(View.GONE);
+        LemurXConsoleShell.setNavSuppressed(COMMUNITY_NAV, false);
         LemurXConsoleShell.onPlaceChanged();
         return true;
     }
@@ -847,6 +857,33 @@ public class MusePage implements NativePage {
         page.mFiles = null;
         sFilesPage = null;
         page.show(page.mSection);
+        LemurXConsoleShell.setNavSuppressed(FILES_NAV, false);
+        LemurXConsoleShell.onPlaceChanged();
+        return true;
+    }
+
+    /** 档案库正盖着。 */
+    public static boolean archiveOpen() {
+        MusePage page = sArchivePage;
+        return page != null && page.mArchive != null && page.mArchive.getVisibility() == View.VISIBLE;
+    }
+
+    /** 手势或顶栏返回离开档案。从侧边栏进来的，回到当时开着的侧边栏。 */
+    public static boolean backFromArchive() {
+        if (!closeArchive()) return false;
+        MuseDrawer.restoreAfterCover();
+        return true;
+    }
+
+    /** 收起档案库，回到打开它之前的分区。没开着时返回 false。 */
+    public static boolean closeArchive() {
+        MusePage page = sArchivePage;
+        if (page == null || page.mArchive == null) return false;
+        page.mContent.removeView(page.mArchive);
+        page.mArchive = null;
+        sArchivePage = null;
+        page.show(page.mSection);
+        LemurXConsoleShell.setNavSuppressed(ARCHIVE_NAV, false);
         LemurXConsoleShell.onPlaceChanged();
         return true;
     }
@@ -856,11 +893,19 @@ public class MusePage implements NativePage {
         return sComputer != null && sComputer.getVisibility() == View.VISIBLE;
     }
 
+    /** 手势或顶栏返回离开电脑页。从侧边栏进来的，回到当时开着的侧边栏。 */
+    public static boolean backFromComputer() {
+        if (!closeComputer()) return false;
+        MuseDrawer.restoreAfterCover();
+        return true;
+    }
+
     /** 收起电脑这一层。底下原来的网页或对话还在。没开着时返回 false。 */
     public static boolean closeComputer() {
         if (!computerOpen() || sComputer == null) return false;
         sComputer.releaseKeyboard();
         sComputer.setVisibility(View.GONE);
+        LemurXConsoleShell.setNavSuppressed(COMPUTER_NAV, false);
         LemurXConsoleShell.onPlaceChanged();
         return true;
     }
@@ -875,10 +920,19 @@ public class MusePage implements NativePage {
         showComputer(runId, null);
     }
 
+    /** 远程电脑和社区要 Aero 账号。没登录就打开登录，调用方不要继续。 */
+    public static boolean requireAccount() {
+        if (LemurXAccount.isSignedIn()) return true;
+        Activity activity = LemurXConsoleShell.activity();
+        if (activity != null) LemurXSignIn.showFromBrowser(activity);
+        return false;
+    }
+
     /**
      * 打开电脑页。{@code threadId} 是页内新跑命令要挂回的对话；点卡片打开时应传入该卡片所在线程。
      */
     public static void showComputer(@Nullable String runId, @Nullable String threadId) {
+        if (!requireAccount()) return;
         Activity activity = LemurXConsoleShell.activity();
         if (activity == null) return;
         ViewGroup content = activity.findViewById(android.R.id.content);
@@ -898,14 +952,9 @@ public class MusePage implements NativePage {
             LinearLayout column = new LinearLayout(activity);
             column.setOrientation(LinearLayout.VERTICAL);
             int padTop = LemurXConsoleShell.statusInsetPx() + dp(activity, 8);
-            sComputer.followKeyboard(column, 0, padTop, 0, dp(activity, 72));
-            TextView title = new TextView(activity);
-            title.setText(R.string.lemurx_muse_computer);
-            title.setTextColor(text(activity));
-            title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-            title.setTypeface(Typeface.DEFAULT_BOLD);
-            title.setPadding(dp(activity, 16), 0, dp(activity, 12), dp(activity, 8));
-            column.addView(title);
+            // 底栏在这一层不出现，底部只留页面空隙，不再为导航留空。
+            sComputer.followKeyboard(column, 0, padTop, 0, dp(activity, 24));
+            column.addView(coverBar(activity, R.string.lemurx_muse_computer, MusePage::backFromComputer));
             sComputerPage = new LemurXComputer.Page(activity);
             column.addView(sComputerPage, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -918,6 +967,7 @@ public class MusePage implements NativePage {
         sComputer.requestApplyInsets();
         sComputer.bringToFront();
         if (runId != null && sComputerPage != null) sComputerPage.focusRun(runId);
+        LemurXConsoleShell.setNavSuppressed(COMPUTER_NAV, true);
         LemurXConsoleShell.onPlaceChanged();
     }
 
@@ -949,6 +999,16 @@ public class MusePage implements NativePage {
     /** 收起抽屉。没开着时返回 false。 */
     public static boolean closeDrawer() {
         return MuseDrawer.closeIfOpen();
+    }
+
+    /** 往前走（换页、打开登录网页）时，不要在回来后再把侧边栏打开。 */
+    public static void dropDrawerReturn() {
+        MuseDrawer.dropReturn();
+    }
+
+    /** 去付款页。侧边栏立刻收掉，返回键不再把它打开。 */
+    public static void abandonDrawer() {
+        MuseDrawer.abandon();
     }
 
     /** 附件预览正开着。外壳的返回键先问这个。 */
