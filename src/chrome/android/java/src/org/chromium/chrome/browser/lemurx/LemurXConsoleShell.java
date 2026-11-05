@@ -26,6 +26,7 @@ import android.view.MotionEvent;
 import android.view.ViewConfiguration;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.ViewOutlineProvider;
 import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
@@ -66,6 +67,7 @@ import org.chromium.chrome.browser.lemurx.muse.MusePage;
 import org.chromium.chrome.browser.lemurx.muse.MuseUrls;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.lifecycle.DestroyObserver;
+import org.chromium.chrome.browser.lifecycle.StartStopWithNativeObserver;
 import org.chromium.chrome.browser.omnibox.OmniboxStub;
 import org.chromium.chrome.browser.omnibox.UrlFocusChangeListener;
 import org.chromium.chrome.browser.tab.Tab;
@@ -125,8 +127,8 @@ import java.util.Set;
  *   <li>新标签页就是 Agent 界面（{@link LemurXChromeHost#newTabUrlOverride} →
  *       {@link #launchUrl()} = {@code chrome-native://lemurx/chat/<新 id>}）。没登录时输入框只打开网址或搜索。
  *   <li>在每一页底部浮一条 LemurX 导航栏（白色药丸、lucide 图标、选中格 #F0F1F2）。
- *       网页上从左侧长出前进和后退。不是网页时不显示前进后退，最左一格固定成当前页面的图标并选中，
- *       让人知道自己在哪。其余是网页、标签页、对话、搜索、社区。标签页管理（Hub）、地址栏打开期间、
+ *       网页上从左侧长出前进和后退，网页钮收起。不是网页时显示网页钮和对话钮。其余是搜索、标签页、菜单。
+ *       标签页管理（Hub）、地址栏打开期间、
  *       原生页面里软键盘弹出期间收起来。
  *   <li>浏览网页时底栏盖在网页上面。手指往下滚过一小段就收起，往上滚一点或回到页顶就出现；
  *       程序自己滚的不算。对话、社区这些原生页面上不跟着滚收起。
@@ -372,18 +374,21 @@ public final class LemurXConsoleShell {
     /** 网页模式才展开的前进 / 后退格；不是网页时 weight 收到 0。 */
     private static @Nullable View sBackCell;
     private static @Nullable View sForwardCell;
-    /**
-     * 不是网页时占住最左一格：图标是当前页面，并且保持选中。网页上收起，把位置让给前进后退。
-     */
-    private static @Nullable View sHereCell;
-    private static @Nullable ImageView sHereIcon;
     /** 当前这一页：CELL_WEB / CELL_CHAT / CELL_COMMUNITY / PLACE_COMPUTER / PLACE_FILES。 */
     private static int sPlace = CELL_WEB;
     /** 标签页按钮右下角的数量。当前这个窗口（普通或无痕）里还开着的标签数。 */
     private static @Nullable TextView sTabCount;
     private static @Nullable TabModelObserver sTabCountObserver;
-    /** 底栏正在展示网页前进后退（标签格收起）。 */
+    /** 底栏正在展示网页前进后退。网页钮收起，对话钮占到它的位置。 */
     private static boolean sWebChrome;
+    /**
+     * 对话钮跟着网页态一起长出来或收起。已经单独露在底栏上时保持显示，只和网页钮交换位置。
+     */
+    private static boolean sChatTracksChrome;
+    /** 这个标签页有没有可回的网页。没有时网页钮压暗。 */
+    private static boolean sWebReady = true;
+    private static boolean sHistBack;
+    private static boolean sHistForward;
     private static @Nullable ValueAnimator sChromeAnim;
     private static final long CHROME_MORPH_MS = 280;
     private static final PathInterpolator CHROME_EASE =
@@ -395,9 +400,17 @@ public final class LemurXConsoleShell {
     private static @Nullable OmniboxStub sOmniboxStub;
     private static @Nullable UrlFocusChangeListener sOmniboxListener;
     private static @Nullable DestroyObserver sDestroyObserver;
+    private static @Nullable StartStopWithNativeObserver sStartObserver;
 
     /** 用户正通过搜索按钮使用地址栏：这期间工具栏露出来，导航栏收起。 */
     private static boolean sOmniboxOpen;
+    /**
+     * 地址栏还在滑出来。这段时间底栏留在原地并淡出，对话不要跟着往下掉。
+     * 聚焦之后再真正收起底栏。
+     */
+    private static boolean sSearchHandoff;
+    /** 底栏上次占的高度。搜索打开后页面继续留着这块，避免对话框下沉。 */
+    private static int sNavHeight;
     private static boolean sSearchBlank;
     private static float sSearchX;
     private static float sSearchY;
@@ -727,6 +740,7 @@ public final class LemurXConsoleShell {
         if (!isEnabled()) return;
         if (sActivity == activity && sNav != null) {
             refresh();
+            MusePage.bringTailnetOnline();
             LemurXWelcome.maybeShow(activity);
             return;
         }
@@ -765,13 +779,25 @@ public final class LemurXConsoleShell {
                 () -> {
                     if (sActivity == activity) detach();
                 };
+        sStartObserver =
+                new StartStopWithNativeObserver() {
+                    @Override
+                    public void onStartWithNative() {
+                        MusePage.bringTailnetOnline();
+                    }
+
+                    @Override
+                    public void onStopWithNative() {}
+                };
         try {
             activity.getLifecycleDispatcher().register(sDestroyObserver);
+            activity.getLifecycleDispatcher().register(sStartObserver);
         } catch (Exception e) {
             logi("lifecycle", e.getMessage());
         }
         applyControls(false);
         refresh();
+        MusePage.bringTailnetOnline();
         LemurXWelcome.maybeShow(activity);
         LemurXKillSwitch.attach(activity);
         LemurXAppUpdate.attach(activity);
@@ -840,6 +866,14 @@ public final class LemurXConsoleShell {
             }
         }
         sDestroyObserver = null;
+        if (activity != null && sStartObserver != null) {
+            try {
+                activity.getLifecycleDispatcher().unregister(sStartObserver);
+            } catch (Exception e) {
+                // 同上
+            }
+        }
+        sStartObserver = null;
         if (activity != null && sControlsObserver != null) {
             try {
                 activity.getBrowserControlsManager().removeObserver(sControlsObserver);
@@ -907,11 +941,10 @@ public final class LemurXConsoleShell {
         sMenuCell = null;
         sBackCell = null;
         sForwardCell = null;
-        sHereCell = null;
-        sHereIcon = null;
         sPlace = CELL_WEB;
         sTabCount = null;
         sWebChrome = false;
+        sChatTracksChrome = false;
         sNavSuppressors.clear();
         if (activity != null && sHidingToken != TokenHolder.INVALID_TOKEN) {
             try {
@@ -922,6 +955,8 @@ public final class LemurXConsoleShell {
         }
         sHidingToken = TokenHolder.INVALID_TOKEN;
         sOmniboxOpen = false;
+        sSearchHandoff = false;
+        sNavHeight = 0;
         sLayout = LayoutType.BROWSING;
         sActivity = null;
     }
@@ -1105,9 +1140,11 @@ public final class LemurXConsoleShell {
                     if (hasFocus) {
                         // 不管是谁聚焦的地址栏（搜索按钮、键盘快捷键…），都按"正在用地址栏"处理。
                         sOmniboxOpen = true;
+                        sSearchHandoff = false;
                     } else {
                         // 没搜就退出：把工具栏收回去。提交了搜索的话导航会接着刷新。
                         sOmniboxOpen = false;
+                        sSearchHandoff = false;
                         scheduleSearchReturn();
                     }
                     applyControls(true);
@@ -2022,21 +2059,35 @@ public final class LemurXConsoleShell {
         }
     }
 
-    /** 导航栏当前占的高度（含手势条内边距）；收起时为 0。原生页面据此留底部空间。 */
+    /**
+     * 导航栏当前占的高度（含手势条内边距）。收起时为 0。
+     * 搜索打开期间仍返回收起前的高度，对话底部留白不变，不会先沉下去再进入搜索。
+     */
     public static int navHeightPx() {
         LinearLayout nav = sNav;
-        if (nav == null || nav.getVisibility() != View.VISIBLE) return 0;
-        int height = nav.getHeight();
-        if (height > 0) return height;
-        try {
-            nav.measure(
-                    View.MeasureSpec.makeMeasureSpec(
-                            ((View) nav.getParent()).getWidth(), View.MeasureSpec.AT_MOST),
-                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-            return nav.getMeasuredHeight();
-        } catch (Exception e) {
-            return 0;
+        if (nav != null && nav.getVisibility() == View.VISIBLE) {
+            int height = nav.getHeight();
+            if (height <= 0) {
+                try {
+                    nav.measure(
+                            View.MeasureSpec.makeMeasureSpec(
+                                    ((View) nav.getParent()).getWidth(), View.MeasureSpec.AT_MOST),
+                            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+                    height = nav.getMeasuredHeight();
+                } catch (Exception e) {
+                    height = 0;
+                }
+            }
+            if (height > 0) sNavHeight = height;
+            return height > 0 ? height : sNavHeight;
         }
+        if (sOmniboxOpen && sNavHeight > 0) return sNavHeight;
+        return 0;
+    }
+
+    /** 地址栏已经接手时底栏让开。滑出过程中先留着，避免对话先塌一下。 */
+    private static boolean omniboxHidesNav() {
+        return sOmniboxOpen && !sSearchHandoff;
     }
 
     public static void addNavListener(Runnable listener) {
@@ -2071,6 +2122,9 @@ public final class LemurXConsoleShell {
         sSearchReturnUrl = null;
         sSearchWebUrl = null;
         sSearchReturnTabId = -1;
+        navHeightPx();
+        sSearchHandoff = true;
+        sOmniboxOpen = true;
         // 搜索基于网页：网页上的覆盖层在地址栏打开期间自动让位，标签页本来就停在网页上，不用动。
         // 只有"纯原生页"标签页（新标签页的对话）且历史里有网页时才需要先回到网页再聚焦。
         try {
@@ -2091,14 +2145,27 @@ public final class LemurXConsoleShell {
         } catch (Exception e) {
             logi("openSearch", e.getMessage());
         }
-        sOmniboxOpen = true;
         applyControls(true);
-        refresh();
+        if (sNav != null) {
+            sNav.animate().cancel();
+            sNav.animate().alpha(0f).setDuration(OMNIBOX_REVEAL_MS).setInterpolator(CHROME_EASE)
+                    .start();
+        }
         ThreadUtils.postOnUiThreadDelayed(
                 () -> {
                     if (sActivity != activity || !sOmniboxOpen) return;
                     ToolbarManager toolbar = activity.getToolbarManager();
-                    if (toolbar == null) return;
+                    if (toolbar == null) {
+                        sSearchHandoff = false;
+                        if (sNav != null) {
+                            sNav.animate().cancel();
+                            sNav.setAlpha(1f);
+                        }
+                        sOmniboxOpen = false;
+                        applyControls(true);
+                        refresh();
+                        return;
+                    }
                     try {
                         AutocompleteInput input =
                                 new AutocompleteInput(OmniboxFocusReason.MENU_OR_KEYBOARD_ACTION);
@@ -2108,8 +2175,9 @@ public final class LemurXConsoleShell {
                         logi("openSearch", e.getMessage());
                         sOmniboxOpen = false;
                         applyControls(true);
-                        refresh();
                     }
+                    sSearchHandoff = false;
+                    refresh();
                 },
                 OMNIBOX_REVEAL_MS);
     }
@@ -2147,7 +2215,7 @@ public final class LemurXConsoleShell {
         int iconSize = res.getDimensionPixelSize(R.dimen.lemurx_console_icon_size);
         int iconSmall = res.getDimensionPixelSize(R.dimen.lemurx_console_icon_size_small);
 
-        // 药丸：不是网页时最左是当前页图标（选中）。网页上那一格收起，左侧长出前进后退。
+        // 药丸：网页钮、对话钮，然后是搜索、标签页、菜单。网页上网页钮收起，长出前进后退。
         // 宽度不超过 370dp，超出的屏幕居中。
         LinearLayout pill =
                 new LinearLayout(activity) {
@@ -2182,15 +2250,6 @@ public final class LemurXConsoleShell {
             pill.setOutlineSpotShadowColor(soft);
         }
 
-        View here = cell(activity, R.drawable.lemurx_console_ic_chat,
-                R.string.lemurx_console_chat, iconSize, cellHeight, v -> {});
-        here.setOnClickListener(null);
-        here.setClickable(false);
-        sHereIcon = (ImageView) ((FrameLayout) here).getChildAt(0);
-        sHereCell = here;
-        applySlotWeight(here, 0f);
-        pill.addView(here);
-
         View backCell = cell(activity, R.drawable.lemurx_console_ic_back,
                 R.string.lemurx_console_back, iconSize, cellHeight, v -> goHistoryBack());
         View forwardCell = cell(activity, R.drawable.lemurx_console_ic_forward,
@@ -2210,10 +2269,11 @@ public final class LemurXConsoleShell {
         View tabs = tabsCell(activity, iconSmall, cellHeight);
         sTabsCell = tabs;
         pill.addView(sectionCells[CELL_WEB]);
-        pill.addView(tabs);
         pill.addView(sectionCells[CELL_CHAT]);
+        // 进出网页时网页钮和前进后退对调；搜索、标签页、菜单只跟着间距动。
         pill.addView(cell(activity, R.drawable.lemurx_console_ic_search,
                 R.string.lemurx_console_search, iconSmall, cellHeight, v -> openSearch()));
+        pill.addView(tabs);
         View menu = cell(activity, R.drawable.lemurx_muse_ic_menu,
                 R.string.lemurx_console_menu, iconSize, cellHeight, v -> openSidebar());
         sMenuCell = menu;
@@ -2624,8 +2684,18 @@ public final class LemurXConsoleShell {
             LemurXDeviceBridge.keepLockOnTop();
             return;
         }
+        bringNavToFront();
+    }
+
+    /** 已经在最前就不动。bringToFront 会让整个窗口重新布局，切换页面时反复调用就会卡。 */
+    private static void bringNavToFront() {
         View nav = sNav;
-        if (nav != null && nav.getVisibility() == View.VISIBLE) nav.bringToFront();
+        if (nav == null || nav.getVisibility() != View.VISIBLE) return;
+        ViewParent parent = nav.getParent();
+        if (!(parent instanceof ViewGroup)) return;
+        ViewGroup group = (ViewGroup) parent;
+        if (group.getChildAt(group.getChildCount() - 1) == nav) return;
+        nav.bringToFront();
     }
 
     /** 这次触摸是不是落在底栏范围内。独立层把这一条让出去，导航栏才能接到。 */
@@ -2662,14 +2732,14 @@ public final class LemurXConsoleShell {
         Tab overlayTab = null;
         String overlaySection = null;
         try {
-            if (isEnabled() && sLayout == LayoutType.BROWSING && !sOmniboxOpen) {
+            if (isEnabled() && sLayout == LayoutType.BROWSING && !omniboxHidesNav()) {
                 Tab fg = activity.getActivityTab();
                 if (fg != null && !MuseUrls.isMuse(fg.getUrl().getSpec())) {
                     overlaySection = sOverlaySection.get(fg.getId());
                     if (overlaySection != null) overlayTab = fg;
                 }
             }
-            if (isEnabled() && sLayout == LayoutType.BROWSING && !sOmniboxOpen
+            if (isEnabled() && sLayout == LayoutType.BROWSING && !omniboxHidesNav()
                     && sNavSuppressors.isEmpty()) {
                 tab = activity.getActivityTab();
                 if (tab != null) {
@@ -2705,10 +2775,10 @@ public final class LemurXConsoleShell {
         watchGesture(webMode ? tab : null);
         syncProgress(activity);
         boolean collapsed = webMode && sWebCollapsed;
+        sWebReady = hasWeb;
         View[] cells = sSectionCells;
         if (cells != null) {
-            // 这个标签页还没看过网页：网页格压暗（点了会唤起地址栏）。
-            cells[CELL_WEB].setAlpha(hasWeb ? 1f : 0.4f);
+            // 这个标签页还没看过网页：网页格压暗（点了会唤起地址栏）。网页钮的透明度在排按钮时一起算。
             for (int i = 0; i < cells.length; i++) {
                 if (cells[i] == null) continue;
                 // 正在看网页时地球格会收起，底栏不保持一个默认选中项。
@@ -2723,9 +2793,12 @@ public final class LemurXConsoleShell {
             }
         }
         morphWebChrome(webMode);
-        paintHere();
         updateHistoryButtons(webMode ? tab : null);
         int vis = show && !collapsed && !sPipChrome ? View.VISIBLE : View.GONE;
+        if (vis == View.VISIBLE && !sSearchHandoff) {
+            nav.animate().cancel();
+            nav.setAlpha(1f);
+        }
         if (nav.getVisibility() != vis) {
             if (vis == View.VISIBLE) syncInsets(nav, sNavPadH, sNavPadTop, sNavPadBottom);
             nav.setVisibility(vis);
@@ -2734,7 +2807,7 @@ public final class LemurXConsoleShell {
         }
         // 每次刷新都抬到最上面。网页合成层和后来加上的覆盖层不能盖住底栏。
         // Agent 正在操作时反过来：锁盖住底栏，接管之前底栏不能点。
-        if (vis == View.VISIBLE && !LemurXDeviceBridge.isDriving()) nav.bringToFront();
+        if (vis == View.VISIBLE && !LemurXDeviceBridge.isDriving()) bringNavToFront();
         LemurXDeviceBridge.keepLockOnTop();
         updateTabCount();
         if (!sOmniboxOpen && tabsReady()) {
@@ -2748,21 +2821,24 @@ public final class LemurXConsoleShell {
     }
 
     /**
-     * 网页模式：前进后退从左侧长出来，地球格收起来，不默认选中任何一格，标签按钮留着。
-     * 对话模式反过来，地球回来。侧边栏三条线两种模式都留在最右边。
-     * weight 0↔1 + 透明度 + 轻微缩放，280ms FastOutSlowIn。
+     * 网页模式：前进后退从左侧长出来，网页钮收起。Agent 页上对话钮本来就排在网页钮后面，
+     * 网页钮让位后它留在前进后退右侧。搜索、标签页、菜单不换顺序，只跟着可用宽度改间距。离开网页时反过来。侧边栏三条线两种模式都留在最右边。
+     * weight 0↔1 + 透明度 + 轻微缩放，280ms FastOutSlowIn。每一帧只摆药丸里的按钮，
+     * 不触发整窗布局；同一次切换里后来的刷新也不把动画时钟清零。
      */
     private static void morphWebChrome(boolean webChrome) {
         View back = sBackCell;
         View forward = sForwardCell;
         View[] cells = sSectionCells;
         if (back == null || forward == null || cells == null) return;
+        if (sChromeAnim != null && sChromeAnim.isRunning() && sWebChrome == webChrome) return;
         float target = webChrome ? 1f : 0f;
         float current = slotWeight(back);
         if (sWebChrome == webChrome && Math.abs(current - target) < 0.01f) {
             applyChrome(webChrome ? 1f : 0f);
             return;
         }
+        prepareChatTrack(webChrome);
         sWebChrome = webChrome;
         if (sChromeAnim != null) sChromeAnim.cancel();
         if (Math.abs(current - target) < 0.01f) {
@@ -2780,28 +2856,30 @@ public final class LemurXConsoleShell {
     private static void applyChrome(float chrome) {
         applySlotWeight(sBackCell, chrome);
         applySlotWeight(sForwardCell, chrome);
-        applySlotWeight(sHereCell, 1f - chrome);
         View[] cells = sSectionCells;
-        // 标签按钮两种模式都在。网页上不再用地球图标占一个默认选中位。
+        // 搜索、标签、菜单两种模式都在，顺序不动，宽度跟着前后钮的权重一起变。
         applySlotWeight(sTabsCell, 1f);
         applySlotWeight(sMenuCell, 1f);
         if (cells != null) {
-            // 当前页已经占住最左一格时，不再在后面重复同一个图标。社区在侧边栏里。
-            float chat = sPlace == CELL_CHAT ? chrome : 1f;
+            float chat = sPlace == CELL_CHAT ? 1f : (sChatTracksChrome ? chrome : 1f);
             applySlotWeight(cells[CELL_WEB], 1f - chrome);
             applySlotWeight(cells[CELL_CHAT], chat);
+            if (!sWebReady) cells[CELL_WEB].setAlpha(0.4f * (1f - chrome));
         }
-        LinearLayout nav = sNav;
-        if (nav != null) nav.requestLayout();
-        if (chrome > 0.5f) {
-            ChromeTabbedActivity activity = sActivity;
-            Tab tab = null;
-            try {
-                if (activity != null) tab = activity.getActivityTab();
-            } catch (Exception e) {
-                tab = null;
-            }
-            updateHistoryButtons(tab);
+        placeSlots();
+        paintHistoryAlpha();
+    }
+
+    /**
+     * 对话钮已经单独露在底栏上时，进出网页保持占位，只让网页钮和前进后退做动画。
+     */
+    private static void prepareChatTrack(boolean webChrome) {
+        View[] cells = sSectionCells;
+        View chat = cells == null ? null : cells[CELL_CHAT];
+        if (webChrome) {
+            sChatTracksChrome = slotWeight(chat) < 0.99f;
+        } else {
+            sChatTracksChrome = false;
         }
     }
 
@@ -2817,52 +2895,56 @@ public final class LemurXConsoleShell {
         ViewGroup.LayoutParams raw = view.getLayoutParams();
         if (!(raw instanceof LinearLayout.LayoutParams)) return;
         LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
+        // 只改权重，不走 setLayoutParams。那会把布局请求冒到整个窗口，切换时每一帧都卡一下。
+        lp.width = 0;
         lp.weight = weight;
-        view.setLayoutParams(lp);
         view.setAlpha(weight);
         float scale = 0.72f + 0.28f * weight;
         view.setScaleX(scale);
         view.setScaleY(scale);
         boolean on = weight > 0.08f;
-        view.setClickable(on);
-        view.setFocusable(on);
-        view.setImportantForAccessibility(
-                on ? View.IMPORTANT_FOR_ACCESSIBILITY_YES : View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-    }
-
-    /** 最左一格换成当前页面的图标，并保持选中。网页上这一格是收起的。 */
-    private static void paintHere() {
-        View here = sHereCell;
-        ImageView icon = sHereIcon;
-        if (here == null || icon == null) return;
-        int drawable = R.drawable.lemurx_console_ic_chat;
-        int desc = R.string.lemurx_console_chat;
-        if (sPlace == CELL_COMMUNITY) {
-            drawable = R.drawable.lemurx_console_ic_community;
-            desc = R.string.lemurx_console_community;
-        } else if (sPlace == PLACE_COMPUTER) {
-            drawable = R.drawable.lemurx_muse_ic_server;
-            desc = R.string.lemurx_muse_computer;
-        } else if (sPlace == PLACE_FILES) {
-            drawable = R.drawable.lemurx_muse_ic_file_text;
-            desc = R.string.lemurx_muse_files;
-        } else if (sPlace == CELL_WEB) {
-            drawable = R.drawable.lemurx_console_ic_web;
-            desc = R.string.lemurx_console_web;
-        }
-        icon.setImageResource(drawable);
-        ChromeTabbedActivity activity = sActivity;
-        if (activity != null) here.setContentDescription(activity.getString(desc));
-        boolean mark = !sWebChrome;
-        if (here.isSelected() != mark) {
-            here.setSelected(mark);
-            here.setBackgroundResource(mark
-                    ? R.drawable.lemurx_console_cell_active_bg
-                    : R.drawable.lemurx_console_cell_bg);
+        if (view.isClickable() != on) {
+            view.setClickable(on);
+            view.setFocusable(on);
+            view.setImportantForAccessibility(
+                    on ? View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                            : View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         }
     }
 
-    /** 盖层打开或收起之后重算最左一格。 */
+    /** 按当前权重把药丸里的按钮摆好。药丸自己的宽高不变，所以不用重新测量窗口。 */
+    private static void placeSlots() {
+        View anchor = sBackCell;
+        if (anchor == null || !(anchor.getParent() instanceof ViewGroup)) return;
+        ViewGroup pill = (ViewGroup) anchor.getParent();
+        int inner = pill.getWidth() - pill.getPaddingLeft() - pill.getPaddingRight();
+        if (inner <= 0) return;
+        int count = pill.getChildCount();
+        float sum = 0f;
+        for (int i = 0; i < count; i++) sum += slotWeight(pill.getChildAt(i));
+        if (sum <= 0f) return;
+        int x = pill.getPaddingLeft();
+        int top = pill.getPaddingTop();
+        int used = 0;
+        for (int i = 0; i < count; i++) {
+            View child = pill.getChildAt(i);
+            int width = i == count - 1
+                    ? Math.max(0, inner - used)
+                    : Math.round(inner * slotWeight(child) / sum);
+            used += width;
+            int height = child.getLayoutParams().height;
+            if (height <= 0) height = child.getHeight();
+            child.measure(
+                    View.MeasureSpec.makeMeasureSpec(Math.max(width, 0), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(Math.max(height, 0), View.MeasureSpec.EXACTLY));
+            child.setPivotX(width / 2f);
+            child.setPivotY(height / 2f);
+            child.layout(x, top, x + width, top + height);
+            x += width;
+        }
+    }
+
+    /** 盖层打开或收起之后重算底栏。 */
     public static void onPlaceChanged() {
         refresh();
         liftNav();
@@ -2886,11 +2968,19 @@ public final class LemurXConsoleShell {
             canBack = false;
             canForward = false;
         }
+        sHistBack = canBack;
+        sHistForward = canForward;
         back.setEnabled(canBack);
         forward.setEnabled(canForward);
-        float shown = slotWeight(back);
-        back.setAlpha((canBack ? 1f : 0.32f) * shown);
-        forward.setAlpha((canForward ? 1f : 0.32f) * shown);
+        paintHistoryAlpha();
+    }
+
+    /** 前进后退的明暗跟着能点与否，也跟着它正在展开的宽度。 */
+    private static void paintHistoryAlpha() {
+        View back = sBackCell;
+        View forward = sForwardCell;
+        if (back != null) back.setAlpha((sHistBack ? 1f : 0.32f) * slotWeight(back));
+        if (forward != null) forward.setAlpha((sHistForward ? 1f : 0.32f) * slotWeight(forward));
     }
 
     // ---------------------------------------------------------------- 网页上的 Agent 覆盖层
@@ -3421,8 +3511,9 @@ public final class LemurXConsoleShell {
         }
     }
 
-    /** 当前前台是不是正盖着附件预览、设置抽屉、社区，或者 Agent（返回键要先收它们）。 */
+    /** 当前前台是不是正盖着附件预览、设置抽屉、推荐、选择框、社区，或者 Agent（返回键要先收它们）。 */
     private static boolean overlayVisible() {
+        if (MusePage.chatSheetsOpen()) return true;
         if (MusePage.previewOpen()) return true;
         if (MusePage.drawerOpen()) return true;
         if (MusePage.filesOpen()) return true;
@@ -3433,11 +3524,12 @@ public final class LemurXConsoleShell {
                 && sOverlayHost.getVisibility() == View.VISIBLE;
     }
 
-    /** 返回键：先收附件预览，再收设置抽屉，再收盖层。从侧边栏点进去的盖层，关掉后抽屉回到打开的状态。 */
+    /** 返回键：先收附件预览和设置抽屉，再收推荐和选择框，再收盖层。从侧边栏点进去的盖层，关掉后抽屉回到打开的状态。 */
     private static boolean consumeBack() {
         if (LemurXWelcome.consumeBack()) return true;
         if (MusePage.closePreview()) return true;
         if (MusePage.closeDrawer()) return true;
+        if (MusePage.closeChatSheets()) return true;
         if (MusePage.backFromComputer()) return true;
         if (MusePage.closeFiles()) return true;
         if (MusePage.backFromArchive()) return true;

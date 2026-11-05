@@ -166,6 +166,8 @@ public class MusePage implements NativePage {
 
     private final FrameLayout mRoot;
     private final FrameLayout mContent;
+    /** 顶栏：Aero 图标、标题、新增标签。输入时整条收起，搜索建议顶到状态栏下。 */
+    private final LinearLayout mHeader;
     private final TextView mHeading;
     private final ImageView mMenu;
     private final View mNewChat;
@@ -239,13 +241,13 @@ public class MusePage implements NativePage {
         column.setOrientation(LinearLayout.VERTICAL);
 
         // ---- 顶栏
-        LinearLayout header = new LinearLayout(context);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(8), dp(6), dp(8), dp(6));
+        mHeader = new LinearLayout(context);
+        mHeader.setOrientation(LinearLayout.HORIZONTAL);
+        mHeader.setGravity(Gravity.CENTER_VERTICAL);
+        mHeader.setPadding(dp(8), dp(6), dp(8), dp(6));
         mMenu = iconButton(context, R.drawable.lemurx_muse_ic_menu, R.string.lemurx_muse_settings);
         showMenuButton();
-        header.addView(mMenu);
+        mHeader.addView(mMenu);
 
         ImageView logo = new ImageView(context);
         logo.setImageResource(R.mipmap.app_icon);
@@ -260,14 +262,14 @@ public class MusePage implements NativePage {
         LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(26), dp(26));
         logoLp.setMarginStart(dp(4));
         logoLp.setMarginEnd(dp(8));
-        header.addView(logo, logoLp);
+        mHeader.addView(logo, logoLp);
 
         mHeading = new TextView(context);
         mHeading.setTextColor(text(context));
         mHeading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         mHeading.setTypeface(Typeface.DEFAULT_BOLD);
         mHeading.setText(R.string.lemurx_muse_brand);
-        header.addView(mHeading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        mHeader.addView(mHeading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         mNewChat = iconButton(context, R.drawable.lemurx_muse_ic_new_chat, R.string.lemurx_muse_new_chat);
         mNewChat.setOnClickListener(
@@ -279,8 +281,8 @@ public class MusePage implements NativePage {
                     }
                     newChat();
                 });
-        header.addView(mNewChat);
-        column.addView(header, new LinearLayout.LayoutParams(
+        mHeader.addView(mNewChat);
+        column.addView(mHeader, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         mContent = new FrameLayout(context);
@@ -428,8 +430,14 @@ public class MusePage implements NativePage {
         show(section);
     }
 
+    /** 输入时收起顶栏，让搜索建议顶到状态栏下面。离开输入或离开对话时放回来。 */
+    void setComposeHeaderHidden(boolean hidden) {
+        mHeader.setVisibility(hidden ? View.GONE : View.VISIBLE);
+    }
+
     private void show(String section) {
         mSection = section;
+        mHeader.setVisibility(View.VISIBLE);
         if (mArchive != null && mArchive.getVisibility() == View.VISIBLE) {
             if (mChat != null) mChat.setVisibility(View.GONE);
             if (mCommunity != null) mCommunity.setVisibility(View.GONE);
@@ -463,6 +471,7 @@ public class MusePage implements NativePage {
             mHeading.setText(R.string.lemurx_muse_brand);
             mNewChat.setContentDescription(context.getString(R.string.lemurx_muse_new_chat));
             mNewChat.setVisibility(View.VISIBLE);
+            if (mChat.isComposing()) setComposeHeaderHidden(true);
         }
         try {
             mTab.updateTitle();
@@ -1019,6 +1028,30 @@ public class MusePage implements NativePage {
     /** 收起附件预览。没开着时返回 false。 */
     public static boolean closePreview() {
         return MuseChatView.closePreview();
+    }
+
+    /** 推荐或设备、模型、附件选择正开着。返回手势要先收它们，不要去翻网页历史。 */
+    public static boolean chatSheetsOpen() {
+        return MuseChatView.sheetsOpen();
+    }
+
+    /** 收起最上面的一层选择框或推荐。没开着时返回 false。 */
+    public static boolean closeChatSheets() {
+        return MuseChatView.consumeSheetBack();
+    }
+
+    /**
+     * 打开应用或回到前台时把这个账号的 Tailscale 节点拉上线，并刷新对话里的在线点。
+     * 还没有对话页时也要打这一下，不能等用户再打开远程电脑。
+     */
+    public static void bringTailnetOnline() {
+        ThreadUtils.assertOnUiThread();
+        if (!LemurXAccount.isSignedIn()) return;
+        if (sChats.isEmpty()) {
+            LemurXComputer.ensureNodeOnline(null);
+            return;
+        }
+        for (MuseChatView chat : sChats.values()) chat.bringTargetsOnline();
     }
 
     // ---------------------------------------------------------------- 内边距

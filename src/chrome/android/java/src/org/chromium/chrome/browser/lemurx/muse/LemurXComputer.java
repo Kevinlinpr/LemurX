@@ -50,6 +50,33 @@ final class LemurXComputer {
     private static final int MAX_LOG = 8000;
     private static final int MAX_RUNS = 24;
 
+    /**
+     * 打开应用时每个对话都会问一次节点状态。并到同一次请求里，避免两路同时
+     * {@code tailscale up} 把刚连上的登录拆掉。
+     */
+    private static boolean sOnlineInFlight;
+    private static final List<MuseApi.Callback<Object>> sAfterOnline = new ArrayList<>();
+
+    /**
+     * 用已经保存的登录把这个账号的节点拉上线。没有登录记录时服务端保持离线，这里不交新的 key。
+     * {@code done} 在界面线程收到 {@code /api/tailnet} 的结果；可以是 null。
+     */
+    static void ensureNodeOnline(MuseApi.@Nullable Callback<Object> done) {
+        if (!LemurXAccount.isSignedIn()) {
+            if (done != null) done.onResult(null, null);
+            return;
+        }
+        if (done != null) sAfterOnline.add(done);
+        if (sOnlineInFlight) return;
+        sOnlineInFlight = true;
+        MuseApi.get().get("/api/tailnet", (value, error) -> {
+            sOnlineInFlight = false;
+            List<MuseApi.Callback<Object>> waiters = new ArrayList<>(sAfterOnline);
+            sAfterOnline.clear();
+            for (MuseApi.Callback<Object> waiter : waiters) waiter.onResult(value, error);
+        });
+    }
+
     /** 聊天和本机记录共用的一次运行。对话里点预览读这条命令和输出。 */
     static final class Run {
         final String id;

@@ -11,7 +11,10 @@ import android.graphics.Typeface;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
@@ -73,7 +76,7 @@ final class MuseDrawer {
         mScrim.setAlpha(0f);
         mScrim.setOnClickListener(v -> close());
 
-        mPanel = new LinearLayout(context);
+        mPanel = new DrawerPanel(context);
         mPanel.setOrientation(LinearLayout.VERTICAL);
         mPanel.setBackgroundColor(MusePage.bg(context));
         mPanel.setElevation(MusePage.dp(context, 8));
@@ -386,6 +389,148 @@ final class MuseDrawer {
         for (int i = 0; i < mPushed.size(); i++) {
             mPushed.get(i).animate().translationX(mPushedFrom.get(i)).setDuration(240)
                     .setInterpolator(ease).start();
+        }
+    }
+
+    /** 侧边栏当前宽度。跟着手指走时，页面让开的距离按这个算。 */
+    private float panelWidth() {
+        int width = mPanel.getWidth();
+        if (width > 0) return width;
+        ViewGroup.LayoutParams lp = mPanel.getLayoutParams();
+        return lp != null ? lp.width : 0;
+    }
+
+    /** 开始用手拖之前，先停掉打开和收起的动画。 */
+    private void cancelSlide() {
+        mPanel.animate().cancel();
+        for (int i = 0; i < mPushed.size(); i++) {
+            mPushed.get(i).animate().cancel();
+        }
+    }
+
+    /** 侧边栏和被推开的页面一起跟着手指。{@code translationX} 在 {@code [-宽, 0]}。 */
+    private void dragTo(float translationX) {
+        float width = panelWidth();
+        if (width <= 0) return;
+        translationX = Math.max(-width, Math.min(0f, translationX));
+        mPanel.setTranslationX(translationX);
+        for (int i = 0; i < mPushed.size(); i++) {
+            mPushed.get(i).setTranslationX(mPushedFrom.get(i) + width + translationX);
+        }
+    }
+
+    /** 滑得不够，弹回打开的位置。 */
+    private void settleOpen() {
+        float width = panelWidth();
+        android.view.animation.Interpolator ease = new DecelerateInterpolator(1.6f);
+        mPanel.animate().translationX(0f).setDuration(200).setInterpolator(ease).start();
+        for (int i = 0; i < mPushed.size(); i++) {
+            mPushed.get(i).animate().translationX(mPushedFrom.get(i) + width)
+                    .setDuration(200).setInterpolator(ease).start();
+        }
+    }
+
+    /**
+     * 开着的侧边栏。向左滑就跟着收起，竖着滚名单不抢手势。
+     * 系统边缘返回仍然走原来的返回键路径。
+     */
+    private final class DrawerPanel extends LinearLayout {
+        private final int mSlop;
+        private final int mMinFling;
+        private float mDownRawX;
+        private float mDownRawY;
+        private float mOriginRawX;
+        private boolean mDragging;
+        private boolean mChecking;
+        private @Nullable VelocityTracker mTracker;
+
+        DrawerPanel(android.content.Context context) {
+            super(context);
+            ViewConfiguration vc = ViewConfiguration.get(context);
+            mSlop = vc.getScaledTouchSlop();
+            mMinFling = vc.getScaledMinimumFlingVelocity();
+        }
+
+        private void track(MotionEvent ev) {
+            if (mTracker == null) mTracker = VelocityTracker.obtain();
+            mTracker.addMovement(ev);
+        }
+
+        private void clearTracker() {
+            if (mTracker != null) {
+                mTracker.recycle();
+                mTracker = null;
+            }
+            mDragging = false;
+            mChecking = false;
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent ev) {
+            if (!mOpen || mClosing) return false;
+            int action = ev.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                mDownRawX = ev.getRawX();
+                mDownRawY = ev.getRawY();
+                mOriginRawX = ev.getRawX() - getTranslationX();
+                mDragging = false;
+                mChecking = true;
+                track(ev);
+                return false;
+            }
+            if (action == MotionEvent.ACTION_MOVE && mChecking) {
+                track(ev);
+                float dx = ev.getRawX() - mDownRawX;
+                float dy = ev.getRawY() - mDownRawY;
+                if (Math.abs(dx) > mSlop || Math.abs(dy) > mSlop) {
+                    if (dx < 0 && Math.abs(dx) > Math.abs(dy)) {
+                        mDragging = true;
+                        mChecking = false;
+                        cancelSlide();
+                        if (getParent() != null) {
+                            getParent().requestDisallowInterceptTouchEvent(true);
+                        }
+                        dragTo(ev.getRawX() - mOriginRawX);
+                        return true;
+                    }
+                    mChecking = false;
+                }
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                clearTracker();
+            }
+            return false;
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent ev) {
+            if (!mDragging) return super.onTouchEvent(ev);
+            track(ev);
+            int action = ev.getActionMasked();
+            if (action == MotionEvent.ACTION_MOVE) {
+                dragTo(ev.getRawX() - mOriginRawX);
+                return true;
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                float vx = 0f;
+                if (mTracker != null) {
+                    mTracker.computeCurrentVelocity(1000);
+                    vx = mTracker.getXVelocity();
+                }
+                float tx = getTranslationX();
+                float width = panelWidth();
+                boolean flingClose = vx < -mMinFling;
+                boolean flingOpen = vx > mMinFling;
+                boolean past = width > 0 && tx < -width * 0.28f;
+                clearTracker();
+                if (action != MotionEvent.ACTION_CANCEL && (flingClose || (past && !flingOpen))) {
+                    close();
+                } else {
+                    settleOpen();
+                }
+                return true;
+            }
+            return true;
         }
     }
 

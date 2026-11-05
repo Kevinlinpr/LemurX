@@ -45,6 +45,7 @@ android_resources("muse_resources") {
     "res/drawable/lemurx_muse_ic_new_chat.xml",
     "res/drawable/lemurx_muse_ic_mic.xml",
     "res/drawable/lemurx_muse_ic_palette.xml",
+    "res/drawable/lemurx_muse_ic_paperclip.xml",
     "res/drawable/lemurx_muse_ic_pin.xml",
     "res/drawable/lemurx_muse_ic_plus.xml",
     "res/drawable/lemurx_muse_ic_refresh.xml",
@@ -55,8 +56,10 @@ android_resources("muse_resources") {
     "res/drawable/lemurx_muse_ic_smartphone.xml",
     "res/drawable/lemurx_muse_ic_sparkles.xml",
     "res/drawable/lemurx_muse_ic_stop.xml",
+    "res/drawable/lemurx_muse_ic_switch.xml",
     "res/drawable/lemurx_muse_ic_trash.xml",
     "res/drawable/lemurx_muse_ic_user.xml",
+    "res/drawable/lemurx_muse_ic_x.xml",
     "res/values-zh-rCN/lemurx_muse_strings.xml",
     "res/values/lemurx_muse_strings.xml",
   ]

@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.lemurx.muse;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.Dialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -18,6 +17,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Outline;
+import android.graphics.drawable.Drawable;
 import android.graphics.PorterDuff;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -41,6 +41,7 @@ import android.text.Selection;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.text.method.ArrowKeyMovementMethod;
 import android.text.style.ClickableSpan;
 import android.text.style.ImageSpan;
@@ -56,9 +57,7 @@ import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
-import android.view.Window;
 import android.view.WindowInsets;
-import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
@@ -69,7 +68,9 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import androidx.appcompat.content.res.AppCompatResources;
 import androidx.core.content.FileProvider;
+import androidx.core.widget.ImageViewCompat;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.FileProviderUtils;
@@ -83,7 +84,26 @@ import org.chromium.chrome.browser.lemurx.LemurXConsoleShell;
 import org.chromium.chrome.browser.lemurx.agent.LemurXDeviceBridge;
 import org.chromium.chrome.browser.lemurx.LemurXHaptics;
 import org.chromium.chrome.browser.lemurx.LemurXKillSwitch;
+import org.chromium.chrome.browser.omnibox.styles.OmniboxImageSupplier;
+import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
+import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteController;
+import org.chromium.chrome.browser.omnibox.suggestions.base.BaseSuggestionView;
+import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
+import org.chromium.components.browser_ui.styles.ChromeColors;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.components.metrics.OmniboxEventProtosIntDef.PageClassification;
+import org.chromium.components.omnibox.AutocompleteInput;
+import org.chromium.components.omnibox.AutocompleteMatch;
+import org.chromium.components.omnibox.AutocompleteResult;
+import org.chromium.components.omnibox.AutocompleteStopReason;
+import org.chromium.components.omnibox.OmniboxFocusReason;
+import org.chromium.components.omnibox.OmniboxSuggestionType;
+import org.chromium.components.omnibox.SuggestTemplateInfoProto.SuggestTemplateInfo;
+import org.chromium.components.search_engines.TemplateUrl;
+import org.chromium.components.search_engines.TemplateUrlService;
+import org.chromium.url.GURL;
 import org.chromium.ui.base.WindowAndroid;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -230,6 +250,45 @@ class MuseChatView extends FrameLayout {
     /** 列表末尾的"Agent 正在…"那一行：三个跳动的点 + 可选的说明文字（工具名）。 */
     private final LinearLayout mTyping;
     private final EditText mInput;
+    /** 远程推荐选中后贴在文字上面，标明这一段输入基于哪一项。 */
+    private final LinearLayout mBasisRow;
+    private final TextView mBasisLabel;
+    private @Nullable String mBasisPrompt;
+    private boolean mBasisHeld;
+    /** 输入栏本身。上拉建议贴着它的上沿，把上面的对话盖住。 */
+    private final LinearLayout mInputBar;
+    private final FrameLayout mAskSheet;
+    private final LinearLayout mAskRows;
+    /** 输入框上面的三个动作：问 Aero、解释、查一下。只在打字时出现。 */
+    private final LinearLayout mComposeChips;
+    /**
+     * 附件、设备、三个动作和输入框。打字时这一条的底色和搜索建议相同，输入框自己仍是圆角色块。
+     */
+    private final LinearLayout mComposeDock;
+    /** 切换设备时盖住对话的列表。添加远程电脑只放在这里。 */
+    private final FrameLayout mDeviceSheet;
+    private final LinearLayout mDeviceCard;
+    private final LinearLayout mDeviceRows;
+    /** 选择模型时盖住对话的列表。 */
+    private final FrameLayout mModelSheet;
+    private final LinearLayout mModelCard;
+    private final LinearLayout mModelRows;
+    /** 选附件类型。和设备、模型同一张贴着输入栏的卡片。 */
+    private final FrameLayout mAttachSheet;
+    private final LinearLayout mAttachCard;
+    private final LinearLayout mAttachChoices;
+    /** 程序自己改输入框时不要把上拉建议弹出来。 */
+    private int mAskQuiet;
+    private int mAskGen;
+    private boolean mAskListening;
+    private AutocompleteController.@Nullable OnSuggestionsReceivedListener mAskListener;
+    private List<AutocompleteMatch> mAskMatches = new ArrayList<>();
+    private @Nullable Runnable mAskQuery;
+    /** 输入栏和上拉层都挂好了。构造过程里的布局不要去碰还没建好的层。 */
+    private boolean mAskPlaced;
+    /** 搜索建议用地址栏原来的尺寸和颜色。 */
+    private @Nullable OmniboxResourceProvider mOmniboxResources;
+    private @Nullable OmniboxImageSupplier mOmniboxImages;
     private final ImageView mSend;
     private final ImageView mMic;
     private final ImageView mAttach;
@@ -270,6 +329,8 @@ class MuseChatView extends FrameLayout {
     private final LinearLayout mSuggestions;
     private @Nullable View mPreview;
     private static @Nullable MuseChatView sPreviewOwner;
+    /** 推荐或设备、模型、附件选择正盖着。返回手势先收这一层。 */
+    private static @Nullable MuseChatView sSheetOwner;
 
     private final List<Message> mMessages = new ArrayList<>();
     private @Nullable String mThreadId;
@@ -551,7 +612,10 @@ class MuseChatView extends FrameLayout {
         LinearLayout.LayoutParams attachLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         attachLp.setMargins(pad, 0, pad, dp(8));
-        column.addView(mAttachScroll, attachLp);
+        // 打字时这一整条（附件、设备、动作、输入框）要和上面的搜索建议连成同一块底色。
+        mComposeDock = new LinearLayout(context);
+        mComposeDock.setOrientation(LinearLayout.VERTICAL);
+        mComposeDock.addView(mAttachScroll, attachLp);
 
         // 操作对象。标题写明是给 Agent 操作的，避免只看到一个设备名。
         mTargetRow = new LinearLayout(context);
@@ -594,6 +658,7 @@ class MuseChatView extends FrameLayout {
         LinearLayout.LayoutParams titleRowLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         titleRowLp.bottomMargin = dp(10);
+        titleRow.setVisibility(View.GONE);
         targetBlock.addView(titleRow, titleRowLp);
         mTargetHint = new TextView(context);
         mTargetHint.setText(R.string.lemurx_agent_operates_hint);
@@ -603,38 +668,71 @@ class MuseChatView extends FrameLayout {
         mTargetHint.setVisibility(View.GONE);
         mHideTargetHint = () -> mTargetHint.setVisibility(View.GONE);
         targetBlock.addView(mTargetHint);
-        targetBlock.addView(mTargetScroll);
         mTargetBlock = targetBlock;
+        // 设备钮挪进输入框底排，这一条不再单独占一行。
+        targetBlock.setVisibility(View.GONE);
         LinearLayout.LayoutParams targetLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         targetLp.setMargins(pad, 0, pad, dp(8));
-        column.addView(targetBlock, targetLp);
+        mComposeDock.addView(targetBlock, targetLp);
+        mComposeChips = new LinearLayout(context);
+        mComposeChips.setOrientation(LinearLayout.HORIZONTAL);
+        mComposeChips.setGravity(Gravity.CENTER_VERTICAL);
+        mComposeChips.setVisibility(View.GONE);
+        addComposeChip(context, R.string.lemurx_muse_compose_ask, () -> sendCompose(false, false));
+        addComposeChip(context, R.string.lemurx_muse_compose_explain, () -> sendCompose(true, false));
+        addComposeChip(context, R.string.lemurx_muse_compose_lookup, () -> sendCompose(false, true));
+        LinearLayout.LayoutParams chipsLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        chipsLp.setMargins(pad, 0, pad, dp(8));
+        mComposeDock.addView(mComposeChips, chipsLp);
         refreshTargets();
 
-        // ---- 输入栏
-        LinearLayout bar = new LinearLayout(context);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.BOTTOM);
-        bar.setBackground(MusePage.rounded(MusePage.surface(getContext()), 26, context));
-        bar.setPadding(dp(6), dp(6), dp(6), dp(6));
-        mAttach = new ImageView(context);
-        mAttach.setImageResource(R.drawable.lemurx_muse_ic_plus);
-        mAttach.setColorFilter(MusePage.text(context), PorterDuff.Mode.SRC_IN);
-        mAttach.setContentDescription(context.getString(R.string.lemurx_muse_attach));
-        mAttach.setClickable(true);
-        // 和发送钮一样不能抢焦点，否则按下时键盘先收、底栏回来，点按落到药丸上。
-        mAttach.setFocusable(false);
-        mAttach.setFocusableInTouchMode(false);
-        mAttach.setPadding(dp(9), dp(9), dp(9), dp(9));
-        mAttach.setOnClickListener(v -> onAttachClicked());
-        bar.addView(mAttach, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        // ---- 输入栏：上面是文字，下面是设备、模型，以及靠右的附件、语音、发送。
+        mInputBar = new LinearLayout(context);
+        mInputBar.setOrientation(LinearLayout.VERTICAL);
+        mInputBar.setBackground(MusePage.rounded(MusePage.surface(getContext()), 18, context));
+        mInputBar.setPadding(dp(4), dp(4), dp(4), dp(4));
+        mBasisRow = new LinearLayout(context);
+        mBasisRow.setOrientation(LinearLayout.HORIZONTAL);
+        mBasisRow.setGravity(Gravity.CENTER_VERTICAL);
+        mBasisRow.setVisibility(View.GONE);
+        mBasisRow.setPadding(dp(10), dp(6), dp(4), dp(6));
+        mBasisRow.setBackground(MusePage.rounded(MusePage.chipBg(context), 12, context));
+        mBasisLabel = new TextView(context);
+        mBasisLabel.setSingleLine(true);
+        mBasisLabel.setEllipsize(TextUtils.TruncateAt.END);
+        mBasisLabel.setTextColor(MusePage.chipText(context));
+        mBasisLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        mBasisLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        mBasisRow.addView(mBasisLabel, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        ImageView basisClear = new ImageView(context);
+        basisClear.setImageResource(R.drawable.lemurx_muse_ic_x);
+        basisClear.setColorFilter(MusePage.chipText(context));
+        basisClear.setContentDescription(context.getString(R.string.lemurx_muse_clear_input));
+        basisClear.setClickable(true);
+        basisClear.setFocusable(false);
+        basisClear.setFocusableInTouchMode(false);
+        basisClear.setPadding(dp(6), dp(4), dp(6), dp(4));
+        basisClear.setOnClickListener(v -> {
+            LemurXHaptics.tick(v);
+            dismissBasis();
+        });
+        mBasisRow.addView(basisClear, new LinearLayout.LayoutParams(dp(28), dp(24)));
+        LinearLayout.LayoutParams basisLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        basisLp.setMargins(dp(8), dp(6), dp(8), 0);
+        mInputBar.addView(mBasisRow, basisLp);
         mInput = new EditText(context);
         mInput.setHint(inputHintRes());
         mInput.setHintTextColor(MusePage.muted(getContext()));
         mInput.setTextColor(MusePage.text(getContext()));
         mInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         mInput.setBackground(null);
-        mInput.setMaxLines(6);
+        mInput.setMinLines(1);
+        mInput.setMaxLines(3);
+        mInput.setGravity(Gravity.TOP | Gravity.START);
         mInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         mInput.setImeOptions(EditorInfo.IME_ACTION_SEND | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
@@ -646,11 +744,49 @@ class MuseChatView extends FrameLayout {
                     }
                     return false;
                 });
-        mInput.setPadding(0, dp(10), dp(8), dp(10));
+        mInput.setPadding(dp(12), dp(8), dp(12), dp(4));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             mInput.setTextCursorDrawable(new ColorDrawable(MusePage.text(context)));
         }
-        bar.addView(mInput, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        mInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                paintMic();
+                if (mAskQuiet > 0) return;
+                if (mBasisHeld && (s == null || s.toString().trim().isEmpty())) {
+                    clearBasis();
+                }
+                scheduleAskSheet();
+            }
+        });
+        mInputBar.addView(mInput, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout tools = new LinearLayout(context);
+        tools.setOrientation(LinearLayout.HORIZONTAL);
+        tools.setGravity(Gravity.CENTER_VERTICAL);
+        tools.setPadding(dp(2), dp(2), dp(2), dp(2));
+        mTargetScroll.setPadding(0, 0, 0, 0);
+        tools.addView(mTargetScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        tools.addView(modelChip(context));
+        tools.addView(new View(context), new LinearLayout.LayoutParams(0, 0, 1f));
+        mAttach = new ImageView(context);
+        mAttach.setImageResource(R.drawable.lemurx_muse_ic_paperclip);
+        mAttach.setColorFilter(MusePage.text(context), PorterDuff.Mode.SRC_IN);
+        mAttach.setContentDescription(context.getString(R.string.lemurx_muse_attach));
+        mAttach.setClickable(true);
+        // 和发送钮一样不能抢焦点，否则按下时键盘先收、底栏回来，点按落到药丸上。
+        mAttach.setFocusable(false);
+        mAttach.setFocusableInTouchMode(false);
+        mAttach.setPadding(dp(8), dp(8), dp(8), dp(8));
+        mAttach.setOnClickListener(v -> onAttachClicked());
+        tools.addView(mAttach, new LinearLayout.LayoutParams(dp(36), dp(36)));
         mMic = new ImageView(context);
         mMic.setImageResource(R.drawable.lemurx_muse_ic_mic);
         mMic.setContentDescription(context.getString(R.string.lemurx_muse_voice));
@@ -658,12 +794,12 @@ class MuseChatView extends FrameLayout {
         // 和发送钮一样不能抢焦点，否则按下时键盘先收、底栏回来，点按落到药丸上。
         mMic.setFocusable(false);
         mMic.setFocusableInTouchMode(false);
-        mMic.setPadding(dp(9), dp(9), dp(9), dp(9));
+        mMic.setPadding(dp(8), dp(8), dp(8), dp(8));
         mMic.setOnClickListener(v -> onMicClicked());
         paintMic();
-        LinearLayout.LayoutParams micLp = new LinearLayout.LayoutParams(dp(40), dp(40));
-        micLp.setMargins(0, 0, dp(4), 0);
-        bar.addView(mMic, micLp);
+        LinearLayout.LayoutParams micLp = new LinearLayout.LayoutParams(dp(36), dp(36));
+        micLp.setMargins(0, 0, dp(2), 0);
+        tools.addView(mMic, micLp);
         mSend = new ImageView(context);
         mSend.setImageResource(R.drawable.lemurx_muse_ic_send);
         mSend.setBackground(MusePage.rounded(MusePage.accent(context), 20, context));
@@ -674,9 +810,11 @@ class MuseChatView extends FrameLayout {
         // 消息接受这次点击之后，再主动把键盘收起来。
         mSend.setFocusable(false);
         mSend.setFocusableInTouchMode(false);
-        mSend.setPadding(dp(9), dp(9), dp(9), dp(9));
+        mSend.setPadding(dp(8), dp(8), dp(8), dp(8));
         mSend.setOnClickListener(v -> onSendClicked());
-        bar.addView(mSend, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        tools.addView(mSend, new LinearLayout.LayoutParams(dp(36), dp(36)));
+        mInputBar.addView(tools, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         mGuestNote = new TextView(context);
         mGuestNote.setText(R.string.lemurx_muse_guest_agent);
         mGuestNote.setTextColor(MusePage.accent(context));
@@ -693,13 +831,65 @@ class MuseChatView extends FrameLayout {
         LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         noteLp.setMargins(pad, 0, pad, 0);
-        column.addView(mGuestNote, noteLp);
+        mComposeDock.addView(mGuestNote, noteLp);
         LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         barLp.setMargins(pad, 0, pad, dp(10));
-        column.addView(bar, barLp);
+        mComposeDock.addView(mInputBar, barLp);
+        column.addView(mComposeDock, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         addView(column, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // 输入时盖住对话。搜索建议和下面的输入区用同一块底色。
+        mAskSheet = new FrameLayout(context);
+        mAskSheet.setVisibility(View.GONE);
+        mAskSheet.setClickable(true);
+        mAskSheet.setFocusable(false);
+        mAskSheet.setFocusableInTouchMode(false);
+        ScrollView askScroll = new ScrollView(context);
+        askScroll.setFillViewport(true);
+        askScroll.setClickable(true);
+        askScroll.setFocusable(false);
+        askScroll.setFocusableInTouchMode(false);
+        askScroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        mAskRows = new LinearLayout(context);
+        mAskRows.setOrientation(LinearLayout.VERTICAL);
+        mAskRows.setClickable(true);
+        mAskRows.setPadding(dp(16), dp(12), dp(16), dp(16));
+        askScroll.addView(mAskRows, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        mAskSheet.addView(askScroll, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        addView(mAskSheet, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        mDeviceSheet = newPickerSheet(context, v -> hideDeviceSheet());
+        ScrollView deviceScroll = newPickerScroll(context);
+        mDeviceRows = newPickerRows(context);
+        deviceScroll.addView(mDeviceRows, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        mDeviceCard = pickerSheetCard(mDeviceSheet, deviceScroll, R.string.lemurx_muse_target_sheet);
+        addView(mDeviceSheet, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        mModelSheet = newPickerSheet(context, v -> hideModelSheet());
+        ScrollView modelScroll = newPickerScroll(context);
+        mModelRows = newPickerRows(context);
+        modelScroll.addView(mModelRows, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        mModelCard = pickerSheetCard(mModelSheet, modelScroll, R.string.lemurx_muse_model_sheet);
+        addView(mModelSheet, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        mAttachSheet = newPickerSheet(context, v -> hideAttachSheet());
+        ScrollView attachScroll = newPickerScroll(context);
+        mAttachChoices = newPickerRows(context);
+        attachScroll.addView(mAttachChoices, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        mAttachCard = pickerSheetCard(mAttachSheet, attachScroll, R.string.lemurx_muse_attach_pick);
+        addView(mAttachSheet, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // 软键盘弹出时把底部药丸收起来，输入栏贴着键盘；收起后再放回去。
@@ -708,8 +898,599 @@ class MuseChatView extends FrameLayout {
                     updateImeSuppression();
                     return insets;
                 });
-        mInput.setOnFocusChangeListener((v, hasFocus) -> updateImeSuppression());
+        mInput.setOnFocusChangeListener(
+                (v, hasFocus) -> {
+                    updateImeSuppression();
+                    if (hasFocus) scheduleAskSheet();
+                    else hideAskSheet();
+                });
         paintAccountMode();
+        mAskPlaced = true;
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+        positionAskSheet();
+    }
+
+    /** 上拉建议停在附件、操作对象和输入栏之上，把对话盖住。 */
+    private void positionAskSheet() {
+        if (!mAskPlaced) return;
+        positionCover(mAskSheet);
+        positionCover(mDeviceSheet);
+        positionCover(mModelSheet);
+        positionCover(mAttachSheet);
+    }
+
+    /** 上拉层停在仍露着的输入栏、快捷按钮或设备按钮之上。 */
+    private void positionCover(FrameLayout sheet) {
+        if (sheet.getVisibility() != View.VISIBLE) return;
+        int top = viewTop(mInputBar);
+        if (mAttachScroll.getVisibility() == View.VISIBLE) {
+            top = Math.min(top, viewTop(mAttachScroll));
+        }
+        if (mComposeChips.getVisibility() == View.VISIBLE) {
+            top = Math.min(top, viewTop(mComposeChips));
+        }
+        if (mTargetBlock.getVisibility() == View.VISIBLE) {
+            top = Math.min(top, viewTop(mTargetBlock));
+        }
+        int inset = Math.max(0, getHeight() - top);
+        ViewGroup.LayoutParams raw = sheet.getLayoutParams();
+        if (!(raw instanceof FrameLayout.LayoutParams)) return;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) raw;
+        if (lp.bottomMargin == inset) return;
+        lp.bottomMargin = inset;
+        sheet.setLayoutParams(lp);
+    }
+
+    private int viewTop(View view) {
+        int y = 0;
+        View cursor = view;
+        while (cursor != null && cursor != this) {
+            y += cursor.getTop();
+            if (!(cursor.getParent() instanceof View)) break;
+            cursor = (View) cursor.getParent();
+        }
+        return y;
+    }
+
+    private void scheduleAskSheet() {
+        if (mAskQuery != null) mInput.removeCallbacks(mAskQuery);
+        mAskQuery = () -> {
+            mAskQuery = null;
+            String text = mInput.getText() == null ? "" : mInput.getText().toString().trim();
+            // 远程电脑一点进输入框就给出常用操作，不必先打字。本机浏览器仍要有内容才出搜索建议。
+            if (mBasisHeld || !mInput.hasFocus() || (text.isEmpty() && !onRemoteComputer())) {
+                hideAskSheet();
+                return;
+            }
+            showAskSheet(text);
+        };
+        mInput.postDelayed(mAskQuery, 50);
+    }
+
+    private void showAskSheet(String text) {
+        boolean fresh = mAskSheet.getVisibility() != View.VISIBLE;
+        if (mPage != null) mPage.setComposeHeaderHidden(true);
+        hideDeviceSheet();
+        hideModelSheet();
+        hideAttachSheet();
+        mTargetBlock.setVisibility(View.GONE);
+        mComposeChips.setVisibility(onRemoteComputer() ? View.GONE : View.VISIBLE);
+        paintComposeSurface(true);
+        paintAskSheet(text);
+        mAskSheet.setVisibility(View.VISIBLE);
+        updateJump();
+        if (fresh) {
+            mAskSheet.setTranslationY(dp(40));
+            mAskSheet.animate().translationY(0f).setDuration(180)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f))
+                    .start();
+        }
+        if (onRemoteComputer()) stopAskQuery();
+        else startAskQuery(text);
+        noteComposeSheets();
+    }
+
+    private void hideAskSheet() {
+        if (!mAskPlaced) return;
+        if (mAskQuery != null) {
+            mInput.removeCallbacks(mAskQuery);
+            mAskQuery = null;
+        }
+        stopAskQuery();
+        if (mAskSheet.getVisibility() == View.GONE) return;
+        mAskSheet.animate().cancel();
+        mAskSheet.setTranslationY(0f);
+        mAskSheet.setVisibility(View.GONE);
+        mAskRows.removeAllViews();
+        mComposeChips.setVisibility(View.GONE);
+        paintComposeSurface(false);
+        mTargetBlock.setVisibility(View.GONE);
+        if (mPage != null) mPage.setComposeHeaderHidden(false);
+        updateJump();
+        noteComposeSheets();
+    }
+
+    boolean isComposing() {
+        return mAskPlaced && mAskSheet.getVisibility() == View.VISIBLE;
+    }
+
+    /** 搜索建议那一块的底色。打字时按钮所在的底栏跟它用同一个颜色，输入框色块单独留着。 */
+    private int composeSurfaceColor() {
+        return OmniboxResourceProvider.getStandardSuggestionBackgroundColor(
+                getContext(), BrandedColorScheme.APP_DEFAULT);
+    }
+
+    /**
+     * 打字时建议列表和三个动作所在的底栏铺成同一块颜色。输入框保持自己的圆角色块，
+     * 收起后底栏不再单独铺色。
+     */
+    private void paintComposeSurface(boolean composing) {
+        if (!composing) {
+            mComposeDock.setBackground(null);
+            return;
+        }
+        int color = composeSurfaceColor();
+        mComposeDock.setBackgroundColor(color);
+        mAskSheet.setBackgroundColor(color);
+        for (int i = 0; i < mComposeChips.getChildCount(); i++) {
+            Drawable background = mComposeChips.getChildAt(i).getBackground();
+            if (background instanceof GradientDrawable) {
+                ((GradientDrawable) background).setColor(color);
+            }
+        }
+    }
+
+    /** 三个动作和底栏同色，只留一圈细边，避免再叠一块不一样的底。 */
+    private Drawable composeChipBackground(Context context) {
+        GradientDrawable background = MusePage.rounded(composeSurfaceColor(), 16, context);
+        background.setStroke(dp(1), MusePage.outline(context));
+        return background;
+    }
+
+    private void paintAskSheet(String text) {
+        Context context = getContext();
+        mAskRows.removeAllViews();
+        if (onRemoteComputer()) {
+            paintComputerActions(context, text);
+            return;
+        }
+        String engine = searchEngineName();
+        int shown = 0;
+        for (AutocompleteMatch match : mAskMatches) {
+            if (shown >= 6) break;
+            if (match == null || !addOmniboxMatch(context, match, engine)) continue;
+            shown++;
+        }
+        if (shown == 0) {
+            addOmniboxRow(context, null, true, null, text, engine, () -> openWeb(text));
+        }
+    }
+
+    /** 远程电脑上工程师会做的操作。没打字时全部列出；打了字就只留对得上的，对不上就执行原句。 */
+    private void paintComputerActions(Context context, String text) {
+        String query = text == null ? "" : text.trim().toLowerCase(java.util.Locale.ROOT);
+        int[][] actions = {
+            {R.string.lemurx_muse_pc_git, R.string.lemurx_muse_pc_git_sub,
+                    R.string.lemurx_muse_pc_git_prompt, R.drawable.lemurx_muse_ic_code},
+            {R.string.lemurx_muse_pc_test, R.string.lemurx_muse_pc_test_sub,
+                    R.string.lemurx_muse_pc_test_prompt, R.drawable.lemurx_muse_ic_refresh},
+            {R.string.lemurx_muse_pc_build, R.string.lemurx_muse_pc_build_sub,
+                    R.string.lemurx_muse_pc_build_prompt, R.drawable.lemurx_muse_ic_cpu},
+            {R.string.lemurx_muse_pc_logs, R.string.lemurx_muse_pc_logs_sub,
+                    R.string.lemurx_muse_pc_logs_prompt, R.drawable.lemurx_muse_ic_file_text},
+            {R.string.lemurx_muse_pc_ports, R.string.lemurx_muse_pc_ports_sub,
+                    R.string.lemurx_muse_pc_ports_prompt, R.drawable.lemurx_muse_ic_server},
+            {R.string.lemurx_muse_pc_health, R.string.lemurx_muse_pc_health_sub,
+                    R.string.lemurx_muse_pc_health_prompt, R.drawable.lemurx_muse_ic_info},
+        };
+        int shown = 0;
+        for (int[] action : actions) {
+            String title = context.getString(action[0]);
+            String sub = context.getString(action[1]);
+            String prompt = context.getString(action[2]);
+            if (!query.isEmpty()
+                    && !title.toLowerCase(java.util.Locale.ROOT).contains(query)
+                    && !sub.toLowerCase(java.util.Locale.ROOT).contains(query)
+                    && !prompt.toLowerCase(java.util.Locale.ROOT).contains(query)) {
+                continue;
+            }
+            int icon = action[3];
+            addComputerRow(context, icon, title, sub, () -> applyComputerBasis(title, prompt));
+            shown++;
+        }
+        if (shown == 0 && !query.isEmpty()) {
+            addComputerRow(context, R.drawable.lemurx_muse_ic_code, text,
+                    context.getString(R.string.lemurx_muse_computer_do),
+                    () -> applyComputerBasis(
+                            context.getString(R.string.lemurx_muse_computer_do), text));
+        }
+    }
+
+    /** 当前默认搜索引擎的短名，比如 Google。还没加载好时返回空。 */
+    private String searchEngineName() {
+        try {
+            Profile profile = mTab.getProfile();
+            if (profile == null) return "";
+            TemplateUrlService service = TemplateUrlServiceFactory.getForProfile(profile);
+            if (service == null || !service.isLoaded()) return "";
+            TemplateUrl engine = service.getDefaultSearchEngineTemplateUrl();
+            if (engine == null) return "";
+            String name = engine.getShortName();
+            return name == null ? "" : name.trim();
+        } catch (RuntimeException ignored) {
+            return "";
+        }
+    }
+
+    /**
+     * 一条地址栏建议。搜索是放大镜加查询，默认搜索那条的第二行是搜索引擎名；
+     * 网址是地球图标、标题和第二行地址。
+     */
+    private boolean addOmniboxMatch(Context context, AutocompleteMatch match, String engine) {
+        String display = match.getDisplayText() == null ? "" : match.getDisplayText().trim();
+        String description = match.getDescription() == null ? "" : match.getDescription().trim();
+        boolean search = match.isSearchSuggestion();
+        GURL url = match.getUrl();
+        String spec = url == null || !url.isValid() ? "" : url.getSpec();
+        if (search) {
+            if (display.isEmpty()) return false;
+            String second = !description.isEmpty()
+                    ? description
+                    : (match.isWhatYouTyped() ? engine : "");
+            String open = spec.isEmpty() ? display : spec;
+            addOmniboxRow(context, match, true, url, display, second, () -> openWeb(open));
+            return true;
+        }
+        if (spec.isEmpty() && display.isEmpty()) return false;
+        String title = !description.isEmpty() ? description : display;
+        String address = !display.isEmpty() ? prettyUrl(display) : prettyUrl(spec);
+        if (title.equals(address)) address = "";
+        String open = spec.isEmpty() ? display : spec;
+        addOmniboxRow(context, match, false, url, title, address, () -> openWeb(open));
+        return true;
+    }
+
+    private void addOmniboxRow(
+            Context context,
+            @Nullable AutocompleteMatch match,
+            boolean search,
+            @Nullable GURL pageUrl,
+            String line1,
+            String line2,
+            Runnable action) {
+        OmniboxResourceProvider resources = omniboxResources();
+        int layout = org.chromium.chrome.browser.omnibox.R.layout.omnibox_basic_suggestion;
+        BaseSuggestionView<View> row = new BaseSuggestionView<>(context, layout);
+        row.setSuggestionDimensions(
+                resources.getSuggestionDecorationIconSizeWidth(),
+                resources.getSuggestionContentHeight(),
+                resources.getSuggestionCompactContentHeight(),
+                resources.getSuggestionContentVerticalPadding());
+        row.setFocusable(false);
+        row.setFocusableInTouchMode(false);
+        fitSuggestionIcon(row, false, false);
+        int icon = fallbackSuggestionIcon(match, search);
+        Drawable drawable = AppCompatResources.getDrawable(context, icon);
+        row.decorationIcon.setImageDrawable(drawable);
+        ImageViewCompat.setImageTintList(
+                row.decorationIcon, ChromeColors.getSecondaryIconTint(context, false));
+        loadSuggestionImage(row, match, search, pageUrl);
+        TextView first = row.contentView.findViewById(
+                org.chromium.chrome.browser.omnibox.R.id.line_1);
+        TextView second = row.contentView.findViewById(
+                org.chromium.chrome.browser.omnibox.R.id.line_2);
+        first.setText(line1);
+        first.setTextColor(OmniboxResourceProvider.getSuggestionPrimaryTextColor(
+                context, BrandedColorScheme.APP_DEFAULT));
+        if (TextUtils.isEmpty(line2)) {
+            second.setVisibility(View.GONE);
+        } else {
+            second.setText(line2);
+            second.setVisibility(View.VISIBLE);
+            second.setTextColor(search
+                    ? OmniboxResourceProvider.getSuggestionSecondaryTextColor(
+                            context, BrandedColorScheme.APP_DEFAULT)
+                    : OmniboxResourceProvider.getSuggestionUrlTextColor(
+                            context, BrandedColorScheme.APP_DEFAULT));
+        }
+        row.setOnClickListener(
+                v -> {
+                    LemurXHaptics.tick(v);
+                    action.run();
+                });
+        mAskRows.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        row.applySideSpacing(false, resources.getSideSpacing());
+    }
+
+    /** 一条电脑操作。样子跟搜索建议同一行，图标换成这件事自己的。 */
+    private void addComputerRow(
+            Context context, int icon, String line1, String line2, Runnable action) {
+        addOmniboxRow(context, null, true, null, line1, line2, action);
+        View last = mAskRows.getChildAt(mAskRows.getChildCount() - 1);
+        if (!(last instanceof BaseSuggestionView)) return;
+        @SuppressWarnings("unchecked")
+        BaseSuggestionView<View> row = (BaseSuggestionView<View>) last;
+        row.decorationIcon.setImageResource(icon);
+        ImageViewCompat.setImageTintList(
+                row.decorationIcon, ChromeColors.getSecondaryIconTint(context, false));
+    }
+
+    private OmniboxResourceProvider omniboxResources() {
+        if (mOmniboxResources == null) {
+            mOmniboxResources = new OmniboxResourceProvider(
+                    getContext(), BrandedColorScheme.APP_DEFAULT);
+        }
+        return mOmniboxResources;
+    }
+
+    private OmniboxImageSupplier omniboxImages() {
+        if (mOmniboxImages == null) {
+            mOmniboxImages = new OmniboxImageSupplier(getContext());
+            mOmniboxImages.onNativeInitialized();
+            Profile profile = mTab.getProfile();
+            if (profile != null) mOmniboxImages.setProfile(profile);
+        }
+        return mOmniboxImages;
+    }
+
+    /** 还没有方形图时用的矢量图标。历史、趋势和网址各有自己的符号。 */
+    private int fallbackSuggestionIcon(@Nullable AutocompleteMatch match, boolean search) {
+        if (!search || match == null) {
+            return search
+                    ? org.chromium.chrome.browser.omnibox.R.drawable.ic_suggestion_magnifier
+                    : org.chromium.chrome.browser.omnibox.R.drawable.ic_globe_24dp;
+        }
+        int type = match.getType();
+        if (type == OmniboxSuggestionType.SEARCH_HISTORY
+                || type == OmniboxSuggestionType.SEARCH_SUGGEST_PERSONALIZED) {
+            return org.chromium.chrome.browser.omnibox.R.drawable.ic_history_24dp;
+        }
+        switch (match.getIconType()) {
+            case SuggestTemplateInfo.IconType.HISTORY_VALUE:
+                return org.chromium.chrome.browser.omnibox.R.drawable.ic_history_24dp;
+            case SuggestTemplateInfo.IconType.TRENDING_VALUE:
+                return org.chromium.chrome.browser.omnibox.R.drawable.trending_up_black_24dp;
+            case SuggestTemplateInfo.IconType.SEARCH_LOOP_WITH_SPARKLE_VALUE:
+                return org.chromium.chrome.browser.omnibox.R.drawable.search_spark_black_24dp;
+            case SuggestTemplateInfo.IconType.GLOBE_WITH_SEARCH_LOOP_VALUE:
+                return org.chromium.chrome.browser.omnibox.R.drawable.travel_explore_24dp;
+            case SuggestTemplateInfo.IconType.FAVICON_VALUE:
+                return org.chromium.chrome.browser.omnibox.R.drawable.ic_globe_24dp;
+            default:
+                return org.chromium.chrome.browser.omnibox.R.drawable.ic_suggestion_magnifier;
+        }
+    }
+
+    /**
+     * 图标槽和地址栏一致：小图 24dp、配图 36dp，圆角不超过边长的四分之一，所以是圆角方形不是圆。
+     * 配图铺满这个方槽再裁角；矢量图标只居中，不裁成圆。
+     */
+    private void fitSuggestionIcon(BaseSuggestionView<View> row, boolean large, boolean crop) {
+        int edge = large
+                ? omniboxResources().getEdgeSizeLargeIcon()
+                : omniboxResources().getEdgeSize();
+        int radius = large
+                ? omniboxResources().getLargeIconRoundingRadius()
+                : omniboxResources().getSmallIconRoundingRadius();
+        if (large) row.setUseLargeDecorationIcon(true);
+        ImageView icon = row.decorationIcon;
+        ViewGroup.LayoutParams lp = icon.getLayoutParams();
+        lp.width = edge;
+        lp.height = edge;
+        icon.setLayoutParams(lp);
+        icon.setScaleType(crop ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.CENTER_INSIDE);
+        icon.setClipToOutline(crop);
+        row.decorationIconOutline.setRadius(Math.min(radius, edge / 4));
+        icon.invalidateOutline();
+    }
+
+    /** 搜索实体用方形配图，网址用网站图标。拿到图之前先留着矢量图标。 */
+    private void loadSuggestionImage(
+            BaseSuggestionView<View> row,
+            @Nullable AutocompleteMatch match,
+            boolean search,
+            @Nullable GURL pageUrl) {
+        try {
+            if (search && match != null) {
+                GURL image = match.getImageUrl();
+                if (image != null && image.isValid() && !image.isEmpty()) {
+                    omniboxImages().fetchImage(image, drawable ->
+                            applySuggestionImage(row, drawable, true));
+                }
+                return;
+            }
+            if (pageUrl != null && pageUrl.isValid() && !pageUrl.isEmpty()) {
+                omniboxImages().fetchFavicon(pageUrl, drawable ->
+                        applySuggestionImage(row, drawable, false));
+            }
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void applySuggestionImage(
+            BaseSuggestionView<View> row, @Nullable Drawable drawable, boolean large) {
+        if (drawable == null || row.getParent() == null) return;
+        Runnable paint = () -> {
+            if (row.getParent() == null) return;
+            row.decorationIcon.setImageDrawable(drawable);
+            ImageViewCompat.setImageTintList(row.decorationIcon, null);
+            row.decorationIcon.setColorFilter(null);
+            fitSuggestionIcon(row, large, true);
+        };
+        if (ThreadUtils.runningOnUiThread()) paint.run();
+        else row.post(paint);
+    }
+
+    private void sendAsk(String prompt) {
+        if (TextUtils.isEmpty(prompt)) return;
+        mAskQuiet++;
+        mInput.setText(prompt);
+        mInput.setSelection(prompt.length());
+        mAskQuiet--;
+        hideAskSheet();
+        send();
+    }
+
+    /** 选中一项远程操作：把对应指令写进输入框，并标出这段文字基于它。先不发送。 */
+    private void applyComputerBasis(String title, String prompt) {
+        if (TextUtils.isEmpty(prompt)) return;
+        mBasisPrompt = prompt;
+        mBasisHeld = true;
+        mBasisLabel.setText(getContext().getString(R.string.lemurx_muse_computer_basis, title));
+        mBasisRow.setVisibility(View.VISIBLE);
+        mAskQuiet++;
+        mInput.setText(prompt);
+        mInput.setSelection(prompt.length());
+        mAskQuiet--;
+        hideAskSheet();
+        if (!mInput.hasFocus()) mInput.requestFocus();
+    }
+
+    private void clearBasis() {
+        mBasisHeld = false;
+        mBasisPrompt = null;
+        mBasisRow.setVisibility(View.GONE);
+    }
+
+    /** 去掉“基于哪一项”。文字若仍是那条指令，一并清掉，推荐可以再出来。 */
+    private void dismissBasis() {
+        String prompt = mBasisPrompt;
+        clearBasis();
+        if (prompt != null && mInput.getText() != null && prompt.contentEquals(mInput.getText())) {
+            mAskQuiet++;
+            mInput.setText("");
+            mAskQuiet--;
+            scheduleAskSheet();
+        }
+    }
+
+    /** 推荐列表，或设备、模型、附件选择，有一层正开着。 */
+    static boolean sheetsOpen() {
+        MuseChatView owner = sSheetOwner;
+        return owner != null && owner.composeSheetOpen();
+    }
+
+    /** 返回手势：先收选择框，再收推荐。没有这些层时不拦截。 */
+    static boolean consumeSheetBack() {
+        MuseChatView owner = sSheetOwner;
+        if (owner == null || !owner.composeSheetOpen()) return false;
+        return owner.closeTopComposeSheet();
+    }
+
+    private boolean composeSheetOpen() {
+        if (!mAskPlaced) return false;
+        return mAttachSheet.getVisibility() == View.VISIBLE
+                || mModelSheet.getVisibility() == View.VISIBLE
+                || mDeviceSheet.getVisibility() == View.VISIBLE
+                || mAskSheet.getVisibility() == View.VISIBLE;
+    }
+
+    private boolean closeTopComposeSheet() {
+        if (mAttachSheet.getVisibility() == View.VISIBLE) {
+            hideAttachSheet();
+            return true;
+        }
+        if (mModelSheet.getVisibility() == View.VISIBLE) {
+            hideModelSheet();
+            return true;
+        }
+        if (mDeviceSheet.getVisibility() == View.VISIBLE) {
+            hideDeviceSheet();
+            return true;
+        }
+        if (mAskSheet.getVisibility() == View.VISIBLE) {
+            hideAskSheet();
+            return true;
+        }
+        return false;
+    }
+
+    private void noteComposeSheets() {
+        if (!mAskPlaced) return;
+        if (composeSheetOpen()) sSheetOwner = this;
+        else if (sSheetOwner == this) sSheetOwner = null;
+        BackPressManager.lemurXConsoleStateChanged();
+    }
+
+    private void openWeb(String target) {
+        hideKeyboard();
+        mAskQuiet++;
+        mInput.setText("");
+        mAskQuiet--;
+        hideAskSheet();
+        LemurXConsoleShell.openTyped(mTab, target);
+    }
+
+    private void startAskQuery(String text) {
+        try {
+            Profile profile = mTab.getProfile();
+            if (profile == null) return;
+            AutocompleteController controller = AutocompleteController.getForProfile(profile);
+            if (controller == null) return;
+            if (!mAskListening) {
+                final int gen = ++mAskGen;
+                mAskListener = (result, isFinal) -> deliverAskMatches(gen, result);
+                controller.addOnSuggestionsReceivedListener(mAskListener);
+                controller.resetSession();
+                mAskListening = true;
+            }
+            AutocompleteInput input = new AutocompleteInput(OmniboxFocusReason.OMNIBOX_TAP);
+            input.setUserText(text);
+            input.setPageClassification(PageClassification.OTHER);
+            GURL page = mTab.getUrl();
+            if (page != null) input.setPageUrl(page);
+            int cursor = mInput.getSelectionEnd();
+            if (cursor < 0) cursor = text.length();
+            controller.start(mTab.getWebContents(), input, cursor, true);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void deliverAskMatches(int gen, @Nullable AutocompleteResult result) {
+        if (!ThreadUtils.runningOnUiThread()) {
+            mInput.post(() -> deliverAskMatches(gen, result));
+            return;
+        }
+        if (gen != mAskGen || mAskSheet.getVisibility() != View.VISIBLE) return;
+        if (onRemoteComputer()) return;
+        mAskMatches = result == null
+                ? new ArrayList<>()
+                : new ArrayList<>(result.getSuggestionsList());
+        String text = mInput.getText() == null ? "" : mInput.getText().toString().trim();
+        if (!text.isEmpty()) paintAskSheet(text);
+    }
+
+    private void stopAskQuery() {
+        if (!mAskListening && mAskListener == null) {
+            mAskMatches = new ArrayList<>();
+            return;
+        }
+        mAskGen++;
+        mAskListening = false;
+        mAskMatches = new ArrayList<>();
+        AutocompleteController.OnSuggestionsReceivedListener listener = mAskListener;
+        mAskListener = null;
+        try {
+            Profile profile = mTab.getProfile();
+            AutocompleteController controller =
+                    profile == null ? null : AutocompleteController.getForProfile(profile);
+            if (controller != null) {
+                if (listener != null) controller.removeOnSuggestionsReceivedListener(listener);
+                controller.stop(AutocompleteStopReason.INTERACTION);
+            }
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private static String prettyUrl(String spec) {
+        if (spec.startsWith("https://")) return spec.substring("https://".length());
+        if (spec.startsWith("http://")) return spec.substring("http://".length());
+        return spec;
     }
 
     private int dp(int value) {
@@ -734,7 +1515,10 @@ class MuseChatView extends FrameLayout {
         }
     }
 
-    /** 点在消息和按钮以外的空白上，收起键盘。文字和输入框不算空白。 */
+    /**
+     * 点在消息和按钮以外的空白上，收起键盘。文字和输入框不算空白。
+     * 先把事件交给被点的那一行，再收键盘。否则收键盘会清掉输入焦点，推荐列表先被拆掉，点击就丢了。
+     */
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         int action = ev.getActionMasked();
@@ -742,20 +1526,31 @@ class MuseChatView extends FrameLayout {
             mBlankDown = isBlank(ev);
             mBlankX = ev.getX();
             mBlankY = ev.getY();
-        } else if (action == MotionEvent.ACTION_UP && mBlankDown && mSelecting == null) {
+        }
+        boolean handled = super.dispatchTouchEvent(ev);
+        if (action == MotionEvent.ACTION_UP && mBlankDown && mSelecting == null) {
             float dx = ev.getX() - mBlankX;
             float dy = ev.getY() - mBlankY;
             int slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
             if (dx * dx + dy * dy <= (float) slop * slop) hideKeyboard();
         }
-        return super.dispatchTouchEvent(ev);
+        return handled;
     }
 
     private boolean isBlank(MotionEvent ev) {
         View hit = hitView(this, ev.getX(), ev.getY());
         if (hit == null || hit == this || hit == mScroll || hit == mList || hit == mEmpty) return true;
         if (hit == mInput || hit instanceof EditText) return false;
-        return !hit.isClickable() && !hit.isLongClickable();
+        for (View cursor = hit; cursor != null && cursor != this; cursor = parentOf(cursor)) {
+            if (cursor == mAskSheet || cursor instanceof ScrollView) continue;
+            if (cursor.isClickable() || cursor.isLongClickable()) return false;
+        }
+        return true;
+    }
+
+    private static @Nullable View parentOf(View view) {
+        if (!(view.getParent() instanceof View)) return null;
+        return (View) view.getParent();
     }
 
     private static @Nullable View hitView(View view, float x, float y) {
@@ -794,8 +1589,21 @@ class MuseChatView extends FrameLayout {
 
     @Override
     protected void onDetachedFromWindow() {
+        hideAskSheet();
+        if (mOmniboxResources != null) {
+            mOmniboxResources.destroy();
+            mOmniboxResources = null;
+        }
+        if (mOmniboxImages != null) {
+            mOmniboxImages.destroy();
+            mOmniboxImages = null;
+        }
         LemurXDeviceBridge.removeActionListener(mAgentLogTick);
         releaseVoice();
+        if (sSheetOwner == this) {
+            sSheetOwner = null;
+            BackPressManager.lemurXConsoleStateChanged();
+        }
         if (mImeSuppressed) {
             mImeSuppressed = false;
             LemurXConsoleShell.setNavSuppressed(this, false);
@@ -808,6 +1616,10 @@ class MuseChatView extends FrameLayout {
         boolean opening = visibility == View.VISIBLE && getVisibility() != View.VISIBLE;
         super.setVisibility(visibility);
         if (visibility != View.VISIBLE && mMic != null) {
+            hideAskSheet();
+            hideDeviceSheet();
+            hideModelSheet();
+            hideAttachSheet();
             endVoice(true);
             if (mImeSuppressed) {
                 mImeSuppressed = false;
@@ -963,6 +1775,7 @@ class MuseChatView extends FrameLayout {
     /** 登录状态变了。游客和已登录都可以跟智能体说话；远程电脑和社区仍要账号。 */
     void applyAccountMode() {
         updateEmpty();
+        refreshTargets();
         if (LemurXAccount.isSignedIn() && mThreadId != null && !mLoaded && !mLoading
                 && mMessages.isEmpty()) {
             String id = mThreadId;
@@ -978,13 +1791,21 @@ class MuseChatView extends FrameLayout {
     }
 
     private int inputHintRes() {
+        if (onRemoteComputer()) return R.string.lemurx_muse_computer_ask;
         return R.string.lemurx_muse_input_hint;
+    }
+
+    /** 操作对象是一台远程电脑，而不是本机浏览器。 */
+    private boolean onRemoteComputer() {
+        String selected = LemurXComputer.operateTarget(getContext());
+        return selected != null && !LemurXComputer.TARGET_BROWSER.equalsIgnoreCase(selected);
     }
 
     /** 列表比视口高且没贴底时显示"回到最新"。 */
     private void updateJump() {
         View child = mScroll.getChildAt(0);
-        boolean show = child != null
+        boolean show = mAskSheet.getVisibility() != View.VISIBLE
+                && child != null
                 && child.getHeight() > mScroll.getHeight() + dp(8)
                 && !mStickToBottom
                 && !mMessages.isEmpty();
@@ -1121,8 +1942,10 @@ class MuseChatView extends FrameLayout {
         chip.setOnClickListener(
                 v -> {
                     LemurXHaptics.tick(v);
+                    mAskQuiet++;
                     mInput.setText(prompt);
                     send();
+                    mAskQuiet--;
                 });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1343,7 +2166,12 @@ class MuseChatView extends FrameLayout {
         if (message != null && message.body != null) {
             boolean streaming =
                     message == mTypeMessage && (!mTypeFinished || mTyped < message.text.length());
-            MuseRich.show(message.body, markdown, streaming, this::openInNewTab, this::styleSelectable);
+            MuseRich.show(
+                    message.body,
+                    replyBesideCommand(message, markdown),
+                    streaming,
+                    this::openInNewTab,
+                    this::styleSelectable);
             view.setVisibility(View.GONE);
             bindFiles(message);
             return;
@@ -1565,8 +2393,10 @@ class MuseChatView extends FrameLayout {
 
     private void resumeSuspended() {
         if (!mSuspended || mRun != null) return;
+        mAskQuiet++;
         mInput.setText(getContext().getString(R.string.lemurx_agent_resume_prompt));
         send();
+        mAskQuiet--;
     }
 
     private void send() {
@@ -1592,7 +2422,10 @@ class MuseChatView extends FrameLayout {
         mPending.clear();
         renderAttach();
         String text = typed;
+        mAskQuiet++;
         mInput.setText("");
+        mAskQuiet--;
+        hideAskSheet();
         showError(null);
         List<LemurXArchive.Proposal> noticed = new ArrayList<>();
         for (Attach file : files) {
@@ -1604,6 +2437,7 @@ class MuseChatView extends FrameLayout {
             file.excerpt = LemurXArchive.maskValues(file.excerpt, noticed);
         }
         text = LemurXArchive.maskValues(text, noticed);
+        clearBasis();
         Message user = new Message(UUID.randomUUID().toString(), "user", text, files);
         append(user);
         for (Attach file : files) askFileShare(file);
@@ -1877,7 +2711,7 @@ class MuseChatView extends FrameLayout {
         mSend.setColorFilter(MusePage.onAccent(getContext()), PorterDuff.Mode.SRC_IN);
         mSend.setContentDescription(getContext().getString(
                 running ? R.string.lemurx_muse_stop : R.string.lemurx_muse_send));
-        if (!mListening) mMic.setAlpha(running ? 0.35f : 1f);
+        paintMic();
         mAttach.setAlpha(running ? 0.35f : 1f);
     }
 
@@ -1885,6 +2719,12 @@ class MuseChatView extends FrameLayout {
 
     private void onMicClicked() {
         LemurXHaptics.click(mMic);
+        if (hasInputText()) {
+            if (mListening) endVoice(false);
+            clearBasis();
+            mInput.setText("");
+            return;
+        }
         if (mListening) {
             endVoice(true);
             return;
@@ -2004,14 +2844,27 @@ class MuseChatView extends FrameLayout {
         }
     }
 
+    /** 输入框里已经有字。这时语音钮换成清除。 */
+    private boolean hasInputText() {
+        return mInput.getText() != null && mInput.getText().length() > 0;
+    }
+
     private void paintMic() {
         Context context = getContext();
-        if (mListening) {
+        if (hasInputText()) {
+            mMic.setImageResource(R.drawable.lemurx_muse_ic_x);
+            mMic.setBackground(MusePage.rounded(MusePage.track(context), 20, context));
+            mMic.setColorFilter(MusePage.text(context), PorterDuff.Mode.SRC_IN);
+            mMic.setContentDescription(context.getString(R.string.lemurx_muse_clear_input));
+            mMic.setAlpha(1f);
+        } else if (mListening) {
+            mMic.setImageResource(R.drawable.lemurx_muse_ic_mic);
             mMic.setBackground(MusePage.rounded(MusePage.accent(context), 20, context));
             mMic.setColorFilter(MusePage.onAccent(context), PorterDuff.Mode.SRC_IN);
             mMic.setContentDescription(context.getString(R.string.lemurx_muse_voice_stop));
             mMic.setAlpha(1f);
         } else {
+            mMic.setImageResource(R.drawable.lemurx_muse_ic_mic);
             mMic.setBackground(null);
             mMic.setColorFilter(MusePage.text(context), PorterDuff.Mode.SRC_IN);
             mMic.setContentDescription(context.getString(R.string.lemurx_muse_voice));
@@ -2418,7 +3271,15 @@ class MuseChatView extends FrameLayout {
         scheduleWindow();
     }
 
-    /** 拉被控制的那台电脑。游客没有远程电脑，仍显示本机浏览器，让人知道 Agent 能操作这个浏览器。 */
+    /** 打开应用或回到前台时刷新这一页的设备点。节点上线由 {@link LemurXComputer#ensureNodeOnline} 合并。 */
+    void bringTargetsOnline() {
+        refreshTargets();
+    }
+
+    /**
+     * 拉被控制的那台电脑。游客没有远程电脑，仍显示本机浏览器，让人知道 Agent 能操作这个浏览器。
+     * 先等节点上线再读设备列表。列表接口本身不会执行 tailscale up，并行去读会把还没起来的机器画成离线。
+     */
     private void refreshTargets() {
         final int gen = ++mTargetGen;
         mControlledHost = LemurXComputer.host(getContext());
@@ -2431,12 +3292,17 @@ class MuseChatView extends FrameLayout {
         }
         mTargetsReady = false;
         paintTargets();
-        MuseApi.get().get("/api/tailnet", (value, error) -> {
-            if (gen != mTargetGen || !(value instanceof JSONObject)) return;
-            String host = ((JSONObject) value).optString("host", "");
-            if (!host.isEmpty()) mControlledHost = host;
-            paintTargets();
+        LemurXComputer.ensureNodeOnline((value, error) -> {
+            if (gen != mTargetGen) return;
+            if (value instanceof JSONObject) {
+                String host = ((JSONObject) value).optString("host", "");
+                if (!host.isEmpty()) mControlledHost = host;
+            }
+            loadTargetDevices(gen);
         });
+    }
+
+    private void loadTargetDevices(int gen) {
         MuseApi.get().get("/api/tailnet/devices", (value, error) -> {
             if (gen != mTargetGen) return;
             if (!(value instanceof JSONObject)) return;
@@ -2451,6 +3317,435 @@ class MuseChatView extends FrameLayout {
 
     private void paintTargets() {
         mTargetRow.removeAllViews();
+        List<TargetChoice> choices = targetChoices();
+        TargetChoice picked = choices.get(0);
+        for (int i = 0; i < choices.size(); i++) {
+            if (choices.get(i).selected) picked = choices.get(i);
+        }
+        addSelectedTarget(picked);
+        if (mAskPlaced && !mListening) {
+            mInput.setHint(inputHintRes());
+            if (mInput.hasFocus()) scheduleAskSheet();
+        }
+        mTargetBlock.setVisibility(View.GONE);
+        if (mAskPlaced && mDeviceSheet.getVisibility() == View.VISIBLE) paintDeviceSheet();
+    }
+
+    /** 输入栏上只留当前设备。右边的切换打开列表，添加远程电脑在那个列表里。 */
+    private void addSelectedTarget(TargetChoice picked) {
+        Context context = getContext();
+        LinearLayout chip = new LinearLayout(context);
+        chip.setOrientation(LinearLayout.HORIZONTAL);
+        chip.setGravity(Gravity.CENTER_VERTICAL);
+        chip.setPadding(dp(10), dp(6), dp(4), dp(6));
+        chip.setBackground(MusePage.rounded(MusePage.bg(context), 14, context));
+        ImageView image = new ImageView(context);
+        image.setImageResource(picked.icon);
+        image.setColorFilter(MusePage.text(context));
+        if (picked.online == null) {
+            chip.addView(image, new LinearLayout.LayoutParams(dp(18), dp(18)));
+        } else {
+            FrameLayout mark = new FrameLayout(context);
+            mark.addView(image, new FrameLayout.LayoutParams(
+                    dp(18), dp(18), Gravity.START | Gravity.CENTER_VERTICAL));
+            FrameLayout.LayoutParams dotLp = new FrameLayout.LayoutParams(dp(8), dp(8));
+            dotLp.gravity = Gravity.BOTTOM | Gravity.END;
+            mark.addView(presenceDot(context, picked.online), dotLp);
+            chip.addView(mark, new LinearLayout.LayoutParams(dp(22), dp(20)));
+        }
+        TextView text = new TextView(context);
+        text.setText(picked.label);
+        text.setSingleLine(true);
+        text.setEllipsize(TextUtils.TruncateAt.END);
+        text.setMaxWidth(dp(96));
+        text.setTextColor(MusePage.text(context));
+        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        textLp.setMarginStart(dp(8));
+        chip.addView(text, textLp);
+        ImageView swap = new ImageView(context);
+        swap.setImageResource(R.drawable.lemurx_muse_ic_switch);
+        swap.setColorFilter(MusePage.muted(context));
+        swap.setContentDescription(context.getString(R.string.lemurx_muse_target_switch));
+        swap.setClickable(true);
+        swap.setFocusable(false);
+        swap.setFocusableInTouchMode(false);
+        swap.setPadding(dp(8), dp(4), dp(8), dp(4));
+        swap.setOnClickListener(v -> {
+            LemurXHaptics.tick(v);
+            toggleDeviceSheet();
+        });
+        chip.addView(swap, new LinearLayout.LayoutParams(dp(36), dp(28)));
+        chip.setOnClickListener(v -> {
+            LemurXHaptics.tick(v);
+            toggleDeviceSheet();
+        });
+        chip.setContentDescription(presenceDescription(context, picked.description, picked.online));
+        chip.setFocusable(false);
+        chip.setFocusableInTouchMode(false);
+        mTargetRow.addView(chip, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+    }
+
+    /** 输入框底排的模型钮。点开后列出可选模型。 */
+    private View modelChip(Context context) {
+        LinearLayout chip = new LinearLayout(context);
+        chip.setOrientation(LinearLayout.HORIZONTAL);
+        chip.setGravity(Gravity.CENTER_VERTICAL);
+        chip.setPadding(dp(8), dp(6), dp(6), dp(6));
+        chip.setBackground(MusePage.rounded(MusePage.bg(context), 14, context));
+        ImageView image = new ImageView(context);
+        image.setImageResource(R.drawable.lemurx_muse_ic_sparkles);
+        image.setColorFilter(MusePage.text(context));
+        chip.addView(image, new LinearLayout.LayoutParams(dp(16), dp(16)));
+        TextView text = new TextView(context);
+        text.setText(R.string.lemurx_muse_model);
+        text.setSingleLine(true);
+        text.setTextColor(MusePage.text(context));
+        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        textLp.setMarginStart(dp(6));
+        chip.addView(text, textLp);
+        ImageView chevron = new ImageView(context);
+        chevron.setImageResource(R.drawable.lemurx_muse_ic_chevron);
+        chevron.setColorFilter(MusePage.muted(context));
+        chevron.setRotation(90f);
+        chip.addView(chevron, new LinearLayout.LayoutParams(dp(16), dp(16)));
+        chip.setContentDescription(context.getString(R.string.lemurx_muse_model_sheet));
+        chip.setClickable(true);
+        chip.setFocusable(false);
+        chip.setFocusableInTouchMode(false);
+        chip.setOnClickListener(v -> {
+            LemurXHaptics.tick(v);
+            toggleModelSheet();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMarginStart(dp(6));
+        chip.setLayoutParams(lp);
+        return chip;
+    }
+
+    /** 半透明遮罩。点空白处收起，卡片自己吃掉点击。 */
+    private FrameLayout newPickerSheet(Context context, View.OnClickListener dismiss) {
+        FrameLayout sheet = new FrameLayout(context);
+        sheet.setVisibility(View.GONE);
+        sheet.setClickable(true);
+        sheet.setFocusable(false);
+        sheet.setFocusableInTouchMode(false);
+        sheet.setClipChildren(false);
+        sheet.setOnClickListener(dismiss);
+        return sheet;
+    }
+
+    private ScrollView newPickerScroll(Context context) {
+        ScrollView scroll = new ScrollView(context);
+        scroll.setFillViewport(false);
+        scroll.setFocusable(false);
+        scroll.setFocusableInTouchMode(false);
+        scroll.setVerticalScrollBarEnabled(false);
+        return scroll;
+    }
+
+    private LinearLayout newPickerRows(Context context) {
+        LinearLayout rows = new LinearLayout(context);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        rows.setPadding(0, dp(4), 0, dp(6));
+        return rows;
+    }
+
+    /**
+     * 贴着输入栏的圆角卡片。行数少时跟着内容高，行数多时在遮罩里滚动，不盖住输入栏。
+     */
+    private LinearLayout pickerSheetCard(FrameLayout sheet, ScrollView scroll, int titleRes) {
+        Context context = sheet.getContext();
+        LinearLayout card = new LinearLayout(context) {
+            @Override
+            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                int mode = View.MeasureSpec.getMode(heightMeasureSpec);
+                int max = View.MeasureSpec.getSize(heightMeasureSpec);
+                ViewGroup.LayoutParams rowLp = scroll.getLayoutParams();
+                rowLp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+                super.onMeasure(
+                        widthMeasureSpec,
+                        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+                if (mode == View.MeasureSpec.UNSPECIFIED || getMeasuredHeight() <= max) return;
+                int extra = getMeasuredHeight() - scroll.getMeasuredHeight();
+                rowLp.height = Math.max(dp(120), max - extra);
+                super.onMeasure(
+                        widthMeasureSpec,
+                        View.MeasureSpec.makeMeasureSpec(max, View.MeasureSpec.AT_MOST));
+            }
+        };
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setClickable(true);
+        card.setOnClickListener(v -> {});
+        stylePickerCard(card);
+        card.setPadding(dp(8), dp(10), dp(8), dp(8));
+
+        View handle = new View(context);
+        handle.setBackground(MusePage.rounded(MusePage.handle(context), 2, context));
+        LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(36), dp(4));
+        handleLp.gravity = Gravity.CENTER_HORIZONTAL;
+        handleLp.bottomMargin = dp(12);
+        card.addView(handle, handleLp);
+
+        TextView title = new TextView(context);
+        title.setText(titleRes);
+        title.setTextColor(MusePage.text(context));
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setPadding(dp(12), 0, dp(12), dp(4));
+        card.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        card.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.BOTTOM;
+        lp.setMargins(dp(12), dp(24), dp(12), dp(12));
+        sheet.addView(card, lp);
+        return card;
+    }
+
+    /** 设备、模型和附件共用的卡片底。 */
+    private void stylePickerCard(LinearLayout card) {
+        Context context = card.getContext();
+        GradientDrawable face = MusePage.rounded(MusePage.bg(context), 28, context);
+        face.setStroke(Math.max(1, dp(1)), MusePage.line(context));
+        card.setBackground(face);
+        card.setElevation(dp(18));
+        card.setClipToOutline(true);
+        card.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
+    }
+
+    private int pickerScrim(Context context) {
+        return MusePage.night(context) ? 0xB3000000 : 0x73000000;
+    }
+
+    private void presentPicker(FrameLayout sheet, LinearLayout card) {
+        sheet.animate().cancel();
+        card.animate().cancel();
+        sheet.setBackgroundColor(pickerScrim(getContext()));
+        sheet.setAlpha(0f);
+        card.setTranslationY(dp(28));
+        sheet.setVisibility(View.VISIBLE);
+        positionAskSheet();
+        sheet.animate().alpha(1f).setDuration(160).start();
+        card.animate().translationY(0f).setDuration(220)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.8f))
+                .start();
+        noteComposeSheets();
+    }
+
+    private void dismissPicker(FrameLayout sheet, LinearLayout card) {
+        sheet.animate().cancel();
+        card.animate().cancel();
+        sheet.setAlpha(1f);
+        card.setTranslationY(0f);
+        sheet.setVisibility(View.GONE);
+    }
+
+    /**
+     * 一条选项：圆角色块里的图标、标题、说明。选中的右侧标出正在使用，添加类选项给一个向右的箭头。
+     */
+    private View pickerRow(
+            Context context,
+            int icon,
+            String title,
+            String subtitle,
+            boolean selected,
+            boolean trailingChevron,
+            @Nullable Boolean online,
+            Runnable action) {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(8), dp(8), dp(10), dp(8));
+        row.setClickable(true);
+        row.setFocusable(false);
+        row.setFocusableInTouchMode(false);
+
+        FrameLayout well = new FrameLayout(context);
+        well.setBackground(MusePage.rounded(
+                selected ? MusePage.chipBg(context) : MusePage.surface(context), 14, context));
+        ImageView image = new ImageView(context);
+        image.setImageResource(icon);
+        image.setColorFilter(selected ? MusePage.chipText(context) : MusePage.text(context));
+        FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(dp(20), dp(20));
+        iconLp.gravity = Gravity.CENTER;
+        well.addView(image, iconLp);
+        if (online != null) {
+            FrameLayout.LayoutParams dotLp = new FrameLayout.LayoutParams(dp(9), dp(9));
+            dotLp.gravity = Gravity.BOTTOM | Gravity.END;
+            well.addView(presenceDot(context, online), dotLp);
+            row.setContentDescription(presenceDescription(context, title, online));
+        }
+        row.addView(well, new LinearLayout.LayoutParams(dp(40), dp(40)));
+
+        LinearLayout text = new LinearLayout(context);
+        text.setOrientation(LinearLayout.VERTICAL);
+        TextView name = new TextView(context);
+        name.setText(title);
+        name.setSingleLine(true);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        name.setTextColor(selected ? MusePage.accent(context) : MusePage.text(context));
+        name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        if (selected) name.setTypeface(Typeface.DEFAULT_BOLD);
+        text.addView(name);
+        if (!TextUtils.isEmpty(subtitle)) {
+            TextView sub = new TextView(context);
+            sub.setText(subtitle);
+            sub.setSingleLine(true);
+            sub.setEllipsize(TextUtils.TruncateAt.END);
+            sub.setTextColor(MusePage.muted(context));
+            sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            subLp.topMargin = dp(2);
+            text.addView(sub, subLp);
+        }
+        LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        textLp.setMarginStart(dp(12));
+        textLp.setMarginEnd(dp(8));
+        row.addView(text, textLp);
+
+        if (selected) {
+            TextView mark = new TextView(context);
+            mark.setText(R.string.lemurx_muse_picker_current);
+            mark.setTextColor(MusePage.chipText(context));
+            mark.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            mark.setTypeface(Typeface.DEFAULT_BOLD);
+            mark.setPadding(dp(8), dp(4), dp(8), dp(4));
+            mark.setBackground(MusePage.rounded(MusePage.chipBg(context), 10, context));
+            row.addView(mark);
+        } else if (trailingChevron) {
+            ImageView chevron = new ImageView(context);
+            chevron.setImageResource(R.drawable.lemurx_muse_ic_chevron);
+            chevron.setColorFilter(MusePage.muted(context));
+            row.addView(chevron, new LinearLayout.LayoutParams(dp(18), dp(18)));
+        }
+        row.setOnClickListener(v -> {
+            LemurXHaptics.tick(v);
+            action.run();
+        });
+        row.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return row;
+    }
+
+    private void addPickerDivider(LinearLayout host) {
+        View line = new View(host.getContext());
+        line.setBackgroundColor(MusePage.line(host.getContext()));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
+        lp.setMarginStart(dp(60));
+        lp.setMarginEnd(dp(8));
+        host.addView(line, lp);
+    }
+
+    private void toggleModelSheet() {
+        if (!mAskPlaced) return;
+        hideDeviceSheet();
+        hideAttachSheet();
+        if (mModelSheet.getVisibility() == View.VISIBLE) {
+            hideModelSheet();
+            return;
+        }
+        paintModelSheet();
+        presentPicker(mModelSheet, mModelCard);
+    }
+
+    private void hideModelSheet() {
+        if (!mAskPlaced || mModelSheet.getVisibility() == View.GONE) return;
+        dismissPicker(mModelSheet, mModelCard);
+        mModelRows.removeAllViews();
+        noteComposeSheets();
+    }
+
+    private void paintModelSheet() {
+        Context context = getContext();
+        mModelRows.removeAllViews();
+        mModelRows.addView(pickerRow(
+                context,
+                R.drawable.lemurx_muse_ic_sparkles,
+                context.getString(R.string.lemurx_muse_model),
+                context.getString(R.string.lemurx_muse_model_sub),
+                true,
+                false,
+                null,
+                this::hideModelSheet));
+    }
+
+    private void toggleDeviceSheet() {
+        if (!mAskPlaced) return;
+        hideModelSheet();
+        hideAttachSheet();
+        if (mDeviceSheet.getVisibility() == View.VISIBLE) {
+            hideDeviceSheet();
+            return;
+        }
+        paintDeviceSheet();
+        presentPicker(mDeviceSheet, mDeviceCard);
+    }
+
+    private void hideDeviceSheet() {
+        if (!mAskPlaced || mDeviceSheet.getVisibility() == View.GONE) return;
+        dismissPicker(mDeviceSheet, mDeviceCard);
+        mDeviceRows.removeAllViews();
+        noteComposeSheets();
+    }
+
+    private void paintDeviceSheet() {
+        Context context = getContext();
+        mDeviceRows.removeAllViews();
+        List<TargetChoice> choices = targetChoices();
+        for (int i = 0; i < choices.size(); i++) {
+            if (i > 0) addPickerDivider(mDeviceRows);
+            addDeviceChoice(choices.get(i));
+        }
+        addPickerDivider(mDeviceRows);
+        addDeviceChoice(new TargetChoice(
+                context.getString(R.string.lemurx_muse_target_add_row),
+                R.drawable.lemurx_muse_ic_plus,
+                context.getString(R.string.lemurx_muse_target_add_computer_cd),
+                false,
+                null,
+                true,
+                context.getString(R.string.lemurx_muse_target_add_sub),
+                null));
+    }
+
+    private void addDeviceChoice(TargetChoice choice) {
+        Context context = getContext();
+        mDeviceRows.addView(pickerRow(
+                context,
+                choice.icon,
+                choice.label,
+                choice.subtitle,
+                choice.selected,
+                choice.add,
+                choice.online,
+                () -> {
+                    hideDeviceSheet();
+                    if (choice.add) {
+                        MusePage.showComputer(null, mThreadId);
+                        return;
+                    }
+                    if (choice.ip == null) {
+                        LemurXComputer.saveOperateTarget(context, LemurXComputer.TARGET_BROWSER);
+                        paintTargets();
+                        return;
+                    }
+                    selectComputer(choice.ip);
+                }));
+    }
+
+    private List<TargetChoice> targetChoices() {
         Context context = getContext();
         String selected = LemurXComputer.operateTarget(context);
         boolean onBrowser = LemurXComputer.TARGET_BROWSER.equalsIgnoreCase(selected);
@@ -2468,41 +3763,125 @@ class MuseChatView extends FrameLayout {
             LemurXComputer.saveOperateTarget(context, LemurXComputer.TARGET_BROWSER);
             onBrowser = true;
         }
-        addTargetChip(
+        List<TargetChoice> items = new ArrayList<>();
+        items.add(new TargetChoice(
                 context.getString(R.string.lemurx_muse_target_browser),
                 R.drawable.lemurx_muse_ic_smartphone,
-                onBrowser,
                 context.getString(R.string.lemurx_muse_target_browser_cd),
-                v -> {
-                    LemurXHaptics.tick(v);
-                    LemurXComputer.saveOperateTarget(context, LemurXComputer.TARGET_BROWSER);
-                    paintTargets();
-                });
-        addTargetAction(
-                context.getString(R.string.lemurx_muse_target_add_computer),
-                context.getString(R.string.lemurx_muse_target_add_computer_cd),
-                v -> {
-                    LemurXHaptics.tick(v);
-                    MusePage.showComputer(null, mThreadId);
-                });
+                onBrowser,
+                null,
+                false,
+                context.getString(R.string.lemurx_muse_target_browser_sub),
+                null));
         for (int i = 0; i < mTargetDevices.length(); i++) {
             JSONObject device = mTargetDevices.optJSONObject(i);
             if (!LemurXComputer.isControlledComputer(device, mControlledHost)) continue;
             String ip = device.optString("ip", "");
             String name = device.optString("name", "");
             if (name.isEmpty()) name = ip;
-            boolean picked = !onBrowser && ip.equalsIgnoreCase(selected);
-            addTargetChip(
+            String os = device.optString("os", "").trim();
+            String subtitle = os.isEmpty()
+                    ? context.getString(R.string.lemurx_muse_target_computer_sub)
+                    : context.getString(R.string.lemurx_muse_target_computer_os, os);
+            boolean reachable = mTargetJoined && device.optBoolean("online", false);
+            items.add(new TargetChoice(
                     name,
-                    LemurXComputer.Page.deviceIcon(device.optString("os", ""), false),
-                    picked,
+                    LemurXComputer.Page.deviceIcon(os, false),
                     context.getString(R.string.lemurx_muse_target_device_cd, name),
-                    v -> {
-                        LemurXHaptics.tick(v);
-                        selectComputer(ip);
-                    });
+                    !onBrowser && ip.equalsIgnoreCase(selected),
+                    ip,
+                    false,
+                    subtitle,
+                    reachable));
         }
-        mTargetBlock.setVisibility(View.VISIBLE);
+        return items;
+    }
+
+    private void addComposeChip(Context context, int label, Runnable action) {
+        TextView chip = new TextView(context);
+        chip.setText(label);
+        chip.setSingleLine(true);
+        chip.setTextColor(MusePage.text(context));
+        chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        chip.setGravity(Gravity.CENTER);
+        chip.setBackground(composeChipBackground(context));
+        chip.setPadding(dp(12), dp(8), dp(12), dp(8));
+        chip.setClickable(true);
+        chip.setFocusable(false);
+        chip.setFocusableInTouchMode(false);
+        chip.setOnClickListener(v -> {
+            LemurXHaptics.tick(v);
+            action.run();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMarginEnd(dp(8));
+        mComposeChips.addView(chip, lp);
+    }
+
+    /** 把当前输入交给 Aero。explain 和 lookup 互斥，都不是时原句发送。 */
+    private void sendCompose(boolean explain, boolean lookup) {
+        String typed = mInput.getText() == null ? "" : mInput.getText().toString().trim();
+        if (typed.isEmpty()) return;
+        Context context = getContext();
+        if (explain) {
+            sendAsk(context.getString(R.string.lemurx_muse_compose_explain_prompt, typed));
+        } else if (lookup) {
+            sendAsk(context.getString(R.string.lemurx_muse_compose_lookup_prompt, typed));
+        } else {
+            sendAsk(typed);
+        }
+    }
+
+    private static final class TargetChoice {
+        final String label;
+        final int icon;
+        final String description;
+        final boolean selected;
+        /** 空表示本机浏览器。 */
+        final @Nullable String ip;
+        final boolean add;
+        final String subtitle;
+        /** 远程电脑的在线状态。本机浏览器和「添加」没有这个点。 */
+        final @Nullable Boolean online;
+
+        TargetChoice(
+                String label,
+                int icon,
+                String description,
+                boolean selected,
+                @Nullable String ip,
+                boolean add,
+                String subtitle,
+                @Nullable Boolean online) {
+            this.label = label;
+            this.icon = icon;
+            this.description = description;
+            this.selected = selected;
+            this.ip = ip;
+            this.add = add;
+            this.subtitle = subtitle;
+            this.online = online;
+        }
+    }
+
+    /** 绿点在线，红点离线。描一圈底色，压在图标角上时不会糊成一块。 */
+    private View presenceDot(Context context, boolean online) {
+        View dot = new View(context);
+        GradientDrawable face = new GradientDrawable();
+        face.setShape(GradientDrawable.OVAL);
+        face.setColor(online ? 0xFF30D158 : 0xFFFF453A);
+        face.setStroke(Math.max(1, dp(1)), MusePage.bg(context));
+        dot.setBackground(face);
+        dot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return dot;
+    }
+
+    private String presenceDescription(Context context, String label, @Nullable Boolean online) {
+        if (online == null) return label;
+        return label + ", " + context.getString(online
+                ? R.string.lemurx_muse_computer_online
+                : R.string.lemurx_muse_computer_offline);
     }
 
     /** 点一台机器：记住它，并告诉服务端命令打到这台。本机浏览器不需要这一步。 */
@@ -2524,72 +3903,6 @@ class MuseChatView extends FrameLayout {
                 if (!accountToken.isEmpty()) LemurXComputer.saveToken(context, accountToken);
             }
         });
-    }
-
-    private void addTargetChip(
-            String label, int icon, boolean selected, String description, View.OnClickListener click) {
-        Context context = getContext();
-        LinearLayout chip = new LinearLayout(context);
-        chip.setOrientation(LinearLayout.HORIZONTAL);
-        chip.setGravity(Gravity.CENTER_VERTICAL);
-        chip.setPadding(dp(8), dp(6), dp(10), dp(6));
-        chip.setBackground(MusePage.rounded(
-                selected ? MusePage.accent(context) : MusePage.surface(context), 16, context));
-        int ink = selected ? MusePage.onAccent(context) : MusePage.text(context);
-        ImageView image = new ImageView(context);
-        image.setImageResource(icon);
-        image.setColorFilter(ink);
-        chip.addView(image, new LinearLayout.LayoutParams(dp(16), dp(16)));
-        TextView text = new TextView(context);
-        text.setText(label);
-        text.setSingleLine(true);
-        text.setTextColor(ink);
-        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        LinearLayout.LayoutParams textLp =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        textLp.setMarginStart(dp(6));
-        chip.addView(text, textLp);
-        chip.setOnClickListener(click);
-        chip.setContentDescription(description);
-        chip.setFocusable(false);
-        chip.setFocusableInTouchMode(false);
-        LinearLayout.LayoutParams chipLp =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        chipLp.setMarginEnd(dp(8));
-        mTargetRow.addView(chip, chipLp);
-    }
-
-    /** 本机浏览器旁边的添加入口：文字加一个加号，点进去连接远程电脑。 */
-    private void addTargetAction(String label, String description, View.OnClickListener click) {
-        Context context = getContext();
-        LinearLayout chip = new LinearLayout(context);
-        chip.setOrientation(LinearLayout.HORIZONTAL);
-        chip.setGravity(Gravity.CENTER_VERTICAL);
-        chip.setPadding(dp(10), dp(6), dp(8), dp(6));
-        chip.setBackground(MusePage.outlined(MusePage.line(context), 16, context));
-        TextView text = new TextView(context);
-        text.setText(label);
-        text.setSingleLine(true);
-        text.setTextColor(MusePage.text(context));
-        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        chip.addView(text);
-        ImageView plus = new ImageView(context);
-        plus.setImageResource(R.drawable.lemurx_muse_ic_plus);
-        plus.setColorFilter(MusePage.text(context));
-        LinearLayout.LayoutParams plusLp = new LinearLayout.LayoutParams(dp(14), dp(14));
-        plusLp.setMarginStart(dp(4));
-        chip.addView(plus, plusLp);
-        chip.setOnClickListener(click);
-        chip.setContentDescription(description);
-        chip.setFocusable(false);
-        chip.setFocusableInTouchMode(false);
-        LinearLayout.LayoutParams chipLp =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        chipLp.setMarginEnd(dp(8));
-        mTargetRow.addView(chip, chipLp);
     }
 
     // ---------------------------------------------------------------- 附件
@@ -2644,144 +3957,78 @@ class MuseChatView extends FrameLayout {
             showError(getContext().getString(R.string.lemurx_muse_attach_full));
             return;
         }
-        hideKeyboard();
-        showAttachSheet();
+        toggleAttachSheet();
     }
 
-    /** 加号先上拉一列附件类型，选中后再打开对应的文件选择器。 */
-    private void showAttachSheet() {
-        Activity activity = LemurXConsoleShell.activity();
-        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
-            openAttachPicker("*/*", null);
+    /** 回形针先上拉附件类型。选中后再打开对应的文件选择器。 */
+    private void toggleAttachSheet() {
+        if (!mAskPlaced) return;
+        hideDeviceSheet();
+        hideModelSheet();
+        if (mAttachSheet.getVisibility() == View.VISIBLE) {
+            hideAttachSheet();
             return;
         }
-        LinearLayout card = new LinearLayout(activity);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER_HORIZONTAL);
-        card.setBackground(MusePage.rounded(MusePage.sheet(activity), 24, activity));
-        card.setPadding(dp(20), dp(10), dp(20), dp(12));
+        paintAttachSheet();
+        presentPicker(mAttachSheet, mAttachCard);
+    }
 
-        View handle = new View(activity);
-        handle.setBackground(MusePage.rounded(MusePage.handle(activity), 2, activity));
-        LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(36), dp(4));
-        handleLp.bottomMargin = dp(16);
-        card.addView(handle, handleLp);
+    private void hideAttachSheet() {
+        if (!mAskPlaced || mAttachSheet.getVisibility() == View.GONE) return;
+        dismissPicker(mAttachSheet, mAttachCard);
+        mAttachChoices.removeAllViews();
+        noteComposeSheets();
+    }
 
-        TextView title = new TextView(activity);
-        title.setText(R.string.lemurx_muse_attach_pick);
-        title.setTextColor(MusePage.text(activity));
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        titleLp.bottomMargin = dp(14);
-        card.addView(title, titleLp);
-
-        Dialog dialog = new Dialog(activity);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        card.addView(attachChoice(
-                activity,
+    private void paintAttachSheet() {
+        Context context = getContext();
+        mAttachChoices.removeAllViews();
+        addAttachChoice(
                 R.drawable.lemurx_muse_ic_file_image,
                 R.string.lemurx_muse_attach_image,
                 R.string.lemurx_muse_attach_image_hint,
-                () -> {
-                    dialog.dismiss();
-                    openAttachPicker("image/*", null);
-                }));
-        card.addView(attachChoice(
-                activity,
+                () -> openAttachPicker("image/*", null));
+        addPickerDivider(mAttachChoices);
+        addAttachChoice(
                 R.drawable.lemurx_muse_ic_file_pdf,
                 R.string.lemurx_muse_attach_pdf,
                 R.string.lemurx_muse_attach_pdf_hint,
-                () -> {
-                    dialog.dismiss();
-                    openAttachPicker("application/pdf", null);
-                }));
-        card.addView(attachChoice(
-                activity,
+                () -> openAttachPicker("application/pdf", null));
+        addPickerDivider(mAttachChoices);
+        addAttachChoice(
                 R.drawable.lemurx_muse_ic_file_doc,
                 R.string.lemurx_muse_attach_doc,
                 R.string.lemurx_muse_attach_doc_hint,
-                () -> {
-                    dialog.dismiss();
-                    openAttachPicker(
-                            "*/*",
-                            new String[] {
-                                "text/*",
-                                "application/json",
-                                "application/msword",
-                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            });
-                }));
-        card.addView(attachChoice(
-                activity,
+                () -> openAttachPicker(
+                        "*/*",
+                        new String[] {
+                            "text/*",
+                            "application/json",
+                            "application/msword",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        }));
+        addPickerDivider(mAttachChoices);
+        addAttachChoice(
                 R.drawable.lemurx_muse_ic_file_text,
                 R.string.lemurx_muse_attach_any,
                 R.string.lemurx_muse_attach_any_hint,
-                () -> {
-                    dialog.dismiss();
-                    openAttachPicker("*/*", null);
-                }));
-        dialog.setContentView(card);
-        dialog.setCanceledOnTouchOutside(true);
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            window.setGravity(Gravity.BOTTOM);
-            window.setDimAmount(0.5f);
-            WindowManager.LayoutParams lp = window.getAttributes();
-            lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
-            lp.y = dp(16);
-            window.setAttributes(lp);
-            window.getDecorView().setPadding(dp(16), 0, dp(16), 0);
-        }
-        dialog.show();
+                () -> openAttachPicker("*/*", null));
     }
 
-    private View attachChoice(
-            Activity activity, int iconRes, int titleRes, int hintRes, Runnable action) {
-        LinearLayout row = new LinearLayout(activity);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setBackground(MusePage.rounded(MusePage.surface(activity), 16, activity));
-        row.setPadding(dp(14), dp(12), dp(14), dp(12));
-        row.setClickable(true);
-        row.setFocusable(true);
-        ImageView icon = new ImageView(activity);
-        icon.setImageResource(iconRes);
-        icon.setColorFilter(MusePage.text(activity), PorterDuff.Mode.SRC_IN);
-        row.addView(icon, new LinearLayout.LayoutParams(dp(22), dp(22)));
-        LinearLayout text = new LinearLayout(activity);
-        text.setOrientation(LinearLayout.VERTICAL);
-        TextView label = new TextView(activity);
-        label.setText(titleRes);
-        label.setTextColor(MusePage.text(activity));
-        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        label.setTypeface(Typeface.DEFAULT_BOLD);
-        text.addView(label);
-        TextView hint = new TextView(activity);
-        hint.setText(hintRes);
-        hint.setTextColor(MusePage.muted(activity));
-        hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hintLp.topMargin = dp(2);
-        text.addView(hint, hintLp);
-        LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        textLp.setMarginStart(dp(12));
-        row.addView(text, textLp);
-        row.setOnClickListener(
-                v -> {
-                    LemurXHaptics.tick(v);
-                    action.run();
-                });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(8);
-        row.setLayoutParams(lp);
-        return row;
+    private void addAttachChoice(int iconRes, int titleRes, int hintRes, Runnable open) {
+        Context context = getContext();
+        mAttachChoices.addView(pickerRow(
+                context,
+                iconRes,
+                context.getString(titleRes),
+                context.getString(hintRes),
+                false,
+                true,
+                null,
+                () -> {
+                    hideAttachSheet();
+                    open.run();
+                }));
     }
 
     private void openAttachPicker(String type, @Nullable String[] mimeTypes) {
@@ -3625,12 +4872,30 @@ class MuseChatView extends FrameLayout {
         return share;
     }
 
-    /** 文件卡片挂在正文下面，单独一块，点整张卡片打开。 */
+    /**
+     * 命令卡片放在这条回复的正文前面，先看到跑了什么，再读 Aero 的话。
+     * 别的附件仍挂在正文下面。
+     */
     private void bindFiles(Message message) {
         LinearLayout row = message.row;
         if (row == null) return;
-        View existing = row.findViewWithTag("aero-files");
-        if (message.files.isEmpty()) {
+        boolean user = "user".equals(message.role);
+        List<Attach> commands = new ArrayList<>();
+        List<Attach> rest = new ArrayList<>();
+        for (Attach file : message.files) {
+            if (!user && "computer".equals(file.kind)) commands.add(file);
+            else rest.add(file);
+        }
+        placeFileBox(message, "aero-commands", commands, !user);
+        placeFileBox(message, "aero-files", rest, false);
+    }
+
+    /** beforeReply 时插到正文前面；否则留在这一行的最后。 */
+    private void placeFileBox(Message message, String tag, List<Attach> files, boolean beforeReply) {
+        LinearLayout row = message.row;
+        if (row == null) return;
+        View existing = row.findViewWithTag(tag);
+        if (files.isEmpty()) {
             if (existing != null) row.removeView(existing);
             return;
         }
@@ -3640,13 +4905,34 @@ class MuseChatView extends FrameLayout {
             box.removeAllViews();
         } else {
             box = new LinearLayout(getContext());
-            box.setTag("aero-files");
+            box.setTag(tag);
             box.setOrientation(LinearLayout.VERTICAL);
-            row.addView(box, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
         boolean user = "user".equals(message.role);
-        for (Attach file : message.files) box.addView(fileCard(file, user));
+        for (Attach file : files) box.addView(fileCard(file, user));
+        if (box.getParent() == row) row.removeView(box);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        if (beforeReply && message.body != null && row.indexOfChild(message.body) >= 0) {
+            row.addView(box, row.indexOfChild(message.body), lp);
+        } else {
+            row.addView(box, lp);
+        }
+    }
+
+    /** 电脑没跑成时，这句英文已经在命令卡片里说明，不再写进正文。 */
+    private String replyBesideCommand(Message message, String markdown) {
+        if (markdown == null || markdown.isEmpty()) return "";
+        boolean computer = false;
+        for (Attach file : message.files) {
+            if ("computer".equals(file.kind)) {
+                computer = true;
+                break;
+            }
+        }
+        if (!computer) return markdown;
+        String shown = markdown.replace("The computer did not run the command", "");
+        return shown.replaceAll("[ \\t]*\\n[ \\t]*\\n(?:[ \\t]*\\n)+", "\n\n").trim();
     }
 
     private View fileCard(Attach file, boolean user) {
@@ -3826,7 +5112,9 @@ class MuseChatView extends FrameLayout {
             if (run != null) {
                 String body = run.output.toString().trim();
                 if (!body.isEmpty()) return body;
-                if (run.done && run.error != null && !run.error.isEmpty()) return run.error;
+                if (run.done && run.error != null && !run.error.isEmpty()) {
+                    return computerFailure(run.error);
+                }
                 return "";
             }
             String local = LemurXVault.getRunOutput(file.computerRunId);
@@ -3834,7 +5122,17 @@ class MuseChatView extends FrameLayout {
         }
         String excerpt = file.excerpt == null ? "" : file.excerpt.trim();
         if ("…".equals(excerpt)) return "";
-        return excerpt;
+        return computerFailure(excerpt);
+    }
+
+    /** 服务端这句英文失败说明换成界面语言，不原样印出来。 */
+    private String computerFailure(String raw) {
+        if (raw == null) return "";
+        String trimmed = raw.trim();
+        if ("The computer did not run the command".equals(trimmed)) {
+            return getContext().getString(R.string.lemurx_muse_command_failed);
+        }
+        return trimmed;
     }
 
     private boolean commandRunning(Attach file) {
