@@ -62,10 +62,12 @@ import org.chromium.chrome.browser.layouts.LayoutStateProvider.LayoutStateObserv
 import org.chromium.chrome.browser.layouts.LayoutType;
 import org.chromium.chrome.browser.back_press.BackPressManager;
 import org.chromium.chrome.browser.lemurx.agent.LemurXDeviceBridge;
+import org.chromium.chrome.browser.lemurx.muse.LemurXExtensions;
 import org.chromium.chrome.browser.lemurx.muse.LemurXWelcome;
 import org.chromium.chrome.browser.lemurx.muse.MusePage;
 import org.chromium.chrome.browser.lemurx.muse.MuseUrls;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.profiles.ProfileManager;
 import org.chromium.chrome.browser.lifecycle.DestroyObserver;
 import org.chromium.chrome.browser.lifecycle.StartStopWithNativeObserver;
 import org.chromium.chrome.browser.omnibox.OmniboxStub;
@@ -371,6 +373,10 @@ public final class LemurXConsoleShell {
     private static @Nullable View sTabsCell;
     /** 网页模式下占住社区那一格，打开侧边栏。对话模式权重为 0。 */
     private static @Nullable View sMenuCell;
+    /** 装了插件才出现，夹在对话和搜索中间。点一下才展开上面的插件栏。 */
+    private static @Nullable View sExtensionsCell;
+    private static boolean sHasExtensions;
+    private static boolean sExtensionsBarOpen;
     /** 网页模式才展开的前进 / 后退格；不是网页时 weight 收到 0。 */
     private static @Nullable View sBackCell;
     private static @Nullable View sForwardCell;
@@ -939,6 +945,9 @@ public final class LemurXConsoleShell {
         sSectionCells = null;
         sTabsCell = null;
         sMenuCell = null;
+        sExtensionsCell = null;
+        sHasExtensions = false;
+        sExtensionsBarOpen = false;
         sBackCell = null;
         sForwardCell = null;
         sPlace = CELL_WEB;
@@ -1001,6 +1010,8 @@ public final class LemurXConsoleShell {
                     @Override
                     public void onPageLoadFinished(Tab tab, GURL url) {
                         finishProgress(tab);
+                        // 官方商店是桌面页。加载完后按手机宽度收一下，安装按钮仍走商店自己的接口。
+                        LemurXWebStore.fit(tab);
                     }
 
                     @Override
@@ -2270,6 +2281,12 @@ public final class LemurXConsoleShell {
         sTabsCell = tabs;
         pill.addView(sectionCells[CELL_WEB]);
         pill.addView(sectionCells[CELL_CHAT]);
+        // 装了插件才占一格，夹在对话和搜索中间。点一下才把上面的插件栏展开。
+        View extensions = cell(activity, R.drawable.lemurx_console_ic_extensions,
+                R.string.lemurx_console_extensions, iconSize, cellHeight, v -> toggleExtensionsBar());
+        sExtensionsCell = extensions;
+        applySlotWeight(extensions, 0f);
+        pill.addView(extensions);
         // 进出网页时网页钮和前进后退对调；搜索、标签页、菜单只跟着间距动。
         pill.addView(cell(activity, R.drawable.lemurx_console_ic_search,
                 R.string.lemurx_console_search, iconSmall, cellHeight, v -> openSearch()));
@@ -2300,6 +2317,8 @@ public final class LemurXConsoleShell {
         nav.setClipToPadding(false);
         nav.addView(pill, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // 已固定的插件排在药丸上面，只在看网页时出现。
+        LemurXPinnedBar.attach(activity, nav);
         nav.setVisibility(View.GONE);
         nav.setOnApplyWindowInsetsListener(
                 (v, insets) -> {
@@ -2792,6 +2811,7 @@ public final class LemurXConsoleShell {
                 }
             }
         }
+        updateExtensionsSlot(activity);
         morphWebChrome(webMode);
         updateHistoryButtons(webMode ? tab : null);
         int vis = show && !collapsed && !sPipChrome ? View.VISIBLE : View.GONE;
@@ -2808,6 +2828,8 @@ public final class LemurXConsoleShell {
         // 每次刷新都抬到最上面。网页合成层和后来加上的覆盖层不能盖住底栏。
         // Agent 正在操作时反过来：锁盖住底栏，接管之前底栏不能点。
         if (vis == View.VISIBLE && !LemurXDeviceBridge.isDriving()) bringNavToFront();
+        LemurXPinnedBar.sync(
+                activity, webMode && sExtensionsBarOpen && sHasExtensions && vis == View.VISIBLE);
         LemurXDeviceBridge.keepLockOnTop();
         updateTabCount();
         if (!sOmniboxOpen && tabsReady()) {
@@ -2853,6 +2875,39 @@ public final class LemurXConsoleShell {
         anim.start();
     }
 
+    /** 点插件钮：展开或收起底栏上面那一排已固定的插件。 */
+    private static void toggleExtensionsBar() {
+        if (!sHasExtensions) return;
+        sExtensionsBarOpen = !sExtensionsBarOpen;
+        refresh();
+    }
+
+    /** 没装插件时这一格权重为 0，不占位置。展开时用导航选中格的底。 */
+    private static void updateExtensionsSlot(ChromeTabbedActivity activity) {
+        boolean installed = false;
+        try {
+            Tab tab = activity.getActivityTab();
+            Profile profile =
+                    tab != null ? tab.getProfile() : ProfileManager.getLastUsedRegularProfile();
+            if (profile != null) installed = LemurXExtensions.hasInstalled(profile);
+        } catch (RuntimeException e) {
+            installed = sHasExtensions;
+        }
+        if (!installed) sExtensionsBarOpen = false;
+        sHasExtensions = installed;
+        View cell = sExtensionsCell;
+        if (cell == null) return;
+        boolean selected = sExtensionsBarOpen && installed;
+        if (cell.isSelected() != selected || cell.getTag() == null) {
+            cell.setSelected(selected);
+            cell.setBackgroundResource(
+                    selected
+                            ? R.drawable.lemurx_console_cell_active_bg
+                            : R.drawable.lemurx_console_cell_bg);
+            cell.setTag(Boolean.TRUE);
+        }
+    }
+
     private static void applyChrome(float chrome) {
         applySlotWeight(sBackCell, chrome);
         applySlotWeight(sForwardCell, chrome);
@@ -2860,6 +2915,8 @@ public final class LemurXConsoleShell {
         // 搜索、标签、菜单两种模式都在，顺序不动，宽度跟着前后钮的权重一起变。
         applySlotWeight(sTabsCell, 1f);
         applySlotWeight(sMenuCell, 1f);
+        // 插件钮只在看网页时占一格，对话界面权重收到 0。
+        applySlotWeight(sExtensionsCell, sHasExtensions ? chrome : 0f);
         if (cells != null) {
             float chat = sPlace == CELL_CHAT ? 1f : (sChatTracksChrome ? chrome : 1f);
             applySlotWeight(cells[CELL_WEB], 1f - chrome);

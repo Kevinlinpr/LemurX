@@ -1,0 +1,20 @@
+diff --git a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsMenuCoordinator.java b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsMenuCoordinator.java
+index 77301c18c3..f18f5a3809 100644
+--- a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsMenuCoordinator.java
++++ b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsMenuCoordinator.java
+@@ -481,14 +481,7 @@ public class ExtensionsMenuCoordinator
+                 mExtensionsToolbarBridge.getMenuButtonState(
+                         webContents, iconSizeDp, iconSizeDp, density, color);
+ 
+-        if (state.getIcon() != null) {
+-            mExtensionsMenuButton.setImageBitmap(state.getIcon());
+-        } else {
+-            // Fallback just in case.
+-            int iconResId = R.drawable.chrome_extension;
+-            mExtensionsMenuButton.setImageResource(iconResId);
+-        }
+-
++        // 图标由底栏换成和导航同一套线条拼图，这里只更新说明文字。
+         mExtensionsMenuButton.setTooltipText(state.getTooltip());
+         mExtensionsMenuButton.setContentDescription(state.getAccessibleText());
+     }

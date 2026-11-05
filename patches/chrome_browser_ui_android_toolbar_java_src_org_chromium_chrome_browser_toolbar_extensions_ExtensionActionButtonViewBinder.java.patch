@@ -1,0 +1,64 @@
+diff --git a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionActionButtonViewBinder.java b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionActionButtonViewBinder.java
+index 556661e422..e4b2aa8be8 100644
+--- a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionActionButtonViewBinder.java
++++ b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionActionButtonViewBinder.java
+@@ -5,7 +5,12 @@
+ package org.chromium.chrome.browser.toolbar.extensions;
+ 
+ import android.annotation.SuppressLint;
++import android.content.res.Configuration;
+ import android.graphics.Bitmap;
++import android.graphics.drawable.GradientDrawable;
++import android.graphics.drawable.StateListDrawable;
++import android.view.ViewGroup;
++import android.widget.ImageView;
+ 
+ import org.chromium.build.annotations.NullMarked;
+ import org.chromium.ui.listmenu.ListMenuButton;
+@@ -25,6 +30,7 @@ public class ExtensionActionButtonViewBinder {
+             button.setContentDescription(accessibleName);
+         } else if (key == ExtensionActionButtonProperties.ICON) {
+             Bitmap bitmap = model.get(ExtensionActionButtonProperties.ICON);
++            applyPinnedChrome(button);
+             button.setImageBitmap(bitmap);
+         } else if (key == ExtensionActionButtonProperties.TOUCH_LISTENER) {
+             button.setOnTouchListener(model.get(ExtensionActionButtonProperties.TOUCH_LISTENER));
+@@ -37,4 +43,38 @@ public class ExtensionActionButtonViewBinder {
+                     model.get(ExtensionActionButtonProperties.ON_LONG_CLICK_LISTENER));
+         }
+     }
++
++    /**
++     * 和底部导航同一格：48×47dp，图标缩在中间，左右留出间距。
++     * 平时透明，弹层打开时用导航选中格的圆角底。
++     */
++    private static void applyPinnedChrome(ListMenuButton button) {
++        float density = button.getResources().getDisplayMetrics().density;
++        int width = Math.round(48f * density);
++        int height = Math.round(47f * density);
++        ViewGroup.LayoutParams params = button.getLayoutParams();
++        if (params != null && (params.width != width || params.height != height)) {
++            params.width = width;
++            params.height = height;
++            button.setLayoutParams(params);
++        }
++        button.setScaleType(ImageView.ScaleType.FIT_CENTER);
++        int pad = Math.round(8f * density);
++        button.setPadding(pad, pad, pad, pad);
++        boolean night =
++                (button.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
++                        == Configuration.UI_MODE_NIGHT_YES;
++        int active = night ? 0xFF2A363E : 0xFFF0F1F2;
++        StateListDrawable states = new StateListDrawable();
++        states.addState(new int[] {android.R.attr.state_pressed}, slot(active, density));
++        states.addState(new int[] {}, slot(0, density));
++        button.setBackground(states);
++    }
++
++    private static GradientDrawable slot(int color, float density) {
++        GradientDrawable shape = new GradientDrawable();
++        shape.setCornerRadius(28f * density);
++        shape.setColor(color);
++        return shape;
++    }
+ }

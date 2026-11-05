@@ -8,6 +8,7 @@
     <string name="lemurx_console_community">Community</string>
     <string name="lemurx_console_menu">Menu</string>
     <string name="lemurx_console_chat">Chat</string>
+    <string name="lemurx_console_extensions">Extensions</string>
     <string name="lemurx_console_search">Search</string>
     <string name="lemurx_console_tabs">Tabs</string>
     <string name="lemurx_console_tabs_count">Tabs, %1$d</string>

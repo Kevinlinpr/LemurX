@@ -1,0 +1,15 @@
+diff --git a/content/browser/renderer_host/render_frame_host_impl.h b/content/browser/renderer_host/render_frame_host_impl.h
+index 7bd838f0db..ce896860d9 100644
+--- a/content/browser/renderer_host/render_frame_host_impl.h
++++ b/content/browser/renderer_host/render_frame_host_impl.h
+@@ -3878,7 +3878,9 @@ class CONTENT_EXPORT RenderFrameHostImpl
+   // Returns true if the ExecuteJavaScript() API can be used on this host.
+   // The checks do not apply to ExecuteJavaScriptInIsolatedWorld, nor to
+   // ExecuteJavaScriptForTests.  See also AssertFrameWasCommitted method.
+-  bool CanExecuteJavaScript();
++  // On Android, `javascript` lets the official Chrome Web Store pass; other
++  // callers keep the original checks.
++  bool CanExecuteJavaScript(const std::u16string* javascript = nullptr);
+ 
+   // Returns the AXTreeID of the parent frame, outer document, or platform
+   // accessibility tree, or ui::AXTreeIDUnknown() if none exists.

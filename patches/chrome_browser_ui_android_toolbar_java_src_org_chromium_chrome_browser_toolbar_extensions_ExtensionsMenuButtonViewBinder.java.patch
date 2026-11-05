@@ -1,0 +1,21 @@
+diff --git a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsMenuButtonViewBinder.java b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsMenuButtonViewBinder.java
+index a34697fb31..9dfa013812 100644
+--- a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsMenuButtonViewBinder.java
++++ b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsMenuButtonViewBinder.java
+@@ -19,16 +19,6 @@ class ExtensionsMenuButtonViewBinder {
+                     model.get(ExtensionsToolbarProperties.IS_REQUEST_ACCESS_BUTTON_VISIBLE);
+             if (isVisible) {
+                 view.setBackgroundResource(R.drawable.extensions_menu_button_bg);
+-            } else {
+-                int defaultBg =
+-                        model.get(
+-                                ExtensionsToolbarProperties
+-                                        .EXTENSIONS_MENU_BUTTON_DEFAULT_BACKGROUND);
+-                if (defaultBg != 0) {
+-                    view.setBackgroundResource(defaultBg);
+-                } else {
+-                    view.setBackgroundResource(R.drawable.default_icon_background);
+-                }
+             }
+         }
+     }

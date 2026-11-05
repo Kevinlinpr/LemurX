@@ -1,0 +1,12 @@
+diff --git a/chrome/browser/ui/android/extensions/BUILD.gn b/chrome/browser/ui/android/extensions/BUILD.gn
+index 4d1c4cb1c9..a3dd4424ca 100644
+--- a/chrome/browser/ui/android/extensions/BUILD.gn
++++ b/chrome/browser/ui/android/extensions/BUILD.gn
+@@ -59,6 +59,7 @@ if (enable_extensions_core) {
+       "//chrome/browser/ui/extensions",
+       "//chrome/browser/ui/extensions:extensions_menu_handler",
+       "//chrome/browser/ui/toolbar",
++      "//components/sessions",
+       "//content/public/browser",
+       "//extensions/browser",
+       "//extensions/browser:extension_action_enums",

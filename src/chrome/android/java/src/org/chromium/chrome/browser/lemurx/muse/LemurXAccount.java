@@ -376,9 +376,16 @@ public final class LemurXAccount {
      * 浏览器会话也不在的话，连同账号登录一起补。必须在后台线程调用。
      */
     public static void ensureAeroTicket(@Nullable Activity activity) {
+        ensureAeroTicket(activity, false);
+    }
+
+    /**
+     * {@code force} 为 true 时忽略一分钟冷却。用户刚点了登录，不能因为后台刚试过一次就直接放弃。
+     */
+    public static void ensureAeroTicket(@Nullable Activity activity, boolean force) {
         if (aeroTicket() != null) return;
         long now = System.currentTimeMillis();
-        if (now < sNextSilentMs) return;
+        if (!force && now < sNextSilentMs) return;
         sNextSilentMs = now + 60_000L;
         Log.i(TAG, "aero ticket: signedIn=%s", isSignedIn());
         if (activity == null || activity.isFinishing() || activity.isDestroyed()) {

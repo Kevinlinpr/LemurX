@@ -7,6 +7,7 @@
     <string name="lemurx_console_community">社区</string>
     <string name="lemurx_console_menu">菜单</string>
     <string name="lemurx_console_chat">对话</string>
+    <string name="lemurx_console_extensions">插件</string>
     <string name="lemurx_console_search">搜索</string>
     <string name="lemurx_console_tabs">标签页</string>
     <string name="lemurx_console_tabs_count">标签页，%1$d 个</string>

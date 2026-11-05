@@ -1,0 +1,57 @@
+diff --git a/content/browser/renderer_host/render_frame_host_impl.cc b/content/browser/renderer_host/render_frame_host_impl.cc
+index 843974a29b..785610d251 100644
+--- a/content/browser/renderer_host/render_frame_host_impl.cc
++++ b/content/browser/renderer_host/render_frame_host_impl.cc
+@@ -3923,7 +3923,19 @@ void RenderFrameHostImpl::ExecuteJavaScriptMethod(
+ void RenderFrameHostImpl::ExecuteJavaScript(const std::u16string& javascript,
+                                             JavaScriptResultCallback callback) {
+   CHECK_CURRENTLY_ON(BrowserThread::UI);
++#if BUILDFLAG(IS_ANDROID)
++  // A page may have navigated away since a Java helper scheduled its script.
++  // Reject denied injections without terminating the browser or losing the
++  // caller's completion callback.
++  if (!CanExecuteJavaScript(&javascript)) {
++    if (callback) {
++      std::move(callback).Run(base::Value());
++    }
++    return;
++  }
++#else
+   CHECK(CanExecuteJavaScript());
++#endif
+   AssertFrameWasCommitted();
+ 
+   const bool wants_result = !callback.is_null();
+@@ -14578,11 +14590,31 @@ bool RenderFrameHostImpl::CreateNetworkServiceDefaultFactoryInternal(
+   return bypass_redirect_checks;
+ }
+ 
+-bool RenderFrameHostImpl::CanExecuteJavaScript() {
++bool RenderFrameHostImpl::CanExecuteJavaScript(
++    const std::u16string* javascript) {
+   if (g_allow_injecting_javascript) {
+     return true;
+   }
+ 
++#if BUILDFLAG(IS_ANDROID)
++  // The phone layout helper injects into the official Chrome Web Store.
++  // Only the active main frame of that https origin is allowed.
++  if (javascript && IsInPrimaryMainFrame() &&
++      !GetLastCommittedOrigin().opaque()) {
++    const GURL& url = GetLastCommittedURL();
++    if (url.is_valid() && url.SchemeIs("https") &&
++        url.EffectiveIntPort() == 443 && !url.has_username() &&
++        !url.has_password()) {
++      const auto path = url.path();
++      if (url.host() == "chromewebstore.google.com" ||
++          (url.host() == "chrome.google.com" &&
++           (path == "/webstore" || path.starts_with("/webstore/")))) {
++        return true;
++      }
++    }
++  }
++#endif
++
+   return !GetLastCommittedURL().is_valid() ||
+          GetLastCommittedURL().SchemeIs(kChromeDevToolsScheme) ||
+          ChildProcessSecurityPolicyImpl::GetInstance()->HasWebUIBindings(

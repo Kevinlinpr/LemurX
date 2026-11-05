@@ -1,0 +1,190 @@
+diff --git a/chrome/browser/ui/android/extensions/extensions_toolbar_android.cc b/chrome/browser/ui/android/extensions/extensions_toolbar_android.cc
+index 875e30c345..3a60074b11 100644
+--- a/chrome/browser/ui/android/extensions/extensions_toolbar_android.cc
++++ b/chrome/browser/ui/android/extensions/extensions_toolbar_android.cc
+@@ -4,11 +4,14 @@
+ 
+ #include "chrome/browser/ui/android/extensions/extensions_toolbar_android.h"
+ 
++#include <algorithm>
++#include <cmath>
+ #include <cstdint>
+ 
+ #include "base/android/jni_array.h"
+ #include "base/android/jni_string.h"
+ #include "base/notimplemented.h"
++#include "base/strings/stringprintf.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/extensions/extension_view_host.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -21,13 +24,25 @@
+ #include "chrome/browser/ui/extensions/settings_api_bubble_helpers.h"
+ #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
+ #include "content/public/browser/web_contents.h"
++#include "components/sessions/content/session_tab_helper.h"
++#include "extensions/browser/extension_action.h"
++#include "extensions/browser/extension_action_icon_factory.h"
++#include "extensions/browser/extension_action_manager.h"
+ #include "extensions/browser/extension_registry.h"
++#include "extensions/browser/permissions/site_permissions_helper.h"
+ #include "extensions/browser/permissions_manager.h"
++#include "third_party/skia/include/core/SkCanvas.h"
++#include "third_party/skia/include/core/SkFont.h"
++#include "third_party/skia/include/core/SkRRect.h"
++#include "ui/gfx/color_utils.h"
++#include "ui/gfx/image/image_skia_operations.h"
+ #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
+ #include "ui/color/color_provider.h"
+ #include "ui/events/android/key_event_android.h"
+ #include "ui/gfx/android/java_bitmap.h"
++#include "cc/paint/paint_flags.h"
+ #include "ui/gfx/canvas.h"
++#include "ui/gfx/font_list.h"
+ #include "ui/gfx/image/canvas_image_source.h"
+ #include "ui/gfx/image/image_skia_rep.h"
+ #include "ui/gfx/paint_vector_icon.h"
+@@ -254,6 +269,113 @@ base::android::ScopedJavaLocalRef<jobject> ExtensionsToolbarAndroid::GetAction(
+       java_hover_card_state);
+ }
+ 
++namespace {
++
++// 和狐猴固定栏同一张图：28dp 圆里放 20dp 图标。没权限且按钮不可见时图标变灰。
++// 角标画在右下角，最多四个字，底色和字色按徽章自己的颜色算。
++SkBitmap RenderPinnedIcon(Profile* profile,
++                          const std::string& action_id,
++                          content::WebContents* web_contents,
++                          int canvas_width_dp,
++                          float scale_factor) {
++  SkBitmap empty;
++  if (!profile || scale_factor <= 0.f || canvas_width_dp <= 0) {
++    return empty;
++  }
++  const extensions::Extension* extension =
++      extensions::ExtensionRegistry::Get(profile)->GetInstalledExtension(
++          action_id);
++  if (!extension) {
++    return empty;
++  }
++  extensions::ExtensionAction* action =
++      extensions::ExtensionActionManager::Get(profile)->GetExtensionAction(
++          *extension);
++  if (!action) {
++    return empty;
++  }
++  const int tab_id = web_contents
++                         ? sessions::SessionTabHelper::IdForTab(web_contents).id()
++                         : extensions::ExtensionAction::kDefaultTabId;
++  extensions::ExtensionActionIconFactory factory(extension, action, nullptr);
++  gfx::Image icon = factory.GetIcon(tab_id);
++  if (icon.IsEmpty()) {
++    return empty;
++  }
++
++  const bool visible = action->GetIsVisible(tab_id);
++  bool grayscale = !visible;
++  if (web_contents) {
++    grayscale = !visible &&
++                extensions::SitePermissionsHelper(profile).GetSiteInteraction(
++                    *extension, web_contents) ==
++                    extensions::SitePermissionsHelper::SiteInteraction::kNone;
++  }
++  gfx::ImageSkia skia = icon.AsImageSkia();
++  if (grayscale) {
++    skia = gfx::ImageSkiaOperations::CreateHSLShiftedImage(
++        skia, color_utils::HSL{-1, 0, 0.6});
++  }
++
++  const int canvas_px =
++      std::max(1, static_cast<int>(std::lround(canvas_width_dp * scale_factor)));
++  gfx::Canvas canvas(gfx::Size(canvas_px, canvas_px), 1.0f, /*is_opaque=*/false);
++
++  const int icon_px = std::max(1, canvas_px * 20 / 28);
++  const gfx::ImageSkiaRep& rep = skia.GetRepresentation(scale_factor);
++  SkBitmap icon_bitmap = rep.GetBitmap();
++  if (!icon_bitmap.isNull()) {
++    const int offset = (canvas_px - icon_px) / 2;
++    canvas.DrawImageInt(gfx::ImageSkia::CreateFrom1xBitmap(icon_bitmap), 0, 0,
++                        icon_bitmap.width(), icon_bitmap.height(), offset,
++                        offset, icon_px, icon_px, true);
++  }
++
++  std::u16string text = base::UTF8ToUTF16(action->GetDisplayBadgeText(tab_id));
++  if (text.empty()) {
++    return canvas.GetBitmap();
++  }
++  if (text.size() > 4) {
++    text.resize(4);
++  }
++  SkColor background = action->GetBadgeBackgroundColor(tab_id);
++  if (SkColorGetA(background) == 0) {
++    background = SkColorSetARGB(0xFF, 0x5F, 0x63, 0x68);
++  }
++  SkColor text_color = action->GetBadgeTextColor(tab_id);
++  if (SkColorGetA(text_color) == 0) {
++    const int red = SkColorGetR(background);
++    const int green = SkColorGetG(background);
++    const int blue = SkColorGetB(background);
++    const double luminance =
++        (0.299 * red + 0.587 * green + 0.114 * blue) / 255.0;
++    text_color = luminance > 0.6 ? SkColorSetARGB(0xFF, 0x20, 0x21, 0x24)
++                                 : SK_ColorWHITE;
++  }
++
++  const int font_px =
++      std::max(8, static_cast<int>(std::lround(11.f * scale_factor)));
++  const int badge_height =
++      std::max(font_px + 4, static_cast<int>(std::lround(16.f * scale_factor)));
++  const int pad = std::max(2, static_cast<int>(std::lround(3.f * scale_factor)));
++  const int text_width = gfx::Canvas::GetStringWidth(
++      text, gfx::FontList(base::StringPrintf("sans-serif,%dpx", font_px)));
++  const int badge_width = std::max(badge_height, text_width + pad * 2);
++  const int radius = std::max(2, static_cast<int>(std::lround(4.f * scale_factor)));
++  gfx::Rect badge(canvas_px - badge_width, canvas_px - badge_height, badge_width,
++                  badge_height);
++  cc::PaintFlags paint;
++  paint.setAntiAlias(true);
++  paint.setColor(background);
++  canvas.DrawRoundRect(badge, radius, paint);
++  canvas.DrawStringRectWithFlags(
++      text, gfx::FontList(base::StringPrintf("sans-serif,%dpx", font_px)),
++      text_color, badge, gfx::Canvas::TEXT_ALIGN_CENTER);
++  return canvas.GetBitmap();
++}
++
++}  // namespace
++
+ base::android::ScopedJavaLocalRef<jobject> ExtensionsToolbarAndroid::GetIcon(
+     JNIEnv* env,
+     const ToolbarActionsModel::ActionId& action_id,
+@@ -261,26 +383,12 @@ base::android::ScopedJavaLocalRef<jobject> ExtensionsToolbarAndroid::GetIcon(
+     int canvas_width_dp,
+     int canvas_height_dp,
+     float scale_factor) {
+-  gfx::Size size(canvas_width_dp, canvas_height_dp);
+-
+-  ToolbarActionViewModel* action =
+-      toolbar_view_model_->GetActionModelForId(action_id);
+-  DCHECK(action);
+-  ui::ImageModel model = action->GetIcon(web_contents, size);
+-
+-  if (model.IsEmpty() || !model.IsImage()) {
+-    return nullptr;
+-  }
+-
+-  gfx::ImageSkia image_skia = model.GetImage().AsImageSkia();
+-
+-  const gfx::ImageSkiaRep& rep = image_skia.GetRepresentation(scale_factor);
+-  const SkBitmap& bitmap = rep.GetBitmap();
+-
+-  if (bitmap.isNull()) {
++  SkBitmap bitmap =
++      RenderPinnedIcon(browser_->GetProfile(), action_id, web_contents,
++                       canvas_width_dp, scale_factor);
++  if (bitmap.isNull() || bitmap.empty()) {
+     return nullptr;
+   }
+-
+   return gfx::ConvertToJavaBitmap(bitmap);
+ }
+ 

@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.lemurx.muse;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Typeface;
@@ -18,6 +19,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import org.chromium.base.ThreadUtils;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
@@ -397,8 +399,35 @@ final class LemurXComputer {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
+    /** 电脑地址和命令钥匙按账号分开。同一部手机换账号时，不能把上一个账号的电脑交出去。 */
+    private static String slot() {
+        String id = LemurXAccount.accountId();
+        return id == null || id.isEmpty() ? "none" : id;
+    }
+
+    private static String prefKey(String name) {
+        return name + ":" + slot();
+    }
+
+    /**
+     * 旧版本把地址和钥匙写在手机上，不区分账号。第一次读到时划给当前账号，然后删掉那份公用记录。
+     */
+    private static void migrateAccount(SharedPreferences stored) {
+        String hostKey = prefKey("host");
+        String tokenKey = prefKey("token");
+        if (stored.contains(hostKey) || stored.contains(tokenKey)) return;
+        String legacyHost = stored.getString("host", "");
+        String legacyToken = stored.getString("token", "");
+        SharedPreferences.Editor edit = stored.edit();
+        if (legacyHost != null && !legacyHost.isEmpty()) edit.putString(hostKey, legacyHost);
+        if (legacyToken != null && !legacyToken.isEmpty()) edit.putString(tokenKey, legacyToken);
+        edit.remove("host").remove("token").apply();
+    }
+
     static String host(Context context) {
-        String value = prefs(context).getString("host", "");
+        SharedPreferences stored = prefs(context);
+        migrateAccount(stored);
+        String value = stored.getString(prefKey("host"), "");
         return value == null ? "" : value;
     }
 
@@ -452,8 +481,14 @@ final class LemurXComputer {
      * join/host 响应写回 {@link #saveToken}，后到的手机不得覆盖服务端那一把。
      */
     static String token(Context context) {
+        rememberSlot();
+        if (sAccountToken != null && sAccountToken.length() >= 8) {
+            saveToken(context, sAccountToken);
+            return sAccountToken;
+        }
         SharedPreferences prefs = prefs(context);
-        String current = prefs.getString("token", "");
+        migrateAccount(prefs);
+        String current = prefs.getString(prefKey("token"), "");
         if (current != null && !current.isEmpty()) return current;
         byte[] bytes = new byte[18];
         new SecureRandom().nextBytes(bytes);
@@ -462,18 +497,97 @@ final class LemurXComputer {
             out.append(String.format(Locale.US, "%02x", b & 0xff));
         }
         String created = out.toString();
-        prefs.edit().putString("token", created).apply();
+        prefs.edit().putString(prefKey("token"), created).apply();
         return created;
     }
 
     static void saveHost(Context context, String host) {
-        prefs(context).edit().putString("host", host).apply();
+        prefs(context).edit().putString(prefKey("host"), host).apply();
+    }
+
+    /** 最近一次 /api/tailnet 带回的账号地址。null 表示这部手机还没问过服务器。 */
+    private static @Nullable String sServerHost;
+    /** 账号上的命令钥匙。换账号时清掉，避免把上一份钥匙交给新账号。 */
+    private static @Nullable String sAccountToken;
+    private static @Nullable String sTokenSlot;
+    /** 已经交给账号的本机地址，避免每次打开页面都再传一次。 */
+    private static @Nullable String sPublishedHost;
+
+    /** 换了 Aero 账号就忘掉上一个账号在内存里的地址和钥匙。 */
+    private static void rememberSlot() {
+        String slot = slot();
+        if (slot.equals(sTokenSlot)) return;
+        sTokenSlot = slot;
+        sServerHost = null;
+        sAccountToken = null;
+        sPublishedHost = null;
+    }
+
+    /**
+     * 电脑地址属于账号，不属于某一台手机。服务器上有地址时以它为准，写回这部手机。
+     * 第一部手机选过的电脑如果还没进账号记录，后加入的手机会把整张设备列表滤成空的。
+     */
+    static void noteServerHost(Context context, @Nullable String serverHost) {
+        rememberSlot();
+        String remote = serverHost == null ? "" : serverHost.trim();
+        sServerHost = remote;
+        if (!remote.isEmpty() && !remote.equalsIgnoreCase(host(context))) {
+            saveHost(context, remote);
+        }
+    }
+
+    /**
+     * 登录状态下的 /api/tailnet。地址和命令钥匙都属于这个账号。
+     * 后加入的手机在自己造钥匙之前先收下账号里的那一把。
+     */
+    static void noteServerAccount(Context context, JSONObject body) {
+        noteServerHost(context, body.optString("host", ""));
+        if (!body.has("deviceToken")) return;
+        String key = body.optString("deviceToken", "");
+        if (key.length() < 8) return;
+        sAccountToken = key;
+        saveToken(context, key);
+    }
+
+    /**
+     * 只有这部手机记得电脑地址、账号记录还是空的时候，把地址交给账号。
+     * 后到的手机只读账号记录，不会用自己新造的地址盖掉这一台。
+     */
+    static void publishLocalHostIfNeeded(Context context) {
+        rememberSlot();
+        if (sServerHost == null || !sServerHost.isEmpty()) return;
+        if (!LemurXAccount.isSignedIn()) return;
+        String local = host(context);
+        if (local.isEmpty() || local.equalsIgnoreCase(sPublishedHost)) return;
+        sPublishedHost = local;
+        JSONObject body = new JSONObject();
+        try {
+            body.put("host", local);
+            body.put("token", token(context));
+        } catch (org.json.JSONException e) {
+            sPublishedHost = null;
+            return;
+        }
+        MuseApi.get().send("POST", "/api/tailnet/host", body, (value, error) -> {
+            if (!(value instanceof JSONObject)) {
+                sPublishedHost = null;
+                return;
+            }
+            JSONObject res = (JSONObject) value;
+            String kept = res.optString("host", "");
+            if (!kept.isEmpty()) {
+                sServerHost = kept;
+                saveHost(context, kept);
+            }
+            String accountToken = res.optString("deviceToken", "");
+            if (!accountToken.isEmpty()) saveToken(context, accountToken);
+        });
     }
 
     /** 同步服务端返回的账号级 deviceToken，使各手机脚本钥匙一致。 */
     static void saveToken(Context context, String token) {
         if (token == null || token.length() < 8) return;
-        prefs(context).edit().putString("token", token).apply();
+        prefs(context).edit().putString(prefKey("token"), token).apply();
     }
 
     /**
@@ -490,6 +604,10 @@ final class LemurXComputer {
         private final TextView mHand;
         private final LinearLayout mDevices;
         private boolean mAwaitingLogin;
+        /** 账号登录页盖住这一层时先记住，回来并且有了票据再打开 Tailscale。 */
+        private boolean mResumeTailscale;
+        /** 游客会话被拒后只换一次正式会话，避免登录按钮来回空转。 */
+        private boolean mSessionRetried;
         private boolean mNeedsJoin;
         private @Nullable String mStatusHost;
         private final Runnable mPollDevices = this::refresh;
@@ -600,16 +718,65 @@ final class LemurXComputer {
             if (sLivePage == this) sLivePage = null;
         }
 
-        /** 在 Aero 的标签页里打开 Tailscale 登录页。这个账号对应网络里的一台终端。 */
+        @Override
+        public void onWindowFocusChanged(boolean hasWindowFocus) {
+            super.onWindowFocusChanged(hasWindowFocus);
+            if (!hasWindowFocus || !mResumeTailscale) return;
+            if (LemurXAccount.aeroTicket() == null) return;
+            mResumeTailscale = false;
+            MuseApi.rebind();
+            startTailscaleLogin();
+        }
+
+        /**
+         * 新设备上浏览器可以已登录，但智能体会话还是游客。游客打不开 Tailscale，
+         * 服务器只回 Sign in to use this feature，按钮看起来就像没点上。
+         * 先补上账号票据并换成正式会话，再打开登录页。
+         */
         private void login() {
+            if (LemurXAccount.aeroTicket() != null) {
+                startTailscaleLogin();
+                return;
+            }
+            mLogin.setText(R.string.lemurx_muse_computer_logging);
+            status("");
+            Activity activity = LemurXConsoleShell.activity();
+            new Thread(() -> {
+                LemurXAccount.ensureAeroTicket(activity, true);
+                ThreadUtils.postOnUiThread(() -> {
+                    if (!isAttachedToWindow()) return;
+                    if (LemurXAccount.aeroTicket() == null) {
+                        paintLogin(false);
+                        status(getContext().getString(R.string.lemurx_muse_computer_need_account));
+                        mResumeTailscale = true;
+                        if (activity != null && !activity.isFinishing()) {
+                            LemurXSignIn.showFromBrowser(activity);
+                        }
+                        return;
+                    }
+                    MuseApi.rebind();
+                    startTailscaleLogin();
+                });
+            }, "aero-ticket").start();
+        }
+
+        /** 在 Aero 的标签页里打开 Tailscale 登录页。这个账号对应网络里的一台终端。 */
+        private void startTailscaleLogin() {
             Context context = getContext();
             mLogin.setText(R.string.lemurx_muse_computer_logging);
             MuseApi.get().send("POST", "/api/tailnet/login", new JSONObject(), (value, error) -> {
                 if (error != null || !(value instanceof JSONObject)) {
+                    if (error != null && error.contains("Sign in to use this feature")
+                            && !mSessionRetried && LemurXAccount.aeroTicket() != null) {
+                        mSessionRetried = true;
+                        MuseApi.rebind();
+                        startTailscaleLogin();
+                        return;
+                    }
                     paintLogin(false);
                     status(error == null
                             ? context.getString(R.string.lemurx_muse_computer_login_fail)
-                            : error);
+                            : accountGate(context, error));
                     return;
                 }
                 JSONObject body = (JSONObject) value;
@@ -674,6 +841,7 @@ final class LemurXComputer {
             MuseApi.get().get("/api/tailnet", (value, error) -> {
                 if (!isAttachedToWindow()) return;
                 if (error != null || !(value instanceof JSONObject)) {
+                    if (error != null) status(accountGate(getContext(), error));
                     loadDevices();
                     return;
                 }
@@ -683,10 +851,8 @@ final class LemurXComputer {
                 // 旧服务不带 online。不能把缺字段当成节点掉线，否则外网一重启就要求重新登录。
                 boolean online = body.has("online") ? body.optBoolean("online") : joined;
                 String statusHost = body.optString("host", "");
-                if (!statusHost.isEmpty()) {
-                    mStatusHost = statusHost;
-                    if (host(getContext()).isEmpty()) saveHost(getContext(), statusHost);
-                }
+                mStatusHost = statusHost;
+                noteServerAccount(getContext(), body);
                 mNeedsJoin = needsJoin || !joined || !online;
                 if (mNeedsJoin) {
                     paintLogin(false);
@@ -783,6 +949,8 @@ final class LemurXComputer {
             }
             if (!shown) {
                 mDevices.addView(body(context, context.getString(R.string.lemurx_muse_computer_none)));
+            } else {
+                publishLocalHostIfNeeded(context);
             }
             if (selfOffline) {
                 mNeedsJoin = true;
@@ -865,6 +1033,14 @@ final class LemurXComputer {
         void finishVisible(@Nullable String error, boolean clearStatus) {
             if (error != null) status(error);
             else if (clearStatus) status("");
+        }
+
+        /** 游客被拒时换成让人去登录账号的说明，不要只留一句英文。 */
+        private static String accountGate(Context context, String error) {
+            if (error.contains("Sign in to use this feature")) {
+                return context.getString(R.string.lemurx_muse_computer_need_account);
+            }
+            return error;
         }
 
         private void status(String text) {

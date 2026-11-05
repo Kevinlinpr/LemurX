@@ -1,0 +1,32 @@
+diff --git a/chrome/browser/content_settings/request_desktop_site_web_contents_observer_android.cc b/chrome/browser/content_settings/request_desktop_site_web_contents_observer_android.cc
+index 44347aed1c..76a0e0081e 100644
+--- a/chrome/browser/content_settings/request_desktop_site_web_contents_observer_android.cc
++++ b/chrome/browser/content_settings/request_desktop_site_web_contents_observer_android.cc
+@@ -26,6 +26,7 @@
+ #include "content/public/common/content_features.h"
+ #include "services/metrics/public/cpp/ukm_builders.h"
+ #include "ui/display/screen.h"
++#include "url/url_constants.h"
+ 
+ namespace rds_web_contents_observer {
+ // Keep in sync with UserAgentRequestType in tools/metrics/histograms/enums.xml.
+@@ -95,6 +96,19 @@ void RequestDesktopSiteWebContentsObserverAndroid::DidStartNavigation(
+       ShouldAllowOnExternalDisplay(is_global_setting);
+   desktop_mode |= should_allow_on_external_display;
+ 
++  // The Chrome Web Store sends Android user agents to /unsupported. Keep it on
++  // the desktop user agent even when the phone window setting would turn that
++  // off. Match DesktopSiteUtils.shouldOverrideDesktopSite() so a
++  // renderer-initiated navigation cannot switch the store back to mobile.
++  if (url.is_valid() && url.SchemeIs(url::kHttpsScheme) &&
++      url.EffectiveIntPort() == 443 && !url.has_username() &&
++      !url.has_password() &&
++      (url.host() == "chromewebstore.google.com" ||
++       (url.host() == "chrome.google.com" &&
++        (url.path() == "/webstore" || url.path().starts_with("/webstore/"))))) {
++    desktop_mode = true;
++  }
++
+   // Override UA for renderer initiated navigation only. UA override for browser
+   // initiated navigation is handled on Java side. This is to workaround known
+   // issues crbug.com/40801643 and crbug.com/40799177.

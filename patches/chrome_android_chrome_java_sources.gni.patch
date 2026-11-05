@@ -1,8 +1,8 @@
 diff --git a/chrome/android/chrome_java_sources.gni b/chrome/android/chrome_java_sources.gni
-index 1a541dcb25..a06f937395 100644
+index 1a541dcb25..38dc9bec89 100644
 --- a/chrome/android/chrome_java_sources.gni
 +++ b/chrome/android/chrome_java_sources.gni
-@@ -22,6 +22,54 @@ chrome_java_sources = [
+@@ -22,6 +22,60 @@ chrome_java_sources = [
    "java/src/org/chromium/chrome/browser/ChromeStrictMode.java",
    "java/src/org/chromium/chrome/browser/ChromeStringConstants.java",
    "java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java",
@@ -12,6 +12,7 @@ index 1a541dcb25..a06f937395 100644
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXAppUpdate.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXHaptics.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/LemurXKillSwitch.java",
++  "java/src/org/chromium/chrome/browser/lemurx/LemurXWebStore.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/agent/LemurXAgentKeyboard.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/agent/LemurXAx.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/agent/LemurXDeviceBridge.java",
@@ -34,6 +35,8 @@ index 1a541dcb25..a06f937395 100644
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXDataFragment.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXComputer.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXVault.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXExtensions.java",
++  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXExtensionsPage.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXFiles.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXDocument.java",
 +  "java/src/org/chromium/chrome/browser/lemurx/muse/LemurXGoogleSignIn.java",

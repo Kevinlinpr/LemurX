@@ -1,0 +1,43 @@
+diff --git a/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtilsUnitTest.java b/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtilsUnitTest.java
+index 1a42e22111..6782006ba1 100644
+--- a/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtilsUnitTest.java
++++ b/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtilsUnitTest.java
+@@ -723,6 +723,38 @@ public class DesktopSiteUtilsUnitTest {
+         Assert.assertTrue("Desktop site window setting should be default enabled", mWindowSetting);
+     }
+ 
++    @Test
++    public void testShouldOverrideDesktopSite_chromeWebStore() {
++        mWindowSetting = true;
++        for (String url :
++                new String[] {
++                    "https://chromewebstore.google.com/",
++                    "https://chromewebstore.google.com/detail/example/id",
++                    "https://chrome.google.com/webstore",
++                    "https://chrome.google.com/webstore/category/extensions"
++                }) {
++            Assert.assertTrue(
++                    url,
++                    DesktopSiteUtils.shouldOverrideDesktopSite(mProfile, new GURL(url), mActivity));
++        }
++    }
++
++    @Test
++    public void testShouldOverrideDesktopSite_notChromeWebStore() {
++        when(mDisplay.getDisplayId()).thenReturn(Display.DEFAULT_DISPLAY);
++        for (String url :
++                new String[] {
++                    "https://chrome.google.com/",
++                    "https://chrome.google.com/webstore-other",
++                    "https://chromewebstore.google.com.example.com/",
++                    "https://example.com/chrome.google.com/webstore"
++                }) {
++            Assert.assertFalse(
++                    url,
++                    DesktopSiteUtils.shouldOverrideDesktopSite(mProfile, new GURL(url), mActivity));
++        }
++    }
++
+     @Test
+     public void testShouldOverrideDesktopSite_contentSettingOn() {
+         doReturn(ContentSetting.ALLOW)

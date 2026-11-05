@@ -1,0 +1,258 @@
+diff --git a/chrome/browser/ui/android/extensions/java/src/org/chromium/chrome/browser/ui/extensions/ExtensionInstallDialogBridge.java b/chrome/browser/ui/android/extensions/java/src/org/chromium/chrome/browser/ui/extensions/ExtensionInstallDialogBridge.java
+index b9b705521b..1c37ee674d 100644
+--- a/chrome/browser/ui/android/extensions/java/src/org/chromium/chrome/browser/ui/extensions/ExtensionInstallDialogBridge.java
++++ b/chrome/browser/ui/android/extensions/java/src/org/chromium/chrome/browser/ui/extensions/ExtensionInstallDialogBridge.java
+@@ -4,17 +4,28 @@
+ 
+ package org.chromium.chrome.browser.ui.extensions;
+ 
+-import static org.chromium.build.NullUtil.assumeNonNull;
+-
++import android.app.Activity;
++import android.app.Dialog;
+ import android.content.Context;
++import android.content.res.Configuration;
+ import android.graphics.Bitmap;
++import android.graphics.Typeface;
+ import android.graphics.drawable.BitmapDrawable;
++import android.graphics.drawable.ColorDrawable;
+ import android.graphics.drawable.Drawable;
++import android.graphics.drawable.GradientDrawable;
+ import android.text.Editable;
++import android.util.TypedValue;
++import android.view.Gravity;
+ import android.view.LayoutInflater;
+ import android.view.View;
++import android.view.ViewGroup;
++import android.view.Window;
++import android.view.WindowManager;
++import android.widget.ImageView;
+ import android.widget.LinearLayout;
+ import android.widget.RatingBar;
++import android.widget.ScrollView;
+ import android.widget.TextView;
+ 
+ import androidx.annotation.VisibleForTesting;
+@@ -43,18 +54,21 @@ import org.chromium.ui.widget.TextViewWithLeading;
+ @NullMarked
+ public class ExtensionInstallDialogBridge implements ModalDialogProperties.Controller {
+     private long mNativeExtensionInstallDialogView;
+-    private final ModalDialogManager mModalDialogManager;
++    private final @Nullable ModalDialogManager mModalDialogManager;
+     private final Context mContext;
+     private final PropertyModel.Builder mPropertyModelBuilder;
+     private @Nullable PropertyModel mDialogModel;
+     private @Nullable View mContentView;
+     private @Nullable TextInputEditText mJustificationInputText;
++    private @Nullable Dialog mActivityDialog;
++    private @Nullable TextView mAcceptButton;
++    private boolean mFinished;
+ 
+     @VisibleForTesting
+     public ExtensionInstallDialogBridge(
+             long nativeExtensionInstallDialogView,
+             Context context,
+-            ModalDialogManager modalDialogManager) {
++            @Nullable ModalDialogManager modalDialogManager) {
+         this.mNativeExtensionInstallDialogView = nativeExtensionInstallDialogView;
+         this.mModalDialogManager = modalDialogManager;
+         this.mContext = context;
+@@ -78,7 +92,9 @@ public class ExtensionInstallDialogBridge implements ModalDialogProperties.Contr
+             long nativeExtensionInstallDialogView, WindowAndroid windowAndroid) {
+         Context context = windowAndroid.getActivity().get();
+         ModalDialogManager modalDialogManager = windowAndroid.getModalDialogManager();
+-        if (context == null || modalDialogManager == null) {
++        // 没有 Activity 时无处可挂对话框。模态框管理器可以没有：手机上的标签模态框
++        // 会被 Aero 自己的窗口盖住，确认框改挂在 Activity 上。
++        if (context == null) {
+             return null;
+         }
+         return new ExtensionInstallDialogBridge(
+@@ -272,12 +288,174 @@ public class ExtensionInstallDialogBridge implements ModalDialogProperties.Contr
+     @CalledByNative
+     public void showDialog() {
+         mDialogModel = mPropertyModelBuilder.build();
+-        mModalDialogManager.showDialog(mDialogModel, ModalDialogManager.ModalDialogType.TAB);
++        if (mContext instanceof Activity) {
++            showActivityDialog((Activity) mContext);
++            return;
++        }
++        if (mModalDialogManager != null) {
++            mModalDialogManager.showDialog(mDialogModel, ModalDialogManager.ModalDialogType.TAB);
++        } else {
++            complete(DialogDismissalCause.NOT_ATTACHED_TO_WINDOW);
++        }
++    }
++
++    /**
++     * 安装确认挂在 Activity 上，盖过 Aero 自己的窗口。标签模态框画在网页容器里，会被盖住。
++     */
++    private void showActivityDialog(Activity activity) {
++        if (activity.isFinishing()) {
++            complete(DialogDismissalCause.ACTIVITY_DESTROYED);
++            return;
++        }
++        boolean night =
++                (activity.getResources().getConfiguration().uiMode
++                                & Configuration.UI_MODE_NIGHT_MASK)
++                        == Configuration.UI_MODE_NIGHT_YES;
++        int background = night ? 0xFF292A2D : 0xFFFFFFFF;
++        int textColor = night ? 0xFFE8EAED : 0xFF202124;
++        int accent = night ? 0xFF8AB4F8 : 0xFF1A73E8;
++        int filledText = night ? 0xFF202124 : 0xFFFFFFFF;
++        float density = activity.getResources().getDisplayMetrics().density;
++        int pad = Math.round(24 * density);
++
++        GradientDrawable card = new GradientDrawable();
++        card.setColor(background);
++        card.setCornerRadius(16f * density);
++        LinearLayout column = new LinearLayout(activity);
++        column.setOrientation(LinearLayout.VERTICAL);
++        column.setPadding(pad, Math.round(20 * density), pad, Math.round(8 * density));
++        column.setBackground(card);
++
++        LinearLayout heading = new LinearLayout(activity);
++        heading.setOrientation(LinearLayout.HORIZONTAL);
++        heading.setGravity(Gravity.CENTER_VERTICAL);
++        Drawable icon = mDialogModel.get(ModalDialogProperties.TITLE_ICON);
++        if (icon != null) {
++            ImageView iconView = new ImageView(activity);
++            iconView.setImageDrawable(icon);
++            int iconSize = Math.round(40 * density);
++            heading.addView(iconView, new LinearLayout.LayoutParams(iconSize, iconSize));
++        }
++        TextView titleView = new TextView(activity);
++        CharSequence title = mDialogModel.get(ModalDialogProperties.TITLE);
++        titleView.setText(title == null ? "" : title);
++        titleView.setTextColor(textColor);
++        titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
++        titleView.setTypeface(Typeface.DEFAULT_BOLD);
++        LinearLayout.LayoutParams titleParams =
++                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
++        titleParams.setMarginStart(Math.round(12 * density));
++        heading.addView(titleView, titleParams);
++        column.addView(heading);
++
++        if (mContentView != null) {
++            ScrollView scroll = new ScrollView(activity);
++            if (mContentView.getParent() instanceof ViewGroup) {
++                ((ViewGroup) mContentView.getParent()).removeView(mContentView);
++            }
++            scroll.addView(mContentView);
++            int maxHeight =
++                    (int) (activity.getResources().getDisplayMetrics().heightPixels * 0.55f);
++            column.addView(
++                    scroll,
++                    new LinearLayout.LayoutParams(
++                            ViewGroup.LayoutParams.MATCH_PARENT, maxHeight));
++        }
++
++        LinearLayout buttons = new LinearLayout(activity);
++        buttons.setOrientation(LinearLayout.HORIZONTAL);
++        buttons.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
++        String cancelLabel = mDialogModel.get(ModalDialogProperties.NEGATIVE_BUTTON_TEXT);
++        String acceptLabel = mDialogModel.get(ModalDialogProperties.POSITIVE_BUTTON_TEXT);
++        TextView cancel = installPill(activity, cancelLabel, accent, 0, density);
++        cancel.setOnClickListener(v -> complete(DialogDismissalCause.NEGATIVE_BUTTON_CLICKED));
++        TextView accept = installPill(activity, acceptLabel, filledText, accent, density);
++        accept.setEnabled(false);
++        accept.setAlpha(0.38f);
++        accept.setOnClickListener(v -> complete(DialogDismissalCause.POSITIVE_BUTTON_CLICKED));
++        LinearLayout.LayoutParams acceptLp =
++                new LinearLayout.LayoutParams(
++                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        acceptLp.setMarginStart(Math.round(8 * density));
++        accept.setLayoutParams(acceptLp);
++        mAcceptButton = accept;
++        buttons.addView(cancel);
++        buttons.addView(accept);
++        column.addView(buttons);
++
++        Dialog dialog = new Dialog(activity);
++        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
++        dialog.setContentView(column);
++        dialog.setCanceledOnTouchOutside(true);
++        dialog.setOnDismissListener(d -> complete(DialogDismissalCause.TOUCH_OUTSIDE));
++        Window window = dialog.getWindow();
++        if (window != null) {
++            window.setBackgroundDrawable(new ColorDrawable(0));
++            int width =
++                    Math.min(
++                            Math.round(448 * density),
++                            activity.getResources().getDisplayMetrics().widthPixels
++                                    - Math.round(32 * density));
++            window.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
++        }
++        mActivityDialog = dialog;
++        dialog.show();
++        // 避免手指还按在商店按钮上时，确认框一出来就被点掉。
++        accept.postDelayed(
++                () -> {
++                    if (mFinished || mAcceptButton == null || mDialogModel == null) return;
++                    if (!mDialogModel.get(ModalDialogProperties.POSITIVE_BUTTON_DISABLED)) {
++                        mAcceptButton.setEnabled(true);
++                        mAcceptButton.setAlpha(1f);
++                    }
++                },
++                500);
++    }
++
++    private static TextView installPill(
++            Activity activity, @Nullable String label, int text, int fill, float density) {
++        TextView view = new TextView(activity);
++        view.setText(label == null ? "" : label);
++        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
++        view.setGravity(Gravity.CENTER);
++        view.setTextColor(text);
++        int hPad = Math.round(16 * density);
++        int vPad = Math.round(10 * density);
++        view.setPadding(hPad, vPad, hPad, vPad);
++        if (fill != 0) {
++            GradientDrawable bg = new GradientDrawable();
++            bg.setColor(fill);
++            bg.setCornerRadius(20f * density);
++            view.setBackground(bg);
++        }
++        return view;
++    }
++
++    private void complete(int dismissalCause) {
++        if (mFinished) return;
++        mFinished = true;
++        Dialog dialog = mActivityDialog;
++        mActivityDialog = null;
++        if (dialog != null) {
++            dialog.setOnDismissListener(null);
++            dialog.dismiss();
++        }
++        PropertyModel model = mDialogModel;
++        if (model == null) {
++            if (mNativeExtensionInstallDialogView != 0) {
++                ExtensionInstallDialogBridgeJni.get()
++                        .onDialogDismissed(mNativeExtensionInstallDialogView);
++                ExtensionInstallDialogBridgeJni.get().destroy(mNativeExtensionInstallDialogView);
++            }
++            return;
++        }
++        onDismiss(model, dismissalCause);
+     }
+ 
+     @Override
+     public void onClick(PropertyModel model, int buttonType) {
+-        ModalDialogManager modalDialogManager = assumeNonNull(mModalDialogManager);
++        if (mModalDialogManager == null) return;
++        ModalDialogManager modalDialogManager = mModalDialogManager;
+         if (buttonType == ModalDialogProperties.ButtonType.POSITIVE) {
+             modalDialogManager.dismissDialog(model, DialogDismissalCause.POSITIVE_BUTTON_CLICKED);
+         } else {
+@@ -316,6 +494,10 @@ public class ExtensionInstallDialogBridge implements ModalDialogProperties.Contr
+     private void setPositiveButtonDisabled(boolean disabled) {
+         // This method can only run AFTER the dialog model has been built.
+         // If mDialogModel is null, we can't update the button state yet.
++        if (mAcceptButton != null) {
++            mAcceptButton.setEnabled(!disabled);
++            mAcceptButton.setAlpha(disabled ? 0.38f : 1f);
++        }
+         if (mDialogModel == null) return;
+ 
+         mDialogModel.set(ModalDialogProperties.POSITIVE_BUTTON_DISABLED, disabled);

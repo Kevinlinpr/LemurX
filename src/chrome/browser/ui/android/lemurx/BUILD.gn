@@ -9,15 +9,26 @@ assert(is_android)
 # (LemurXAx.java / LemurXDeviceBridge.java). No DevTools, no script injection;
 # everything else LemurX adds lives in Java on top of stock Chromium.
 source_set("lemurx") {
-  sources = [ "lemurx_ax.cc" ]
+  sources = [
+    "lemurx_ax.cc",
+    "lemurx_extensions.cc",
+  ]
 
   deps = [
     "//base",
     "//chrome/android:chrome_jni_headers",
+    "//chrome/browser/profiles:profile",
+    "//chrome/browser/ui/toolbar:impl",
+    "//chrome/common",
+    "//components/prefs",
     "//components/viz/common",
     "//content/public/browser",
+    "//extensions/browser",
+    "//extensions/common",
     "//skia",
     "//ui/accessibility",
+    "//ui/android",
+    "//ui/gfx",
     "//ui/gfx/codec",
     "//ui/gfx/geometry",
   ]

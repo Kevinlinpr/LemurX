@@ -118,6 +118,13 @@ final class MuseDrawer {
                     leaveForCover();
                     LemurXConsoleShell.goCommunity();
                 }));
+        // 插件管理页盖在当前窗口上。安装和卸载的确认也在窗口上弹出，不走标签模态框。
+        column.addView(row(context, R.drawable.lemurx_muse_ic_puzzle,
+                R.string.lemurx_muse_extensions, R.string.lemurx_muse_extensions_hint,
+                v -> {
+                    close();
+                    LemurXExtensionsPage.show();
+                }));
         // 用量和系统设置盖住当前窗口。抽屉不收，返回时还停在原来的位置。
         column.addView(row(context, R.drawable.lemurx_muse_ic_card,
                 R.string.lemurx_billing_heading, 0,

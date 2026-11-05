@@ -48,6 +48,7 @@ android_resources("muse_resources") {
     "res/drawable/lemurx_muse_ic_paperclip.xml",
     "res/drawable/lemurx_muse_ic_pin.xml",
     "res/drawable/lemurx_muse_ic_plus.xml",
+    "res/drawable/lemurx_muse_ic_puzzle.xml",
     "res/drawable/lemurx_muse_ic_refresh.xml",
     "res/drawable/lemurx_muse_ic_send.xml",
     "res/drawable/lemurx_muse_ic_server.xml",

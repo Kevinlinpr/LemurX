@@ -21,6 +21,7 @@ android_resources("console_resources") {
     "res/drawable/lemurx_console_cell_bg.xml",
     "res/drawable/lemurx_console_ic_back.xml",
     "res/drawable/lemurx_console_ic_chat.xml",
+    "res/drawable/lemurx_console_ic_extensions.xml",
     "res/drawable/lemurx_console_ic_community.xml",
     "res/drawable/lemurx_console_ic_forward.xml",
     "res/drawable/lemurx_console_ic_search.xml",

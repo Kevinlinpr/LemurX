@@ -3295,7 +3295,9 @@ class MuseChatView extends FrameLayout {
         LemurXComputer.ensureNodeOnline((value, error) -> {
             if (gen != mTargetGen) return;
             if (value instanceof JSONObject) {
-                String host = ((JSONObject) value).optString("host", "");
+                JSONObject body = (JSONObject) value;
+                LemurXComputer.noteServerAccount(getContext(), body);
+                String host = body.optString("host", "");
                 if (!host.isEmpty()) mControlledHost = host;
             }
             loadTargetDevices(gen);
@@ -3311,6 +3313,13 @@ class MuseChatView extends FrameLayout {
             mTargetDevices = devices == null ? new JSONArray() : devices;
             mTargetJoined = body.optBoolean("joined", false);
             mTargetsReady = true;
+            for (int i = 0; i < mTargetDevices.length(); i++) {
+                if (LemurXComputer.isControlledComputer(
+                        mTargetDevices.optJSONObject(i), mControlledHost)) {
+                    LemurXComputer.publishLocalHostIfNeeded(getContext());
+                    break;
+                }
+            }
             paintTargets();
         });
     }

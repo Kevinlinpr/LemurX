@@ -1,0 +1,23 @@
+diff --git a/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java b/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java
+index 028311d52e..40f31fee41 100644
+--- a/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java
++++ b/chrome/browser/ui/android/desktop_site/java/src/org/chromium/chrome/browser/desktop_site/DesktopSiteUtils.java
+@@ -216,6 +216,18 @@ public class DesktopSiteUtils {
+      */
+     public static boolean shouldOverrideDesktopSite(
+             Profile profile, @Nullable GURL url, Context context) {
++        // The Chrome Web Store only offers its install page to a desktop user agent.
++        // Phone-sized windows still need that page, so these hosts skip the window check.
++        if (url != null && url.isValid()) {
++            String host = url.getHost();
++            String path = url.getPath();
++            if ("chromewebstore.google.com".equals(host)
++                    || ("chrome.google.com".equals(host)
++                            && ("/webstore".equals(path) || path.startsWith("/webstore/")))) {
++                return true;
++            }
++        }
++
+         // For --request-desktop-sites, always override the user agent.
+         if (CommandLine.getInstance().hasSwitch(ChromeSwitches.REQUEST_DESKTOP_SITES)) {
+             return true;
