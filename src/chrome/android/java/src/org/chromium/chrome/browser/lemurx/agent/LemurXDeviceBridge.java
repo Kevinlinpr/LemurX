@@ -489,7 +489,7 @@ public final class LemurXDeviceBridge {
     }
 
     private static boolean agentBusy() {
-        return isHoldingTab() || MusePage.hasLiveWork();
+        return isHoldingTab() || MusePage.hasOnScreenBrowserWork();
     }
 
     private static boolean inAgentPip(@Nullable ChromeTabbedActivity activity) {

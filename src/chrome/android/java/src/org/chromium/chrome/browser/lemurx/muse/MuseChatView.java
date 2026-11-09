@@ -157,6 +157,12 @@ class MuseChatView extends FrameLayout {
     /** 正在回复中的会话 → 状态文字；活动页读。 */
     private static final Map<String, String> sLive = new HashMap<>();
 
+    /**
+     * 远程电脑这一轮还在跑，但对话视图被拆掉（关 Aero、换 Activity、换会话）。
+     * SSE 继续收，重开同一条对话时再把动态操作接回去。
+     */
+    private static final Map<String, ParkedTurn> sParked = new HashMap<>();
+
     /** 会话 id → 标题（第一条用户消息），给活动页里"标签页在干什么"的描述用。 */
     private static final Map<String, String> sTitles = new HashMap<>();
 
@@ -179,6 +185,154 @@ class MuseChatView extends FrameLayout {
 
     static @Nullable String titleOf(String threadId) {
         return sTitles.get(threadId);
+    }
+
+    /**
+     * 远程电脑命令还在跑时，把这一轮从视图上卸下来。SSE 仍写这里，
+     * 重开同一条对话再灌回动态操作卡片和步骤。
+     */
+    private static final class ParkedTurn {
+        final String threadId;
+        MuseApi.Run run;
+        int runGen;
+        final ArrayList<Message> messages = new ArrayList<>();
+        @Nullable Message streaming;
+        boolean busy = true;
+        String status = "";
+        String controlledHost = "";
+        final HashSet<String> expanded = new HashSet<>();
+        boolean remoteHeld;
+        String archiveHold = "";
+
+        ParkedTurn(String threadId) {
+            this.threadId = threadId;
+        }
+
+        void applyOwnComputer(JSONObject value) {
+            String runId = value.optString("computerRunId", "");
+            if (runId.isEmpty()) return;
+            String command = value.optString("command", "");
+            String phase = value.optString("phase", "");
+            String host = value.optString("host", "");
+            Context ctx = ContextUtils.getApplicationContext();
+            if ("start".equals(phase)) {
+                LemurXComputer.Run started =
+                        LemurXComputer.beginRun(runId, command, "chat", threadId, host);
+                LemurXComputer.persistRun(started);
+                expanded.add(runId);
+                upsertComputer(runId, command, "…");
+                status = humanizeCommand(ctx, command) + "…";
+                sLive.put(threadId, status);
+                persist();
+                return;
+            }
+            if ("chunk".equals(phase)) {
+                String line = value.optString("line", "");
+                LemurXComputer.appendRun(runId, line);
+                LemurXComputer.Run live = LemurXComputer.getRun(runId);
+                upsertComputer(runId, command, live != null ? live.preview() : line);
+                return;
+            }
+            if ("end".equals(phase)) {
+                boolean ok = value.optBoolean("ok", false);
+                String output = value.optString("output", "");
+                String error = value.optString("error", "");
+                if (LemurXComputer.getRun(runId) == null) {
+                    LemurXComputer.mirrorChatResult(
+                            runId, command, output, ok, ok ? null : error, threadId);
+                } else {
+                    LemurXComputer.endRun(
+                            runId, ok, ok ? null : error, output.isEmpty() ? null : output);
+                }
+                LemurXComputer.Run live = LemurXComputer.getRun(runId);
+                String preview = live != null ? live.preview() : (ok ? output : error);
+                upsertComputer(runId, command, preview);
+                persist();
+            }
+        }
+
+        void upsertComputer(String runId, String command, String preview) {
+            Message host = streaming;
+            if (host == null) {
+                for (int i = messages.size() - 1; i >= 0; i--) {
+                    if ("assistant".equals(messages.get(i).role)) {
+                        host = messages.get(i);
+                        break;
+                    }
+                }
+            }
+            if (host == null) {
+                host = new Message(UUID.randomUUID().toString(), "assistant", "");
+                messages.add(host);
+            }
+            streaming = host;
+            String title = command == null ? "" : command.replace('\n', ' ').replace(']', ' ').trim();
+            if (title.length() > 400) title = title.substring(0, 400);
+            for (Attach file : host.files) {
+                if (runId.equals(file.computerRunId)) {
+                    file.excerpt = preview == null ? "" : preview;
+                    LemurXComputer.Run live = LemurXComputer.getRun(runId);
+                    if (live != null) {
+                        file.computerOk = live.ok;
+                        file.computerDone = live.done;
+                        file.computerError = live.error;
+                    }
+                    persist();
+                    return;
+                }
+            }
+            if (host.files instanceof ArrayList) {
+                Attach card = new Attach(
+                        title.isEmpty() ? "computer" : title,
+                        preview == null ? "" : preview,
+                        List.of(),
+                        "computer",
+                        false,
+                        runId);
+                LemurXComputer.Run live = LemurXComputer.getRun(runId);
+                if (live != null) {
+                    card.computerOk = live.ok;
+                    card.computerDone = live.done;
+                    card.computerError = live.error;
+                } else {
+                    card.computerDone = false;
+                }
+                host.files.add(card);
+            }
+            persist();
+        }
+
+        void onTextDelta(String delta) {
+            if (streaming == null) {
+                streaming = new Message(UUID.randomUUID().toString(), "assistant", "");
+                messages.add(streaming);
+            }
+            streaming.text += LemurXArchive.maskSecrets(delta);
+            persist();
+        }
+
+        void onToolCall(String label) {
+            status = label;
+            sLive.put(threadId, label);
+        }
+
+        void onFinished() {
+            busy = false;
+            streaming = null;
+            persist();
+            sLive.remove(threadId);
+            if (remoteHeld) {
+                MusePage.noteRemoteHold(false);
+                remoteHeld = false;
+            }
+            sParked.remove(threadId);
+        }
+
+        void persist() {
+            JSONArray array = archiveJson(messages);
+            if (array.length() == 0) return;
+            writeCacheFor(threadId, array);
+        }
     }
 
     private static final class Message {
@@ -248,8 +402,9 @@ class MuseChatView extends FrameLayout {
     private final TextView mPages;
     private final LinearLayout mSuspend;
     private boolean mSuspended;
-    /** 列表末尾的"Agent 正在…"那一行：三个跳动的点 + 可选的说明文字（工具名）。 */
+    /** 列表末尾的"Agent 正在…"那一行：干活时写明在干什么。思考只改顶栏表情球。 */
     private final LinearLayout mTyping;
+    private final Runnable mBallIdle = this::idleBall;
     private final EditText mInput;
     /** 远程推荐选中后贴在文字上面，标明这一段输入基于哪一项。 */
     private final LinearLayout mBasisRow;
@@ -307,6 +462,8 @@ class MuseChatView extends FrameLayout {
     private String mControlledHost = "";
     private int mTargetGen;
     private final Set<String> mExpandedRuns = new HashSet<>();
+    /** 这一轮远程电脑命令正由前台服务钉着，离开屏幕也不停。 */
+    private boolean mRemoteHeld;
     /** 操作日志挂在对应的那条回复上，不钉在输入栏。 */
     private final Runnable mAgentLogTick = this::paintAgentLog;
     /** 「Agent 操作」旁边的说明。点问号才出现，一会儿自己收起。 */
@@ -343,6 +500,15 @@ class MuseChatView extends FrameLayout {
     private MuseApi.@Nullable Run mRun;
     /** 拦住游客操作后加一，让被取消的那一轮回调不再改界面。 */
     private int mRunGen;
+    /** 进程被杀后按服务端 live 流恢复：没有 SSE，但仍按正在跑来画。 */
+    private boolean mWatchingComputer;
+    /** 正在向服务端要这一轮的回放，GET 对话不要把界面清掉。 */
+    private boolean mAttachingLive;
+    /** 接上邮箱时先把缺的进度补上，不要打字机从头演。 */
+    private boolean mCatchUp;
+    /** 本机已经跟上的邮箱游标。 */
+    private int mLiveCursor;
+    private String mLiveRunId = "";
     private @Nullable Message mStreaming;
     /** 打字机：已经画到这条回复的第几个字符。落后于 {@link Message#text} 时逐帧往前赶。 */
     private int mTyped;
@@ -460,17 +626,6 @@ class MuseChatView extends FrameLayout {
         mEmpty.setOrientation(LinearLayout.VERTICAL);
         mEmpty.setGravity(Gravity.CENTER);
         mEmpty.setPadding(pad * 2, pad, pad * 2, pad * 2);
-        ImageView logo = new ImageView(context);
-        logo.setImageResource(R.mipmap.app_icon);
-        logo.setClipToOutline(true);
-        logo.setOutlineProvider(
-                new ViewOutlineProvider() {
-                    @Override
-                    public void getOutline(View view, Outline outline) {
-                        outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), view.getWidth() * 0.26f);
-                    }
-                });
-        mEmpty.addView(logo, new LinearLayout.LayoutParams(dp(64), dp(64)));
         TextView brand = new TextView(context);
         brand.setText(R.string.lemurx_muse_empty_title);
         brand.setTextColor(MusePage.text(getContext()));
@@ -531,21 +686,17 @@ class MuseChatView extends FrameLayout {
         column.addView(scrollWrap, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         // ---- 状态 / 错误
-        // 状态不再是输入栏上方的一行小字，而是跟在最后一条消息后面的"正在输入"：三个跳动的点，
-        // 调工具时在点后面补一句"正在搜索…"。
+        // 思考只改顶栏表情球；干活时在列表末尾写明在干什么。
         mTyping = new LinearLayout(context);
         mTyping.setOrientation(LinearLayout.HORIZONTAL);
         mTyping.setGravity(Gravity.CENTER_VERTICAL);
         mTyping.setPadding(dp(2), dp(8), dp(2), dp(8));
-        MuseDotsView dots = new MuseDotsView(context, MusePage.muted(getContext()));
-        mTyping.addView(dots);
         mStatus = new TextView(context);
         mStatus.setTextColor(MusePage.muted(getContext()));
         mStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         mStatus.setVisibility(View.GONE);
         LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        statusLp.setMarginStart(dp(10));
         mTyping.addView(mStatus, statusLp);
         mError = new TextView(context);
         mError.setTextColor(MusePage.error(context));
@@ -1668,16 +1819,369 @@ class MuseChatView extends FrameLayout {
     }
 
     boolean running() {
-        return mRun != null;
+        return mRun != null || mWatchingComputer;
     }
 
-    /** 切到某个会话：同一个就停在最新一条；换了会话时取消进行中的回复并重新拉历史。 */
+    private boolean shouldPark() {
+        return mRun != null && (onRemoteComputer() || hasLiveComputerRun() || mRemoteHeld);
+    }
+
+    private static @Nullable MuseChatView turnChat(String thread, int gen) {
+        MuseChatView chat = MusePage.chatForThread(thread);
+        if (chat != null && chat.mRunGen == gen) return chat;
+        return null;
+    }
+
+    private static @Nullable ParkedTurn turnParked(String thread, int gen) {
+        ParkedTurn parked = sParked.get(thread);
+        if (parked != null && parked.runGen == gen) return parked;
+        return null;
+    }
+
+    private static void stripMessageViews(Message message) {
+        message.view = null;
+        message.body = null;
+        message.row = null;
+        message.logBox = null;
+        message.cachedGen = -1;
+        message.cachedHeight = 0;
+        message.cachedWidth = 0;
+    }
+
+    /** 把正在跑的远程一轮从这张视图卸下，SSE 继续写停放的那份。 */
+    private void parkCurrent() {
+        if (mThreadId == null || mRun == null) return;
+        ParkedTurn parked = new ParkedTurn(mThreadId);
+        parked.run = mRun;
+        parked.runGen = mRunGen;
+        parked.messages.addAll(mMessages);
+        for (Message message : parked.messages) stripMessageViews(message);
+        parked.streaming = mStreaming;
+        parked.busy = mBusy;
+        String status = sLive.get(mThreadId);
+        parked.status = status == null ? "" : status;
+        parked.controlledHost = mControlledHost == null ? "" : mControlledHost;
+        parked.expanded.addAll(mExpandedRuns);
+        parked.remoteHeld = mRemoteHeld;
+        if (!parked.remoteHeld) {
+            MusePage.noteRemoteHold(true);
+            parked.remoteHeld = true;
+        }
+        parked.archiveHold = mArchiveHold == null ? "" : mArchiveHold;
+        parked.persist();
+        sParked.put(mThreadId, parked);
+        mRun = null;
+        mStreaming = null;
+        mWatchingComputer = false;
+        mBusy = false;
+        mRemoteHeld = false;
+        mArchiveHold = "";
+    }
+
+    /** 重开同一条对话：把停放的动态一轮接回这张视图。 */
+    private boolean adoptParked(String threadId) {
+        ParkedTurn parked = sParked.remove(threadId);
+        if (parked == null) return false;
+        mThreadId = threadId;
+        mLoaded = true;
+        mLoading = false;
+        mRun = parked.run;
+        mRunGen = parked.runGen;
+        mStreaming = parked.streaming;
+        mControlledHost = parked.controlledHost;
+        mArchiveHold = parked.archiveHold;
+        mExpandedRuns.clear();
+        mExpandedRuns.addAll(parked.expanded);
+        mWatchingComputer = false;
+        mMessages.clear();
+        mList.removeAllViews();
+        mWinStart = -1;
+        mWinEnd = -1;
+        mTopSpan = -1;
+        mBotSpan = -1;
+        mBatch = true;
+        for (Message message : parked.messages) {
+            stripMessageViews(message);
+            append(message);
+        }
+        mBatch = false;
+        mRemoteHeld = parked.remoteHeld;
+        if (parked.busy) {
+            mBusy = true;
+            mSend.setImageResource(R.drawable.lemurx_muse_ic_stop);
+            mSend.setColorFilter(MusePage.onAccent(getContext()), PorterDuff.Mode.SRC_IN);
+            mSend.setContentDescription(getContext().getString(R.string.lemurx_muse_stop));
+            paintMic();
+            mAttach.setAlpha(0.35f);
+            String status = parked.status;
+            if (TextUtils.isEmpty(status)) {
+                status = getContext().getString(R.string.lemurx_muse_thinking);
+            }
+            showStatus(status);
+        }
+        scheduleWindow();
+        revealLatest();
+        resumeLiveComputerUi();
+        persist();
+        return true;
+    }
+
+    /**
+     * 关掉再进来：未完成的远程命令继续按正在跑来画——状态行、步骤、可展开的输出、停止按钮。
+     */
+    private void resumeLiveComputerUi() {
+        String command = null;
+        boolean live = false;
+        for (Message message : mMessages) {
+            for (Attach file : message.files) {
+                if (!"computer".equals(file.kind) || file.computerRunId == null) continue;
+                if (commandRunning(file)) {
+                    live = true;
+                    command = commandText(file);
+                    mExpandedRuns.add(file.computerRunId);
+                    if (mRun == null) LemurXComputer.watchRun(file.computerRunId);
+                    bindFiles(message);
+                }
+            }
+        }
+        if (mStreaming == null) {
+            for (int i = mMessages.size() - 1; i >= 0; i--) {
+                if ("assistant".equals(mMessages.get(i).role)) {
+                    mStreaming = mMessages.get(i);
+                    break;
+                }
+            }
+        }
+        if (!live) {
+            if (mRun == null && mWatchingComputer) {
+                mWatchingComputer = false;
+                if (mBusy) {
+                    setRunning(false);
+                    showStatus(null);
+                }
+            }
+            if (!mBusy && mRun == null) {
+                if (holdOnly(mStreaming)) mStreaming = null;
+                dropStaleHoldCards();
+            }
+            // 忙不忙已经定了，再画标题，避免停在「Agent steps」上看起来已经结束。
+            for (Message message : mMessages) {
+                if (!message.steps.isEmpty()) renderAgentLog(message);
+            }
+            return;
+        }
+        if (mRun == null && !mBusy) {
+            mWatchingComputer = true;
+            setRunning(true);
+        }
+        for (Message message : mMessages) {
+            if (!message.steps.isEmpty()) renderAgentLog(message);
+        }
+        String status = command != null
+                ? humanizeCommand(getContext(), command) + "…"
+                : getContext().getString(R.string.lemurx_muse_computer_hold_title);
+        showStatus(status);
+        if (mStickToBottom) scrollToBottom(true);
+    }
+
+    /**
+     * 进程被杀后：把服务端这一轮的思考、工具、电脑输出和回复整条接回来。
+     */
+    private void attachLiveTurn() {
+        if (mThreadId == null || mRun != null || mAttachingLive) {
+            restoreComputerRuns();
+            return;
+        }
+        if (!LemurXAccount.isSignedIn()) {
+            restoreComputerRuns();
+            return;
+        }
+        final String id = mThreadId;
+        mAttachingLive = true;
+        MuseApi.get().get("/api/turns/" + id + "/live", (value, error) -> {
+            if (!id.equals(mThreadId)) {
+                mAttachingLive = false;
+                return;
+            }
+            if (mRun != null) {
+                mAttachingLive = false;
+                restoreComputerRuns();
+                return;
+            }
+            if (error != null || !(value instanceof JSONObject)) {
+                mAttachingLive = false;
+                // 邮箱已经没了：Agent 不在这一轮。缓存里 Running 的电脑卡片不能把停止按钮钉住。
+                if (mRun == null && (mBusy || mWatchingComputer)) finishRun(null);
+                restoreComputerRuns();
+                return;
+            }
+            JSONObject snap = (JSONObject) value;
+            JSONArray events = snap.optJSONArray("events");
+            boolean done = snap.optBoolean("done", false);
+            int cursor = snap.optInt("cursor", 0);
+            if (events == null) events = new JSONArray();
+            if (events.length() == 0 && done) {
+                mAttachingLive = false;
+                if (mBusy && mRun == null) finishRun(null);
+                restoreComputerRuns();
+                return;
+            }
+            if (!done) {
+                for (int i = events.length() - 1; i >= 0; i--) {
+                    JSONObject event = events.optJSONObject(i);
+                    if (event == null) continue;
+                    String type = event.optString("type", "");
+                    if ("RUN_FINISHED".equals(type) || "RUN_ERROR".equals(type)) {
+                        done = true;
+                        break;
+                    }
+                }
+            }
+            String runId = snap.optString("runId", "");
+            int saved = readLiveCursor(id, runId);
+            int from = Math.max(0, Math.min(saved, events.length()));
+            ensureLiveAssistant();
+            resumeLiveComputerUi();
+            final int gen = ++mRunGen;
+            MuseApi.RunListener listener = turnListener(id, gen);
+            mCatchUp = true;
+            for (int i = 0; i < events.length(); i++) {
+                JSONObject event = events.optJSONObject(i);
+                if (event == null) continue;
+                String type = event.optString("type", "");
+                boolean computer = "CUSTOM".equals(type)
+                        && "own_computer".equals(event.optString("name", ""));
+                // 电脑输出要从头补回 vault；光从 cursor 接会把已经跑完的命令收成空结果。
+                if (computer) {
+                    MuseApi.dispatchNow(event, listener);
+                    continue;
+                }
+                if (i < from) continue;
+                if ("RUN_FINISHED".equals(type) || "RUN_ERROR".equals(type)) continue;
+                if (type.startsWith("TEXT_MESSAGE")
+                        || type.startsWith("THINKING")
+                        || type.startsWith("REASONING")) {
+                    continue;
+                }
+                MuseApi.dispatchNow(event, listener);
+            }
+            applyCatchUpText(events, from);
+            mCatchUp = false;
+            mLiveRunId = runId;
+            mLiveCursor = cursor;
+            writeLiveCursor(id, runId, cursor);
+            persist();
+            mAttachingLive = false;
+            if (done) {
+                showStatus(null);
+                if (mBusy) finishRun(null);
+                else if (mStreaming != null && !mStreaming.steps.isEmpty()) {
+                    renderAgentLog(mStreaming);
+                }
+                restoreComputerRuns();
+                return;
+            }
+            setRunning(true);
+            if (mStreaming != null) {
+                mStreaming.logOpen = true;
+                if (!mStreaming.steps.isEmpty()) renderAgentLog(mStreaming);
+            }
+            if (!mRemoteHeld) {
+                mRemoteHeld = true;
+                MusePage.noteRemoteHold(true);
+            }
+            mWatchingComputer = false;
+            mRun = MuseApi.get().watchTurn(id, cursor, listener);
+            restoreComputerRuns();
+        });
+    }
+
+    /** 已经摆上的卡片、步骤、正文都留着，只补一个正在跑的助手气泡。 */
+    private void ensureLiveAssistant() {
+        int lastUser = -1;
+        for (int i = 0; i < mMessages.size(); i++) {
+            if ("user".equals(mMessages.get(i).role)) lastUser = i;
+        }
+        Message host = null;
+        if (lastUser >= 0) {
+            for (int i = mMessages.size() - 1; i > lastUser; i--) {
+                if ("assistant".equals(mMessages.get(i).role)) {
+                    host = mMessages.get(i);
+                    break;
+                }
+            }
+        }
+        if (host == null) {
+            host = new Message(UUID.randomUUID().toString(), "assistant", "");
+            host.steps.add(getContext().getString(R.string.lemurx_muse_computer_hold_title));
+            append(host);
+        } else if (host.view == null) {
+            append(host);
+        } else {
+            bindFiles(host);
+            if (!host.steps.isEmpty()) renderAgentLog(host);
+            if (!TextUtils.isEmpty(host.text)) renderInto(host.view, host.text);
+        }
+        host.logOpen = true;
+        mStreaming = host;
+        mTypeMessage = host;
+        mTyped = host.text == null ? 0 : host.text.length();
+        mTypeFinished = false;
+        mWinStart = -1;
+        mWinEnd = -1;
+        mTopSpan = -1;
+        mBotSpan = -1;
+        scheduleWindow();
+    }
+
+    /** 关掉之后新写出的正文一次性补上，已经在屏幕上的字不动。 */
+    private void applyCatchUpText(JSONArray events, int from) {
+        StringBuilder extra = new StringBuilder();
+        for (int i = Math.max(0, from); i < events.length(); i++) {
+            JSONObject event = events.optJSONObject(i);
+            if (event == null) continue;
+            String type = event.optString("type", "");
+            if (!"TEXT_MESSAGE_CONTENT".equals(type) && !"TEXT_MESSAGE_CHUNK".equals(type)) continue;
+            extra.append(event.optString("delta", ""));
+        }
+        Message host = mStreaming;
+        if (host == null) return;
+        if (host.text == null) host.text = "";
+        String add = extra.toString();
+        if (!add.isEmpty()) {
+            if (add.startsWith(host.text)) host.text = add;
+            else if (!host.text.endsWith(add)) host.text += add;
+        }
+        mTypeMessage = host;
+        mTyped = host.text.length();
+        mTypeFinished = false;
+        if (host.view == null) append(host);
+        else if (!TextUtils.isEmpty(host.text)) renderInto(host.view, host.text);
+        if (mStickToBottom) scrollToBottom(true);
+    }
+
+    /** 切到某个会话：同一个就停在最新一条；换了会话时把远程电脑这一轮停放，不要掐掉。 */
     void load(String threadId) {
         if (threadId.equals(mThreadId)) {
             revealLatest();
+            resumeLiveComputerUi();
+            if (mRun == null) attachLiveTurn();
             return;
         }
-        stop();
+        if (shouldPark()) parkCurrent();
+        else if (mRun != null || mWatchingComputer) stop();
+        if (adoptParked(threadId)) {
+            // 停放的那条 SSE 可能已经断了；邮箱才是整条链路的真相。
+            if (mRun != null) {
+                mRun.cancel();
+                mRun = null;
+            }
+            revealLatest();
+            resumeLiveComputerUi();
+            attachLiveTurn();
+            return;
+        }
+        mAttachingLive = false;
         mThreadId = threadId;
         mMessages.clear();
         mList.removeAllViews();
@@ -1693,6 +2197,8 @@ class MuseChatView extends FrameLayout {
         if (hadCache) {
             mLoaded = true;
             revealLatest();
+            resumeLiveComputerUi();
+            attachLiveTurn();
         }
         final String id = threadId;
         MuseApi.get()
@@ -1704,9 +2210,15 @@ class MuseChatView extends FrameLayout {
                             if (error != null) {
                                 showError(error);
                                 updateEmpty();
+                                attachLiveTurn();
                                 return;
                             }
                             mLoaded = true;
+                            if (mRun != null || mAttachingLive) {
+                                updateEmpty();
+                                attachLiveTurn();
+                                return;
+                            }
                             JSONArray messages =
                                     value instanceof JSONObject
                                             ? ((JSONObject) value).optJSONArray("messages")
@@ -1719,8 +2231,10 @@ class MuseChatView extends FrameLayout {
                                 mLoaded = true;
                                 updateEmpty();
                                 writeCache(messages);
+                                attachLiveTurn();
                                 return;
                             }
+                            List<Message> previous = new ArrayList<>(mMessages);
                             mMessages.clear();
                             mList.removeAllViews();
                             mWinStart = -1;
@@ -1737,6 +2251,8 @@ class MuseChatView extends FrameLayout {
                             notifyTitleChanged();
                             revealLatest();
                             writeCache(messages);
+                            keepLocalComputerCards(previous);
+                            attachLiveTurn();
                         });
     }
 
@@ -2351,12 +2867,18 @@ class MuseChatView extends FrameLayout {
             mShowTyping = false;
             if (mTyping.getParent() == mList) mList.removeView(mTyping);
         } else {
-            mShowTyping = true;
-            // "思考中"只亮点不写字；干活时写明在干什么。
             boolean thinking = status.equals(getContext().getString(R.string.lemurx_muse_thinking));
-            mStatus.setText(thinking ? "" : status);
-            mStatus.setVisibility(thinking ? View.GONE : View.VISIBLE);
-            attachTypingRow();
+            applyBallEmotion(status, thinking);
+            // 思考只改顶栏表情球，不占一行字；干活时才写出在干什么。
+            if (thinking) {
+                mShowTyping = false;
+                if (mTyping.getParent() == mList) mList.removeView(mTyping);
+            } else {
+                mShowTyping = true;
+                mStatus.setText(status);
+                mStatus.setVisibility(View.VISIBLE);
+                attachTypingRow();
+            }
             if (mStickToBottom) scrollToBottom(true);
         }
         if (mThreadId != null) {
@@ -2370,11 +2892,51 @@ class MuseChatView extends FrameLayout {
         LemurXConsoleShell.refreshPipStatus();
     }
 
+    /** 把工具状态映到 grok-ball 那组情绪：思考上望、检索扫视、干活忙转。 */
+    private void applyBallEmotion(String status, boolean thinking) {
+        removeCallbacks(mBallIdle);
+        if (thinking) {
+            setBalls(MuseBallEmotion.THINKING);
+            return;
+        }
+        String search = getContext().getString(R.string.lemurx_muse_tool_search);
+        String browse = getContext().getString(R.string.lemurx_muse_tool_browse);
+        String write = getContext().getString(R.string.lemurx_muse_tool_write);
+        String delegate = getContext().getString(R.string.lemurx_muse_tool_delegate);
+        if (status.contains(search) || status.contains(browse)) {
+            setBalls(MuseBallEmotion.SEARCHING);
+            return;
+        }
+        if (status.contains(write)) {
+            setBalls(MuseBallEmotion.REPLYING);
+            return;
+        }
+        if (status.contains(delegate)) {
+            setBalls(MuseBallEmotion.RECEIVING);
+            return;
+        }
+        setBalls(MuseBallEmotion.BUSY);
+    }
+
+    private void setBalls(String emotionId) {
+        if (mPage != null) mPage.setBallEmotion(emotionId);
+    }
+
+    void openBallPicker() {
+        String id = mPage != null ? mPage.ballEmotionId() : MuseBallEmotion.IDLE;
+        MuseBallPicker.show(getContext(), id, this::setBalls);
+    }
+
+    private void idleBall() {
+        if (mBusy || mShowTyping) return;
+        setBalls(MuseBallEmotion.IDLE);
+    }
+
     // ---------------------------------------------------------------- 发送 / 停止
 
     private void onSendClicked() {
         LemurXHaptics.click(mSend);
-        if (mRun != null) {
+        if (mRun != null || mWatchingComputer) {
             stop();
             return;
         }
@@ -2382,10 +2944,21 @@ class MuseChatView extends FrameLayout {
         send();
     }
 
+    /**
+     * 本机浏览器操作必须钉在前台：离开就挂起。远程电脑上的命令在电脑上跑，
+     * 用户退到后台或关掉 Aero 也不打断。
+     */
+    boolean needsScreen() {
+        if (onRemoteComputer() || hasLiveComputerRun() || mRemoteHeld) return false;
+        return mRun != null
+                || (LemurXDeviceBridge.isHoldingTab()
+                        && LemurXDeviceBridge.anchorTabId() == mTab.getId());
+    }
+
     /** 窗口离开前台：停掉这一轮，留一条继续。没有正在进行的操作就不动。 */
     void suspendForBackground() {
         if (mSuspended) return;
-        if (onRemoteComputer()) return;
+        if (!needsScreen()) return;
         boolean drivingHere = mRun != null
                 || (LemurXDeviceBridge.isHoldingTab()
                         && LemurXDeviceBridge.anchorTabId() == mTab.getId());
@@ -2394,7 +2967,7 @@ class MuseChatView extends FrameLayout {
         mSuspend.setVisibility(View.VISIBLE);
         LemurXDeviceBridge.markSuspended();
         if (mRun != null) {
-            stop();
+            stopRun(/*user=*/ false);
             return;
         }
         int anchor = LemurXDeviceBridge.anchorTabId();
@@ -2459,9 +3032,18 @@ class MuseChatView extends FrameLayout {
         mStickToBottom = true;
         scrollToBottom(true);
         persist();
+        mLiveCursor = 0;
+        mLiveRunId = "";
+        clearLiveCursor(mThreadId);
 
         Message assistant = new Message(UUID.randomUUID().toString(), "assistant", "");
         mStreaming = assistant;
+        if (onRemoteComputer()) {
+            assistant.steps.add(getContext().getString(R.string.lemurx_muse_computer_hold_title));
+            assistant.logOpen = true;
+            append(assistant);
+            persist();
+        }
         setRunning(true);
         showStatus(getContext().getString(R.string.lemurx_muse_thinking));
         final String thread = mThreadId;
@@ -2472,94 +3054,169 @@ class MuseChatView extends FrameLayout {
                                 thread,
                                 withAttachments(withTabContext(outbound(files)), files),
                                 tabContext(),
-                                new MuseApi.RunListener() {
+                                turnListener(thread, gen));
+    }
+
+    private MuseApi.RunListener turnListener(String thread, int gen) {
+        return new MuseApi.RunListener() {
                                     @Override
                                     public void onTextStart(String messageId) {
-                                        if (gen != mRunGen || !thread.equals(mThreadId)) return;
-                                        mArchiveHold = "";
-                                        Message current = mStreaming;
-                                        if (current == null) return;
-                                        if (current.view == null) {
-                                            append(current);
-                                            beginType(current);
-                                        } else if (!TextUtils.isEmpty(current.text)) {
-                                            // 一轮里第二段文字（工具调用之后）：另起一条消息。
-                                            Message next = new Message(messageId, "assistant", "");
-                                            next.logFrom = LemurXDeviceBridge.actionLog().size();
-                                            mStreaming = next;
-                                            append(next);
-                                            beginType(next);
-                                        } else {
-                                            // 工具卡已经先挂上了（电脑运行等），正文才到：接着打这一条。
-                                            beginType(current);
+                                        MuseChatView chat = turnChat(thread, gen);
+                                        if (chat != null) {
+                                            chat.mArchiveHold = "";
+                                            Message current = chat.mStreaming;
+                                            if (current == null) return;
+                                            if (current.view == null) {
+                                                chat.append(current);
+                                                chat.beginType(current);
+                                            } else if (!TextUtils.isEmpty(current.text)) {
+                                                // 一轮里第二段文字（工具调用之后）：另起一条消息。
+                                                Message next = new Message(messageId, "assistant", "");
+                                                next.logFrom = LemurXDeviceBridge.actionLog().size();
+                                                chat.mStreaming = next;
+                                                chat.append(next);
+                                                chat.beginType(next);
+                                            } else {
+                                                // 工具卡已经先挂上了（电脑运行等），正文才到：接着打这一条。
+                                                chat.beginType(current);
+                                            }
+                                            chat.showStatus(null);
+                                            return;
                                         }
-                                        showStatus(null);
+                                        ParkedTurn parked = turnParked(thread, gen);
+                                        if (parked != null) parked.archiveHold = "";
                                     }
 
                                     @Override
                                     public void onTextDelta(String messageId, String delta) {
-                                        if (gen != mRunGen || !thread.equals(mThreadId)) return;
-                                        Message current = mStreaming;
-                                        if (current == null) return;
-                                        if (current.view == null) {
-                                            append(current);
-                                            beginType(current);
+                                        MuseChatView chat = turnChat(thread, gen);
+                                        if (chat != null) {
+                                            Message current = chat.mStreaming;
+                                            if (current == null) return;
+                                            if (current.view == null) {
+                                                chat.append(current);
+                                                chat.beginType(current);
+                                            }
+                                            current.text += LemurXArchive.maskSecrets(chat.peelArchive(delta));
+                                            chat.showStatus(null);
+                                            chat.scheduleType();
+                                            return;
                                         }
-                                        current.text += LemurXArchive.maskSecrets(peelArchive(delta));
-                                        showStatus(null);
-                                        scheduleType();
+                                        ParkedTurn parked = turnParked(thread, gen);
+                                        if (parked != null) parked.onTextDelta(delta);
                                     }
 
                                     @Override
                                     public void onTextEnd(String messageId) {
-                                        if (gen != mRunGen || !thread.equals(mThreadId)) return;
-                                        flushArchiveHold();
-                                        showArchiveOffers();
-                                        // 打字机还在追：追上后再渲 markdown，这里不抢。
-                                        scheduleType();
+                                        MuseChatView chat = turnChat(thread, gen);
+                                        if (chat != null) {
+                                            chat.flushArchiveHold();
+                                            chat.showArchiveOffers();
+                                            // 打字机还在追：追上后再渲 markdown，这里不抢。
+                                            chat.scheduleType();
+                                            chat.persist();
+                                            return;
+                                        }
+                                        ParkedTurn parked = turnParked(thread, gen);
+                                        if (parked != null) parked.persist();
+                                    }
+
+                                    @Override
+                                    public void onTurnCursor(int cursor) {
+                                        MuseChatView chat = turnChat(thread, gen);
+                                        if (chat != null) {
+                                            chat.mLiveCursor = cursor;
+                                            chat.writeLiveCursor(thread, chat.mLiveRunId, cursor);
+                                            return;
+                                        }
+                                        ParkedTurn parked = turnParked(thread, gen);
+                                        if (parked != null) {
+                                            writeLiveCursor(thread, "", cursor);
+                                        }
                                     }
 
                                     @Override
                                     public void onToolCall(String toolName) {
-                                        if (gen != mRunGen || !thread.equals(mThreadId)) return;
-                                        showStatus(getContext().getString(
-                                                R.string.lemurx_muse_working, toolLabel(toolName)));
+                                        MuseChatView chat = turnChat(thread, gen);
+                                        if (chat != null) {
+                                            chat.noteAgentStep(chat.toolLabel(toolName));
+                                            chat.showStatus(chat.getContext().getString(
+                                                    R.string.lemurx_muse_working, chat.toolLabel(toolName)));
+                                            chat.persist();
+                                            return;
+                                        }
+                                        ParkedTurn parked = turnParked(thread, gen);
+                                        if (parked != null) {
+                                            Context ctx = ContextUtils.getApplicationContext();
+                                            parked.onToolCall(ctx.getString(
+                                                    R.string.lemurx_muse_working, toolLabel(toolName)));
+                                            parked.persist();
+                                        }
                                     }
 
                                     @Override
                                     public void onToolResult(String toolCallId, String content) {
-                                        if (gen != mRunGen || !thread.equals(mThreadId)) return;
-                                        takeWrittenFile(content);
-                                        takeComputerRun(content);
-                                        // 工具已经回来：不要还停在"browse web"，下一轮模型思考时换成思考中。
-                                        showStatus(getContext().getString(
-                                                R.string.lemurx_muse_thinking));
+                                        MuseChatView chat = turnChat(thread, gen);
+                                        if (chat != null) {
+                                            chat.takeWrittenFile(content);
+                                            chat.takeComputerRun(content);
+                                            // 工具已经回来：不要还停在"browse web"，下一轮模型思考时换成思考中。
+                                            chat.showStatus(chat.getContext().getString(
+                                                    R.string.lemurx_muse_thinking));
+                                            return;
+                                        }
+                                        ParkedTurn parked = turnParked(thread, gen);
+                                        if (parked != null) {
+                                            parked.status = ContextUtils.getApplicationContext()
+                                                    .getString(R.string.lemurx_muse_thinking);
+                                            sLive.put(thread, parked.status);
+                                            parked.persist();
+                                        }
                                     }
 
                                     @Override
                                     public void onOwnComputer(JSONObject value) {
-                                        if (gen != mRunGen || !thread.equals(mThreadId)) return;
-                                        applyOwnComputer(value);
+                                        MuseChatView chat = turnChat(thread, gen);
+                                        if (chat != null) {
+                                            chat.applyOwnComputer(value);
+                                            return;
+                                        }
+                                        ParkedTurn parked = turnParked(thread, gen);
+                                        if (parked != null) parked.applyOwnComputer(value);
                                     }
 
                                     @Override
                                     public void onFinished() {
-                                        if (gen != mRunGen || !thread.equals(mThreadId)) return;
-                                        flushArchiveHold();
-                                        showArchiveOffers();
-                                        finishRun(null);
+                                        MuseChatView chat = turnChat(thread, gen);
+                                        if (chat != null) {
+                                            chat.flushArchiveHold();
+                                            chat.showArchiveOffers();
+                                            chat.finishRun(null);
+                                            return;
+                                        }
+                                        ParkedTurn parked = turnParked(thread, gen);
+                                        if (parked != null) parked.onFinished();
                                     }
 
                                     @Override
                                     public void onError(String message) {
-                                        if (gen != mRunGen || !thread.equals(mThreadId)) return;
-                                        if (stalled(message)) {
-                                            recoverFromServer(message);
+                                        MuseChatView chat = turnChat(thread, gen);
+                                        if (chat != null) {
+                                            if (stalled(message)) {
+                                                chat.recoverFromServer(message);
+                                                return;
+                                            }
+                                            if ("No live turn".equals(message)) {
+                                                chat.finishRun(null);
+                                                return;
+                                            }
+                                            chat.finishRun(message);
                                             return;
                                         }
-                                        finishRun(message);
+                                        ParkedTurn parked = turnParked(thread, gen);
+                                        if (parked != null) parked.onFinished();
                                     }
-                                });
+                                };
     }
 
     /** 连接断了或读超时：服务端多半已经把回复写进会话，拉回来，别停在工具状态上。 */
@@ -2571,7 +3228,21 @@ class MuseChatView extends FrameLayout {
                 || m.contains("connection reset");
     }
 
+    /**
+     * POST / 邮箱 SSE 断了：远程这一轮还在电脑上跑，去接邮箱，不要把界面收成结束。
+     */
+    private void adoptMailboxAfterDrop() {
+        MuseApi.Run run = mRun;
+        mRun = null;
+        if (run != null) run.cancel();
+        attachLiveTurn();
+    }
+
     private void recoverFromServer(String fallback) {
+        if (onRemoteComputer()) {
+            adoptMailboxAfterDrop();
+            return;
+        }
         if (mThreadId == null) {
             finishRun(fallback);
             return;
@@ -2618,11 +3289,23 @@ class MuseChatView extends FrameLayout {
     }
 
     private void finishRun(@Nullable String error) {
+        MuseApi.Run run = mRun;
         mRun = null;
+        if (run != null) run.cancel();
+        mWatchingComputer = false;
+        mLiveCursor = 0;
+        mLiveRunId = "";
+        clearLiveCursor(mThreadId);
         Message current = mStreaming;
         mStreaming = null;
         setRunning(false);
         showStatus(null);
+        settleComputerCards();
+        // 只有占位步骤、没有正文也没有电脑输出：不要留下一张空的 Agent steps。
+        if (current != null && holdOnly(current)) {
+            current.steps.clear();
+            if (current.logBox != null) current.logBox.setVisibility(View.GONE);
+        }
         if (current != null && current.view != null && TextUtils.isEmpty(current.text) && current.files.isEmpty() && current.steps.isEmpty()) {
             View gone = current.row != null ? current.row : current.view;
             if (gone.getParent() instanceof ViewGroup) {
@@ -2641,7 +3324,11 @@ class MuseChatView extends FrameLayout {
             if (mTypeMessage == null) mTypeMessage = current;
             scheduleType();
         }
+        if (current != null && !current.steps.isEmpty()) renderAgentLog(current);
         if (error != null) showError(error);
+        removeCallbacks(mBallIdle);
+        setBalls(error != null ? MuseBallEmotion.ERROR : MuseBallEmotion.DONE);
+        postDelayed(mBallIdle, 1600);
         persist();
         // 这一轮确实在操作网页：放开锁，回到对话，让用户看结果或接着回答。
         boolean drove = LemurXDeviceBridge.isHoldingTab();
@@ -2709,21 +3396,33 @@ class MuseChatView extends FrameLayout {
                 });
     }
 
-    /** 用户点了停止，或者换会话 / 关页面。 */
+    /** 用户点了停止。 */
     void stop() {
+        stopRun(/*user=*/ true);
+    }
+
+    /**
+     * 停掉这一轮对话。{@code user} 为真才中止远程电脑上的命令；关页面、换 Activity
+     * 只断开手机这边的流，电脑上已经打出去的命令继续跑。
+     */
+    private void stopRun(boolean user) {
         MuseApi.Run run = mRun;
-        if (run == null) return;
-        run.cancel();
+        if (run == null && !mWatchingComputer) return;
+        if (run != null) run.cancel();
+        mWatchingComputer = false;
         paintAgentLog();
-        Message current = mStreaming;
-        if (current != null) {
-            for (Attach file : current.files) {
-                if ("computer".equals(file.kind) && file.computerRunId != null) {
-                    LemurXComputer.Run crun = LemurXComputer.getRun(file.computerRunId);
-                    if (crun != null && !crun.done) {
-                        LemurXComputer.endRun(file.computerRunId, false, "用户中止了操作", null);
+        if (user && mThreadId != null) MuseApi.get().abortTurn(mThreadId);
+        if (user) {
+            Message current = mStreaming;
+            if (current != null) {
+                for (Attach file : current.files) {
+                    if ("computer".equals(file.kind) && file.computerRunId != null) {
+                        LemurXComputer.Run crun = LemurXComputer.getRun(file.computerRunId);
+                        if (crun != null && !crun.done) {
+                            LemurXComputer.endRun(file.computerRunId, false, "用户中止了操作", null);
+                        }
+                        if ("…".equals(file.excerpt)) file.excerpt = "用户中止了操作";
                     }
-                    if ("…".equals(file.excerpt)) file.excerpt = "用户中止了操作";
                 }
             }
         }
@@ -2739,6 +3438,47 @@ class MuseChatView extends FrameLayout {
                 running ? R.string.lemurx_muse_stop : R.string.lemurx_muse_send));
         paintMic();
         mAttach.setAlpha(running ? 0.35f : 1f);
+        boolean hold = running && (onRemoteComputer() || hasLiveComputerRun());
+        if (hold != mRemoteHeld) {
+            mRemoteHeld = hold;
+            MusePage.noteRemoteHold(hold);
+        }
+        paintAgentLog();
+    }
+
+    /** 远程占位那一行还在、没有真正步骤或回复。 */
+    private boolean holdOnly(@Nullable Message current) {
+        if (current == null) return false;
+        String hold = getContext().getString(R.string.lemurx_muse_computer_hold_title);
+        return current.steps.size() == 1
+                && hold.equals(current.steps.get(0))
+                && TextUtils.isEmpty(current.text)
+                && current.files.isEmpty();
+    }
+
+    /** 已经结束的远程占位卡片：没有正文、没有电脑输出，打开会话时清掉。 */
+    private void dropStaleHoldCards() {
+        if (mBusy || mRun != null) return;
+        java.util.ArrayList<Message> gone = new java.util.ArrayList<>();
+        for (Message message : mMessages) {
+            if (message == mStreaming) continue;
+            if (holdOnly(message)) gone.add(message);
+        }
+        if (gone.isEmpty()) return;
+        for (Message current : gone) {
+            View row = current.row != null ? current.row : current.view;
+            if (row != null && row.getParent() instanceof ViewGroup) {
+                ((ViewGroup) row.getParent()).removeView(row);
+            }
+            mMessages.remove(current);
+            if (mTypeMessage == current) mTypeMessage = null;
+        }
+        mWinStart = -1;
+        mWinEnd = -1;
+        mTopSpan = -1;
+        mBotSpan = -1;
+        scheduleWindow();
+        persist();
     }
 
     // ---------------------------------------------------------------- 语音
@@ -3215,13 +3955,32 @@ class MuseChatView extends FrameLayout {
      * 这一轮的操作步骤挂在当前那条回复上，跟着对话走。默认只露一行，点开才看每一步。
      * 下一轮发送会清掉还在进行的日志；已经写在回复上的步骤留在那一条里。
      */
+    /** 远程这一轮的步骤写在回复上，不要被本机浏览器日志盖掉。 */
+    private void noteAgentStep(String label) {
+        if (TextUtils.isEmpty(label)) return;
+        Message host = mStreaming;
+        if (host == null) return;
+        if (host.view == null) append(host);
+        if (!host.steps.contains(label)) host.steps.add(label);
+        host.logOpen = true;
+        renderAgentLog(host);
+        if (mStickToBottom) scrollToBottom(true);
+    }
+
     private void paintAgentLog() {
         Message host = mStreaming;
         if (host == null) return;
+        if (onRemoteComputer() || hasLiveComputerRun() || mRemoteHeld) {
+            if (!host.steps.isEmpty()) renderAgentLog(host);
+            return;
+        }
         java.util.ArrayList<String> all = LemurXDeviceBridge.actionLog();
         int from = Math.max(0, Math.min(host.logFrom, all.size()));
+        String hold = getContext().getString(R.string.lemurx_muse_computer_hold_title);
+        boolean held = host.steps.contains(hold);
         host.steps.clear();
         host.steps.addAll(all.subList(from, all.size()));
+        if (held && host.files.isEmpty() && !host.steps.contains(hold)) host.steps.add(hold);
         if (host.steps.isEmpty()) {
             if (host.logBox != null) host.logBox.setVisibility(View.GONE);
             return;
@@ -3252,7 +4011,10 @@ class MuseChatView extends FrameLayout {
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(context);
-        title.setText(context.getString(R.string.lemurx_agent_log_steps, lines.size()));
+        boolean live = mBusy && host == mStreaming;
+        title.setText(context.getString(
+                live ? R.string.lemurx_agent_log_steps : R.string.lemurx_agent_log_steps_done,
+                lines.size()));
         title.setTextColor(MusePage.text(context));
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -3961,6 +4723,11 @@ class MuseChatView extends FrameLayout {
         /** 对话工具这次在用户电脑上跑的命令。点预览看全文，复制不离开对话。 */
         final @Nullable String computerRunId;
 
+        /** 存档里记下的命令状态；重新打开后用来水合，不以预览文本猜。 */
+        boolean computerOk = true;
+        boolean computerDone = true;
+        @Nullable String computerError;
+
         /** 排好的 PDF 或 docx。预览页在 images 里。 */
         @Nullable byte[] data;
 
@@ -4601,8 +5368,12 @@ class MuseChatView extends FrameLayout {
 
     /** 存档带上文本正文，重新打开还能预览。发给模型的那份只留文件名。 */
     private JSONArray archiveJson() {
+        return archiveJson(mMessages);
+    }
+
+    private static JSONArray archiveJson(List<Message> messages) {
         JSONArray array = new JSONArray();
-        for (Message m : mMessages) {
+        for (Message m : messages) {
             String content = archiveContent(m);
             if (TextUtils.isEmpty(content)) continue;
             try {
@@ -4638,6 +5409,15 @@ class MuseChatView extends FrameLayout {
                             : file.name;
                     meta.put("command", command);
                     String preview = file.excerpt == null ? "" : file.excerpt;
+                    if (run != null && run.output.length() > 0) {
+                        preview = run.preview();
+                    } else if (runId.length() > 0) {
+                        String vault = LemurXVault.getRunOutput(runId);
+                        if (vault != null && !vault.trim().isEmpty()) {
+                            preview = vault.trim();
+                        }
+                    }
+                    if ("…".equals(preview)) preview = "";
                     if (preview.length() > 240) preview = preview.substring(preview.length() - 240);
                     meta.put("preview", preview);
                     meta.put("ok", run == null || run.ok);
@@ -4750,8 +5530,11 @@ class MuseChatView extends FrameLayout {
                 }
                 if (runId.isEmpty()) continue;
                 if (excerpt == null) excerpt = "";
-                LemurXComputer.hydrate(runId, name, null, ok, done, error, null, null);
-                files.add(new Attach(name, excerpt, List.of(), "computer", false, runId));
+                Attach card = new Attach(name, excerpt, List.of(), "computer", false, runId);
+                card.computerOk = ok;
+                card.computerDone = done;
+                card.computerError = error;
+                files.add(card);
                 continue;
             }
             files.add(
@@ -5240,13 +6023,12 @@ class MuseChatView extends FrameLayout {
                 if (run.done && run.error != null && !run.error.isEmpty()) {
                     return computerFailure(run.error);
                 }
-                return "";
             }
             String local = LemurXVault.getRunOutput(file.computerRunId);
             if (local != null && !local.trim().isEmpty()) return local.trim();
         }
         String excerpt = file.excerpt == null ? "" : file.excerpt.trim();
-        if ("…".equals(excerpt)) return "";
+        if (excerpt.isEmpty() || "…".equals(excerpt)) return "";
         return computerFailure(excerpt);
     }
 
@@ -5260,12 +6042,42 @@ class MuseChatView extends FrameLayout {
         return trimmed;
     }
 
-    private boolean commandRunning(Attach file) {
-        if (file.computerRunId != null) {
-            LemurXComputer.Run run = LemurXComputer.getRun(file.computerRunId);
-            if (run != null) return !run.done;
+    private boolean hasLiveComputerRun() {
+        for (Message current : mMessages) {
+            for (Attach file : current.files) {
+                if ("computer".equals(file.kind) && commandRunning(file)) return true;
+            }
         }
-        return "…".equals(file.excerpt);
+        if (mStreaming == null) return false;
+        for (Attach file : mStreaming.files) {
+            if ("computer".equals(file.kind) && commandRunning(file)) return true;
+        }
+        return false;
+    }
+
+    /** Agent 这一轮已经结束：还亮着 Running 的电脑卡片收成完成，别把停止按钮留下。 */
+    private void settleComputerCards() {
+        for (Message message : mMessages) {
+            boolean bind = false;
+            for (Attach file : message.files) {
+                if (!"computer".equals(file.kind) || file.computerRunId == null) continue;
+                LemurXComputer.Run run = LemurXComputer.getRun(file.computerRunId);
+                if (file.computerDone && (run == null || run.done)) continue;
+                if (run != null && !run.done) {
+                    LemurXComputer.endRun(run.id, true, null, null);
+                }
+                file.computerDone = true;
+                bind = true;
+            }
+            if (bind) bindFiles(message);
+        }
+    }
+
+    private boolean commandRunning(Attach file) {
+        if (!"computer".equals(file.kind) || file.computerRunId == null) return false;
+        LemurXComputer.Run run = LemurXComputer.getRun(file.computerRunId);
+        if (run != null) return !run.done;
+        return !file.computerDone;
     }
 
     private void copyPlain(String text, TextView label) {
@@ -5354,13 +6166,27 @@ class MuseChatView extends FrameLayout {
         String phase = value.optString("phase", "");
         String host = value.optString("host", "");
         if ("start".equals(phase)) {
-            LemurXComputer.beginRun(runId, command, "chat", mThreadId, host);
-            upsertComputerCard(runId, command, "…", true);
-            showStatus(humanizeCommand(getContext(), command) + "…");
+            LemurXComputer.Run started =
+                    LemurXComputer.beginRun(runId, command, "chat", mThreadId, host);
+            LemurXComputer.persistRun(started);
+            mExpandedRuns.add(runId);
+            // 补进度不要把卡片改回「…」，也不要再亮状态行，否则结束了还会一直显示 Check system resources。
+            upsertComputerCard(runId, command, mCatchUp ? null : "…", !mCatchUp);
+            if (!mCatchUp) {
+                noteAgentStep(humanizeCommand(getContext(), command));
+                showStatus(humanizeCommand(getContext(), command) + "…");
+            }
             return;
         }
         if ("chunk".equals(phase)) {
             String line = value.optString("line", "");
+            if (mCatchUp) {
+                LemurXComputer.Run have = LemurXComputer.getRun(runId);
+                if (have != null && !TextUtils.isEmpty(have.output)) {
+                    upsertComputerCard(runId, command, have.preview(), false);
+                    return;
+                }
+            }
             LemurXComputer.appendRun(runId, line);
             LemurXComputer.Run run = LemurXComputer.getRun(runId);
             // 行级进度只刷新卡片，不每次写存档；start/end 才落盘。
@@ -5391,7 +6217,17 @@ class MuseChatView extends FrameLayout {
         LemurXComputer.Run run = LemurXComputer.getRun(runId);
         if (run != null) run.threadId = mThreadId;
         String preview = run != null ? run.preview() : "";
+        if (run != null && !run.done) mExpandedRuns.add(runId);
         upsertComputerCard(runId, command, preview, true);
+        if (mWatchingComputer) {
+            boolean still = hasLiveComputerRun();
+            if (still) {
+                showStatus(humanizeCommand(getContext(), command) + "…");
+            } else {
+                mWatchingComputer = false;
+                finishRun(null);
+            }
+        }
     }
 
     private void upsertComputerCard(String runId, String command, String preview, boolean save) {
@@ -5401,11 +6237,22 @@ class MuseChatView extends FrameLayout {
                 ? getContext().getString(R.string.lemurx_muse_computer_card)
                 : command.replace('\n', ' ').replace(']', ' ').trim();
         if (title.length() > 400) title = title.substring(0, 400);
-        for (Attach file : host.files) {
-            if (runId.equals(file.computerRunId)) {
-                file.excerpt = preview == null ? "" : preview;
-                bindFiles(host);
-                host.gen++;
+        for (Message message : mMessages) {
+            for (Attach file : message.files) {
+                if (!runId.equals(file.computerRunId)) continue;
+                LemurXComputer.Run live = LemurXComputer.getRun(runId);
+                if (preview != null && !preview.isEmpty() && !"…".equals(preview)) {
+                    file.excerpt = preview;
+                } else if ("…".equals(file.excerpt) && live != null && live.done) {
+                    file.excerpt = "";
+                }
+                if (live != null) {
+                    file.computerOk = live.ok;
+                    file.computerDone = live.done;
+                    file.computerError = live.error;
+                }
+                bindFiles(message);
+                message.gen++;
                 if (mStickToBottom) scrollToBottom(false);
                 scheduleWindow();
                 if (save) persist();
@@ -5413,13 +6260,102 @@ class MuseChatView extends FrameLayout {
             }
         }
         if (host.view == null) append(host);
-        host.files.add(new Attach(title, preview == null ? "" : preview, List.of(), "computer",
-                false, runId));
+        Attach card = new Attach(title, preview == null ? "" : preview, List.of(), "computer",
+                false, runId);
+        LemurXComputer.Run live = LemurXComputer.getRun(runId);
+        if (live != null) {
+            card.computerOk = live.ok;
+            card.computerDone = live.done;
+            card.computerError = live.error;
+        } else {
+            card.computerDone = false;
+        }
+        dropHoldStep(host);
+        host.files.add(card);
         bindFiles(host);
         host.gen++;
         if (mStickToBottom) scrollToBottom(true);
         scheduleWindow();
-        persist();
+        if (save) persist();
+    }
+
+    private boolean hasComputerCard(String runId) {
+        for (Message m : mMessages) {
+            for (Attach file : m.files) {
+                if (runId.equals(file.computerRunId)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 服务端对话可能还没带上电脑卡片；本地已经记下的不要被 GET 盖掉。 */
+    private void keepLocalComputerCards(List<Message> previous) {
+        boolean added = false;
+        for (Message m : previous) {
+            for (Attach file : m.files) {
+                if (!"computer".equals(file.kind) || TextUtils.isEmpty(file.computerRunId)) continue;
+                if (hasComputerCard(file.computerRunId)) continue;
+                upsertComputerCard(file.computerRunId, file.name, file.excerpt, false);
+                added = true;
+            }
+        }
+        if (added) persist();
+    }
+
+    /**
+     * 关掉再进来：按这个对话把服务端记下的命令卡片挂回来，未完成的接着轮询。
+     */
+    private void restoreComputerRuns() {
+        if (mThreadId == null || !LemurXAccount.isSignedIn()) return;
+        final String id = mThreadId;
+        MuseApi.get().get("/api/own-computer-runs?threadId=" + id, (value, error) -> {
+            if (!id.equals(mThreadId) || error != null || !(value instanceof JSONArray)) return;
+            JSONArray rows = (JSONArray) value;
+            boolean added = false;
+            for (int i = 0; i < rows.length(); i++) {
+                JSONObject row = rows.optJSONObject(i);
+                if (row == null) continue;
+                String runId = row.optString("id", "");
+                if (runId.isEmpty()) continue;
+                String command = row.optString("command", "");
+                boolean ok = row.optBoolean("ok", true);
+                boolean done = row.optBoolean("done", false);
+                String err = row.has("error") ? row.optString("error") : null;
+                String host = row.optString("host", "");
+                String keep = null;
+                for (Message message : mMessages) {
+                    for (Attach file : message.files) {
+                        if (!runId.equals(file.computerRunId)) continue;
+                        keep = file.excerpt;
+                        break;
+                    }
+                    if (keep != null) break;
+                }
+                LemurXComputer.hydrate(runId, command, keep, ok, done, err, id, host);
+                LemurXComputer.Run run = LemurXComputer.getRun(runId);
+                String preview = run != null ? run.preview() : (done ? (ok ? "" : (err == null ? "" : err)) : "…");
+                if ((preview == null || preview.isEmpty() || "…".equals(preview))
+                        && keep != null
+                        && !keep.isEmpty()
+                        && !"…".equals(keep)) {
+                    preview = keep;
+                }
+                if (!hasComputerCard(runId)) added = true;
+                upsertComputerCard(runId, command, preview, false);
+            }
+            if (added || rows.length() > 0) persist();
+            resumeLiveComputerUi();
+        });
+    }
+
+    private void dropHoldStep(Message host) {
+        String hold = getContext().getString(R.string.lemurx_muse_computer_hold_title);
+        if (!host.steps.remove(hold)) return;
+        if (host.steps.isEmpty()) {
+            if (host.logBox != null) host.logBox.setVisibility(View.GONE);
+            return;
+        }
+        renderAgentLog(host);
     }
 
     private @Nullable Message hostForToolCard() {
@@ -5847,12 +6783,26 @@ class MuseChatView extends FrameLayout {
             if (TextUtils.isEmpty(content) && !"user".equals(role)) continue;
             Message loaded = decodeStored(
                     m.optString("id", UUID.randomUUID().toString()), role, content);
-            if (TextUtils.isEmpty(loaded.text) && loaded.files.isEmpty()) continue;
+            if (TextUtils.isEmpty(loaded.text) && loaded.files.isEmpty() && loaded.steps.isEmpty()) {
+                continue;
+            }
             for (Attach file : loaded.files) {
-                if ("computer".equals(file.kind) && file.computerRunId != null) {
-                    LemurXComputer.Run run = LemurXComputer.getRun(file.computerRunId);
-                    if (run != null) run.threadId = threadId;
+                if (!"computer".equals(file.kind) || file.computerRunId == null) continue;
+                LemurXComputer.Run existing = LemurXComputer.getRun(file.computerRunId);
+                if (existing != null) {
+                    existing.threadId = threadId;
+                    if (!existing.done) LemurXComputer.watchRun(file.computerRunId);
+                    continue;
                 }
+                LemurXComputer.hydrate(
+                        file.computerRunId,
+                        file.name,
+                        file.excerpt,
+                        file.computerOk,
+                        file.computerDone,
+                        file.computerError,
+                        threadId,
+                        null);
             }
             append(loaded);
             n++;
@@ -5975,12 +6925,16 @@ class MuseChatView extends FrameLayout {
     }
 
     private void writeCache(JSONArray messages) {
-        if (mThreadId == null || messages == null) return;
+        writeCacheFor(mThreadId, messages);
+    }
+
+    private static void writeCacheFor(@Nullable String threadId, JSONArray messages) {
+        if (threadId == null || messages == null) return;
         try {
             File dir = new File(ContextUtils.getApplicationContext().getFilesDir(), "lemurx-chat");
             if (!dir.isDirectory() && !dir.mkdirs()) return;
-            File file = new File(dir, mThreadId + ".json");
-            File tmp = new File(dir, mThreadId + ".json.tmp");
+            File file = new File(dir, threadId + ".json");
+            File tmp = new File(dir, threadId + ".json.tmp");
             try (FileOutputStream out = new FileOutputStream(tmp)) {
                 out.write(messages.toString().getBytes(StandardCharsets.UTF_8));
             }
@@ -5988,6 +6942,60 @@ class MuseChatView extends FrameLayout {
             if (!file.exists()) tmp.renameTo(file);
         } catch (Exception e) {
             Log.i(TAG, "cache: %s", e.getMessage());
+        }
+    }
+
+    private static File chatDir() {
+        return new File(ContextUtils.getApplicationContext().getFilesDir(), "lemurx-chat");
+    }
+
+    private static File liveFile(String threadId) {
+        return new File(chatDir(), threadId + ".live");
+    }
+
+    private static void writeLiveCursor(@Nullable String threadId, @Nullable String runId, int cursor) {
+        if (threadId == null || threadId.isEmpty() || cursor < 0) return;
+        try {
+            File dir = chatDir();
+            if (!dir.isDirectory() && !dir.mkdirs()) return;
+            JSONObject body = new JSONObject();
+            body.put("runId", runId == null ? "" : runId);
+            body.put("cursor", cursor);
+            File tmp = new File(dir, threadId + ".live.tmp");
+            try (FileOutputStream out = new FileOutputStream(tmp)) {
+                out.write(body.toString().getBytes(StandardCharsets.UTF_8));
+            }
+            File file = liveFile(threadId);
+            if (!tmp.renameTo(file) && file.exists() && !file.delete()) return;
+            if (!file.exists()) tmp.renameTo(file);
+        } catch (Exception e) {
+            Log.i(TAG, "live-cursor: %s", e.getMessage());
+        }
+    }
+
+    private static int readLiveCursor(String threadId, String runId) {
+        try {
+            File file = liveFile(threadId);
+            if (!file.isFile() || file.length() == 0 || file.length() > 4000) return 0;
+            byte[] buf = new byte[(int) file.length()];
+            try (InputStream in = new java.io.FileInputStream(file)) {
+                int n = in.read(buf);
+                if (n <= 0) return 0;
+            }
+            JSONObject body = new JSONObject(new String(buf, StandardCharsets.UTF_8).trim());
+            String saved = body.optString("runId", "");
+            if (!saved.isEmpty() && !saved.equals(runId)) return 0;
+            return Math.max(0, body.optInt("cursor", 0));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private static void clearLiveCursor(@Nullable String threadId) {
+        if (threadId == null || threadId.isEmpty()) return;
+        File file = liveFile(threadId);
+        if (file.exists() && !file.delete()) {
+            Log.i(TAG, "live-cursor: could not drop %s", threadId);
         }
     }
 
@@ -6014,12 +7022,14 @@ class MuseChatView extends FrameLayout {
     }
 
     private void persist() {
-        if (mThreadId == null || !mLoaded) return;
+        if (mThreadId == null) return;
         JSONArray messages = archiveJson();
         // 服务端对空的非 default 会话会删行。没消息就不要写，免得加载竞态把已有历史抹掉。
         if (messages.length() == 0) return;
         writeCache(messages);
         writeImages();
+        writeLiveCursor(mThreadId, mLiveRunId, mLiveCursor);
+        if (!mLoaded) return;
         JSONObject body = new JSONObject();
         try {
             body.put("id", mThreadId);
@@ -6038,11 +7048,16 @@ class MuseChatView extends FrameLayout {
     }
 
     void destroy() {
+        removeCallbacks(mBallIdle);
         dismissPreview();
         mAttachGen++;
         mAttachRead.shutdownNow();
-        stop();
-        if (mThreadId != null) sLive.remove(mThreadId);
+        if (shouldPark()) {
+            parkCurrent();
+        } else {
+            stopRun(/*user=*/ false);
+            if (mThreadId != null) sLive.remove(mThreadId);
+        }
         ThreadUtils.assertOnUiThread();
     }
 

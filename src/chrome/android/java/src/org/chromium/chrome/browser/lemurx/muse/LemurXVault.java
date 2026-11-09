@@ -157,6 +157,8 @@ public final class LemurXVault {
 
     static void putRunOutput(String runId, @Nullable String output) {
         if (runId == null || runId.isEmpty()) return;
+        // 空字符串会把已经存下的全文删掉；命令还没结束或收尾时不要抹掉结果。
+        if (output == null || output.isEmpty()) return;
         put(RUN_PREFIX + runId, output);
     }
 

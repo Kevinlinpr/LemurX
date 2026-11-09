@@ -166,10 +166,11 @@ public class MusePage implements NativePage {
 
     private final FrameLayout mRoot;
     private final FrameLayout mContent;
-    /** 顶栏：Aero 图标、标题、新增标签。输入时整条收起，搜索建议顶到状态栏下。 */
-    private final LinearLayout mHeader;
+    /** 顶栏：表情球常驻正中，两侧是返回/新会话。 */
+    private final FrameLayout mHeader;
     private final TextView mHeading;
     private final ImageView mMenu;
+    private final MuseBallView mBall;
     private final View mNewChat;
     /** 文件架盖着时用来收起底栏。这一页不占导航上的一格。 */
     private static final Object FILES_NAV = new Object();
@@ -233,6 +234,16 @@ public class MusePage implements NativePage {
                         super.onLayout(changed, l, t, r, b);
                         updateStatusInset();
                     }
+
+                    @Override
+                    public boolean dispatchTouchEvent(MotionEvent ev) {
+                        int action = ev.getActionMasked();
+                        if (action != MotionEvent.ACTION_UP
+                                && action != MotionEvent.ACTION_CANCEL) {
+                            mBall.followScreen(ev.getRawX(), ev.getRawY());
+                        }
+                        return super.dispatchTouchEvent(ev);
+                    }
                 };
         mRoot.setBackgroundColor(bg(context));
         mRoot.setClickable(true); // 不让触摸漏到下面的 WebContents
@@ -240,36 +251,43 @@ public class MusePage implements NativePage {
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
 
-        // ---- 顶栏
-        mHeader = new LinearLayout(context);
-        mHeader.setOrientation(LinearLayout.HORIZONTAL);
-        mHeader.setGravity(Gravity.CENTER_VERTICAL);
-        mHeader.setPadding(dp(8), dp(6), dp(8), dp(6));
+        // ---- 顶栏：表情球钉在正中，左右各留一格按钮，对得齐。
+        mHeader = new FrameLayout(context);
+        mHeader.setClipChildren(false);
+        mHeader.setPadding(dp(8), dp(4), dp(8), dp(4));
         mMenu = iconButton(context, R.drawable.lemurx_muse_ic_menu, R.string.lemurx_muse_settings);
         showMenuButton();
-        mHeader.addView(mMenu);
+        FrameLayout.LayoutParams menuLp = new FrameLayout.LayoutParams(dp(44), dp(44));
+        menuLp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
+        mHeader.addView(mMenu, menuLp);
 
-        ImageView logo = new ImageView(context);
-        logo.setImageResource(R.mipmap.app_icon);
-        logo.setClipToOutline(true);
-        logo.setOutlineProvider(
-                new ViewOutlineProvider() {
-                    @Override
-                    public void getOutline(View view, Outline outline) {
-                        outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), view.getWidth() * 0.26f);
+        mBall = new MuseBallView(context, 52);
+        mBall.setEmotion(MuseBallEmotion.IDLE);
+        mBall.setOnLongClickListener(
+                v -> {
+                    if (mChat != null) mChat.openBallPicker();
+                    else {
+                        MuseBallPicker.show(context, mBall.emotionId(), mBall::setEmotion);
                     }
+                    return true;
                 });
-        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(26), dp(26));
-        logoLp.setMarginStart(dp(4));
-        logoLp.setMarginEnd(dp(8));
-        mHeader.addView(logo, logoLp);
+        FrameLayout.LayoutParams ballLp = new FrameLayout.LayoutParams(dp(52), dp(52));
+        ballLp.gravity = Gravity.CENTER;
+        mHeader.addView(mBall, ballLp);
 
         mHeading = new TextView(context);
         mHeading.setTextColor(text(context));
         mHeading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         mHeading.setTypeface(Typeface.DEFAULT_BOLD);
         mHeading.setText(R.string.lemurx_muse_brand);
-        mHeader.addView(mHeading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        mHeading.setGravity(Gravity.CENTER_VERTICAL);
+        mHeading.setVisibility(View.GONE);
+        FrameLayout.LayoutParams headingLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        headingLp.gravity = Gravity.CENTER_VERTICAL;
+        headingLp.setMarginStart(dp(52));
+        headingLp.setMarginEnd(dp(52));
+        mHeader.addView(mHeading, headingLp);
 
         mNewChat = iconButton(context, R.drawable.lemurx_muse_ic_new_chat, R.string.lemurx_muse_new_chat);
         mNewChat.setOnClickListener(
@@ -281,7 +299,9 @@ public class MusePage implements NativePage {
                     }
                     newChat();
                 });
-        mHeader.addView(mNewChat);
+        FrameLayout.LayoutParams newLp = new FrameLayout.LayoutParams(dp(44), dp(44));
+        newLp.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+        mHeader.addView(mNewChat, newLp);
         column.addView(mHeader, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -430,9 +450,20 @@ public class MusePage implements NativePage {
         show(section);
     }
 
-    /** 输入时收起顶栏，让搜索建议顶到状态栏下面。离开输入或离开对话时放回来。 */
-    void setComposeHeaderHidden(boolean hidden) {
-        mHeader.setVisibility(hidden ? View.GONE : View.VISIBLE);
+    /** 表情球常驻顶栏正中，打字时也不收。 */
+    void setComposeHeaderHidden(boolean unusedHidden) {}
+
+    void setBallEmotion(String emotionId) {
+        mBall.setEmotion(emotionId);
+    }
+
+    String ballEmotionId() {
+        return mBall.emotionId();
+    }
+
+    private void showHeaderBall(boolean show) {
+        mBall.setVisibility(show ? View.VISIBLE : View.GONE);
+        mHeading.setVisibility(show ? View.GONE : View.VISIBLE);
     }
 
     private void show(String section) {
@@ -443,6 +474,7 @@ public class MusePage implements NativePage {
             if (mCommunity != null) mCommunity.setVisibility(View.GONE);
             mHeading.setText(R.string.lemurx_archive);
             mNewChat.setVisibility(View.INVISIBLE);
+            showHeaderBall(false);
             showBackButton(MusePage::backFromArchive);
             return;
         }
@@ -461,6 +493,7 @@ public class MusePage implements NativePage {
             mHeading.setText(R.string.lemurx_muse_community);
             mNewChat.setContentDescription(context.getString(R.string.lemurx_muse_community_write));
             mNewChat.setVisibility(View.VISIBLE);
+            showHeaderBall(false);
         } else {
             if (mChat == null) {
                 mChat = obtainChat(context);
@@ -471,7 +504,7 @@ public class MusePage implements NativePage {
             mHeading.setText(R.string.lemurx_muse_brand);
             mNewChat.setContentDescription(context.getString(R.string.lemurx_muse_new_chat));
             mNewChat.setVisibility(View.VISIBLE);
-            if (mChat.isComposing()) setComposeHeaderHidden(true);
+            showHeaderBall(true);
         }
         try {
             mTab.updateTitle();
@@ -507,9 +540,39 @@ public class MusePage implements NativePage {
         if (chat != null) chat.destroy();
     }
 
+    /** 这个会话正挂在哪个对话视图上。关页面停放时可能暂时没有。 */
+    static @Nullable MuseChatView chatForThread(String threadId) {
+        if (threadId == null || threadId.isEmpty()) return null;
+        for (MuseChatView chat : sChats.values()) {
+            if (threadId.equals(chat.threadId())) return chat;
+        }
+        return null;
+    }
+
     /** 有对话正在回复。画中画用它判断按 Home 时要不要收成小窗。 */
     public static boolean hasLiveWork() {
         return MuseChatView.hasLiveWork();
+    }
+
+    /**
+     * 本机浏览器这一轮还在操作或回复。远程电脑命令不算：用户可以离开屏幕等结果。
+     */
+    public static boolean hasOnScreenBrowserWork() {
+        ThreadUtils.assertOnUiThread();
+        for (MuseChatView chat : sChats.values()) {
+            if (chat.needsScreen()) return true;
+        }
+        return false;
+    }
+
+    private static int sRemoteHolds;
+
+    /** 远程电脑命令开始或结束时钉住 / 放开后台保活。 */
+    static void noteRemoteHold(boolean hold) {
+        ThreadUtils.assertOnUiThread();
+        if (hold) sRemoteHolds++;
+        else if (sRemoteHolds > 0) sRemoteHolds--;
+        LemurXComputerHoldImpl.sync(sRemoteHolds > 0);
     }
 
     /** 画中画静画面上的那一句。没有正在进行的回复时是 null。 */
@@ -646,6 +709,7 @@ public class MusePage implements NativePage {
         if (mCommunity != null) mCommunity.setVisibility(View.GONE);
         mHeading.setText(R.string.lemurx_archive);
         mNewChat.setVisibility(View.INVISIBLE);
+        showHeaderBall(false);
         showBackButton(MusePage::backFromArchive);
         LemurXConsoleShell.setNavSuppressed(ARCHIVE_NAV, true);
         LemurXConsoleShell.onPlaceChanged();

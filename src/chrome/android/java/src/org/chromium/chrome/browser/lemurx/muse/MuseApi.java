@@ -112,6 +112,9 @@ public final class MuseApi {
         void onFinished();
 
         void onError(String message);
+
+        /** 邮箱游标。接上直播后用来把进度写到本机，下次从这里接着看。 */
+        default void onTurnCursor(int cursor) {}
     }
 
     /** 一次进行中的对话请求。 */
@@ -572,6 +575,27 @@ public final class MuseApi {
         return run;
     }
 
+    /**
+     * 接上服务端还在跑的一轮：先回放 {@code after} 之后的事件，再跟直播。
+     * 只断 SSE 不会停 Agent；用户点停止要另外走 {@link #abortTurn}。
+     */
+    public Run watchTurn(String threadId, int after, RunListener listener) {
+        Run run = new Run();
+        mExecutor.execute(() -> watchTurnBlocking(run, threadId, after, listener));
+        return run;
+    }
+
+    /** 用户点了停止：服务端才真正 abort 这一轮。 */
+    public void abortTurn(String threadId) {
+        send("DELETE", "/api/turns/" + threadId, new JSONObject(), (value, error) -> {});
+    }
+
+    /** 回放邮箱里的事件：调用方已经在 UI 线程上。 */
+    public static boolean dispatchNow(JSONObject event, RunListener listener) {
+        ThreadUtils.assertOnUiThread();
+        return dispatchEvent(event, listener, true);
+    }
+
     private void runBlocking(
             Run run,
             String threadId,
@@ -640,7 +664,10 @@ public final class MuseApi {
                 // event: / id: / 注释行忽略
             }
             if (data.length() > 0) finished |= dispatch(data.toString(), listener);
-            if (!finished) ThreadUtils.postOnUiThread(listener::onFinished);
+            // 流自己断了、没有 RUN_FINISHED：按掉线处理，远程这一轮去接邮箱，不要当成跑完。
+            if (!finished) {
+                ThreadUtils.postOnUiThread(() -> listener.onError("unexpected end of stream"));
+            }
         } catch (Exception e) {
             if (run.isCancelled()) return;
             // 流还没开始就撞上被拆掉的空闲连接：重开一次。已经收到事件就不要重跑，避免操作执行两遍。
@@ -665,6 +692,89 @@ public final class MuseApi {
         }
     }
 
+    private void watchTurnBlocking(Run run, String threadId, int after, RunListener listener) {
+        HttpURLConnection connection = null;
+        boolean finished = false;
+        try {
+            String token = ensureToken();
+            String path = "/api/turns/" + threadId + "/stream?after=" + Math.max(0, after);
+            connection = open("GET", path, token, true);
+            run.mConnection = connection;
+            if (run.isCancelled()) return;
+            connection.setRequestProperty("Accept", "text/event-stream");
+            int status = connection.getResponseCode();
+            if (status == 401) {
+                clearToken(token);
+                token = ensureToken();
+                connection.disconnect();
+                connection = open("GET", path, token, true);
+                run.mConnection = connection;
+                connection.setRequestProperty("Accept", "text/event-stream");
+                status = connection.getResponseCode();
+            }
+            if (status >= 400) {
+                String text = readAll(connection.getErrorStream());
+                if (LemurXKillSwitch.isDisabledStatus(status, text)) {
+                    ThreadUtils.postOnUiThread(LemurXKillSwitch::activate);
+                }
+                throw new IOException(errorMessage(status, text));
+            }
+            BufferedReader reader =
+                    new BufferedReader(
+                            new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8));
+            StringBuilder data = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (run.isCancelled()) return;
+                if (line.isEmpty()) {
+                    if (data.length() > 0) {
+                        finished |= dispatchWatch(data.toString(), listener);
+                        data.setLength(0);
+                        if (finished) break;
+                    }
+                    continue;
+                }
+                if (line.startsWith("data:")) {
+                    String chunk = line.substring(5);
+                    if (chunk.startsWith(" ")) chunk = chunk.substring(1);
+                    if (data.length() > 0) data.append('\n');
+                    data.append(chunk);
+                }
+            }
+            if (!finished && data.length() > 0) finished |= dispatchWatch(data.toString(), listener);
+            if (!finished) {
+                ThreadUtils.postOnUiThread(() -> listener.onError("unexpected end of stream"));
+            }
+        } catch (Exception e) {
+            if (run.isCancelled()) return;
+            String message = describe(e);
+            ThreadUtils.postOnUiThread(() -> listener.onError(message));
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    /** 邮箱直播包一层 cursor/done；里面才是原来的 AG-UI 事件。 */
+    private static boolean dispatchWatch(String json, RunListener listener) {
+        JSONObject wrap;
+        try {
+            wrap = new JSONObject(json);
+        } catch (JSONException e) {
+            return false;
+        }
+        JSONObject event = wrap.optJSONObject("event");
+        boolean done = wrap.optBoolean("done", false);
+        int cursor = wrap.optInt("cursor", -1);
+        if (cursor >= 0) ThreadUtils.postOnUiThread(() -> listener.onTurnCursor(cursor));
+        boolean finished = false;
+        if (event != null) {
+            finished = dispatchEvent(event, listener, false);
+        } else if (wrap.has("type")) {
+            finished = dispatchEvent(wrap, listener, false);
+        }
+        return finished || done;
+    }
+
     /** 一条 SSE 事件 → 回调。返回 true 表示这轮已结束（RUN_FINISHED / RUN_ERROR）。 */
     private static boolean dispatch(String json, RunListener listener) {
         JSONObject event;
@@ -674,35 +784,40 @@ public final class MuseApi {
             Log.i(TAG, "skip non-json event");
             return false;
         }
+        return dispatchEvent(event, listener, false);
+    }
+
+    private static boolean dispatchEvent(JSONObject event, RunListener listener, boolean onUi) {
         String type = event.optString("type", "");
         switch (type) {
             case "TEXT_MESSAGE_START": {
                 String id = event.optString("messageId", "");
                 if ("assistant".equals(event.optString("role", "assistant"))) {
-                    ThreadUtils.postOnUiThread(() -> listener.onTextStart(id));
+                    emit(onUi, () -> listener.onTextStart(id));
                 }
                 return false;
             }
-            case "TEXT_MESSAGE_CONTENT": {
+            case "TEXT_MESSAGE_CONTENT":
+            case "TEXT_MESSAGE_CHUNK": {
                 String id = event.optString("messageId", "");
                 String delta = event.optString("delta", "");
-                if (!delta.isEmpty()) ThreadUtils.postOnUiThread(() -> listener.onTextDelta(id, delta));
+                if (!delta.isEmpty()) emit(onUi, () -> listener.onTextDelta(id, delta));
                 return false;
             }
             case "TEXT_MESSAGE_END": {
                 String id = event.optString("messageId", "");
-                ThreadUtils.postOnUiThread(() -> listener.onTextEnd(id));
+                emit(onUi, () -> listener.onTextEnd(id));
                 return false;
             }
             case "TOOL_CALL_START": {
                 String name = event.optString("toolCallName", "");
-                ThreadUtils.postOnUiThread(() -> listener.onToolCall(name));
+                emit(onUi, () -> listener.onToolCall(name));
                 return false;
             }
             case "TOOL_CALL_RESULT": {
                 String id = event.optString("toolCallId", "");
                 String content = event.optString("content", "");
-                ThreadUtils.postOnUiThread(() -> listener.onToolResult(id, content));
+                emit(onUi, () -> listener.onToolResult(id, content));
                 return false;
             }
             case "CUSTOM": {
@@ -721,11 +836,11 @@ public final class MuseApi {
                     return false;
                 }
                 JSONObject payload = value;
-                ThreadUtils.postOnUiThread(() -> listener.onOwnComputer(payload));
+                emit(onUi, () -> listener.onOwnComputer(payload));
                 return false;
             }
             case "RUN_FINISHED":
-                ThreadUtils.postOnUiThread(listener::onFinished);
+                emit(onUi, listener::onFinished);
                 return true;
             case "RUN_ERROR": {
                 String message = event.optString("message", "");
@@ -741,12 +856,20 @@ public final class MuseApi {
                                     .getString(R.string.lemurx_muse_model_fetch_failed);
                 }
                 final String m = message;
-                ThreadUtils.postOnUiThread(() -> listener.onError(m));
+                emit(onUi, () -> listener.onError(m));
                 return true;
             }
             default:
                 return false;
         }
+    }
+
+    private static void emit(boolean onUi, Runnable action) {
+        if (onUi) {
+            action.run();
+            return;
+        }
+        ThreadUtils.postOnUiThread(action);
     }
 
     private Object postImageBlocking(String path, byte[] jpeg, boolean retryAuth)

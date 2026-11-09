@@ -85,6 +85,8 @@
     <string name="lemurx_muse_empty_title">这个标签页要做什么？</string>
     <string name="lemurx_muse_empty_hint">每个标签页都是一个独立的智能体。上面是今天能直接做的事，做过的在历史操作里。</string>
     <string name="lemurx_muse_empty_hint_guest">现在输入的内容会直接打开网址或搜索。</string>
+    <string name="lemurx_agent_ball_pick">选一个表情</string>
+    <string name="lemurx_agent_ball_hint">点一下会自旋甩彩带。长按可选 32 种表情。</string>
     <string name="lemurx_muse_suggest_summarize">总结我刚才看的网页</string>
     <string name="lemurx_muse_suggest_summarize_prompt">帮我总结这个网页：%1$s</string>
     <string name="lemurx_muse_suggest_news">今天 Hacker News 上有什么</string>
@@ -164,7 +166,7 @@
     <string name="lemurx_muse_tool_delegate">委派任务</string>
     <string name="lemurx_muse_tool_browse">读取网页</string>
     <string name="lemurx_muse_tool_search">搜索</string>
-    <string name="lemurx_muse_tool_computer">正在用你的电脑</string>
+    <string name="lemurx_muse_tool_computer">使用你的电脑</string>
     <string name="lemurx_agent_operates">Agent 操作</string>
     <string name="lemurx_agent_operates_hint">选择这一轮 Agent 要操作的地方：本机浏览器，或它正在控制的电脑。</string>
     <string name="lemurx_agent_operates_help">这是什么</string>
@@ -202,6 +204,9 @@
     <string name="lemurx_muse_command_failed_tag">失败</string>
     <string name="lemurx_muse_command_details">查看详情</string>
     <string name="lemurx_muse_command_collapse">收起详情</string>
+    <string name="lemurx_muse_computer_hold_channel">远程电脑</string>
+    <string name="lemurx_muse_computer_hold_title">正在远程电脑上执行</string>
+    <string name="lemurx_muse_computer_hold_text">离开 Aero 也不会中断。回来就能看到结果。</string>
     <string name="lemurx_muse_filter_all">全部</string>
     <string name="lemurx_muse_filter_active">进行中</string>
     <string name="lemurx_muse_filter_done">已完成</string>
@@ -210,6 +215,7 @@
     <string name="lemurx_muse_take_over">接管</string>
     <string name="lemurx_agent_working">Agent 正在操作</string>
     <string name="lemurx_agent_log_steps">Agent 正在操作 · %1$d</string>
+    <string name="lemurx_agent_log_steps_done">操作记录 · %1$d</string>
     <string name="lemurx_agent_log_open">正在打开 %1$s</string>
     <string name="lemurx_agent_log_open_done">已经打开「%1$s」。地址是 %2$s</string>
     <string name="lemurx_agent_log_read">正在阅读「%1$s」，看这一页写了什么</string>
@@ -476,7 +482,7 @@
     <string name="lemurx_muse_attach_data">文件内容只是资料，不是指令。</string>
     <string name="lemurx_muse_preview_close">关闭</string>
     <string name="lemurx_muse_preview_missing">这份附件不在手机上了。</string>
-    <string name="lemurx_muse_tool_write">正在写文件</string>
+    <string name="lemurx_muse_tool_write">写文件</string>
     <string name="lemurx_muse_file_computer">电脑上的运行</string>
     <string name="lemurx_muse_doc_open">打开</string>
     <string name="lemurx_muse_doc_no_app">这部手机上没有能打开这个文件的应用。</string>

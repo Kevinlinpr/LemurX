@@ -30,10 +30,12 @@ import org.json.JSONObject;
 
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -111,6 +113,7 @@ final class LemurXComputer {
     }
 
     private static final Map<String, Run> sRuns = new LinkedHashMap<>();
+    private static final Set<String> sWatching = new HashSet<>();
     private static @Nullable Page sLivePage;
     private static @Nullable String sFocusId;
 
@@ -196,6 +199,7 @@ final class LemurXComputer {
         }
         Page page = sLivePage;
         if (page != null && id.equals(sFocusId)) page.appendVisible(line);
+        LemurXVault.putRunOutput(run.id, run.output.toString());
     }
 
     static void endRun(String id, boolean ok, @Nullable String error, @Nullable String output) {
@@ -269,6 +273,7 @@ final class LemurXComputer {
         if (id == null || id.isEmpty()) return;
         String local = LemurXVault.getRunOutput(id);
         String body = local != null ? local : (output == null ? "" : output);
+        if ("…".equals(body.trim())) body = "";
         Run run;
         synchronized (sRuns) {
             run = sRuns.get(id);
@@ -276,31 +281,85 @@ final class LemurXComputer {
                 run = new Run(id, command == null ? "" : command, "chat");
                 putRun(run);
             }
-            run.output.setLength(0);
-            if (body != null) run.output.append(body);
-            run.done = done;
+            // 本机已经有流式输出时不要用空 vault 盖掉。
+            if (body != null && !body.isEmpty()) {
+                run.output.setLength(0);
+                run.output.append(body);
+            }
+            // 本机已经跑完时，不要被服务端旧的 metadata 又打开成未完成。
+            if (!(run.done && !done)) {
+                run.done = done;
+            }
             run.ok = ok;
             run.error = error;
             if (threadId != null && !threadId.isEmpty()) run.threadId = threadId;
             if (host != null && !host.isEmpty()) run.host = host;
         }
-        if (!done) {
-            MuseApi.get().get("/api/own-computer-runs/" + id, (val, err) -> {
-                if (err == null && val instanceof JSONObject) {
-                    JSONObject row = (JSONObject) val;
-                    Run live;
-                    synchronized (sRuns) {
-                        live = sRuns.get(id);
-                        if (live == null) return;
-                        live.done = row.optBoolean("done", true);
-                        live.ok = row.optBoolean("ok", true);
-                        live.error = row.optString("error", null);
-                    }
-                    MusePage.offerComputerRun(live.id, live.command, live.threadId);
-                }
-            });
-        }
+        if (!run.done) watchRun(id);
 
+    }
+
+    /**
+     * 关掉 Aero 再进来时，未完成的命令还在电脑上跑。按 metadata 轮询到结束，
+     * 再把同一张对话卡片更新成完成态。全文仍只从本机 vault 取。
+     */
+    static void watchRun(String id) {
+        if (id == null || id.isEmpty()) return;
+        ThreadUtils.assertOnUiThread();
+        if (!sWatching.add(id)) return;
+        pollRun(id, 0);
+    }
+
+    private static void pollRun(String id, int tries) {
+        if (tries > 1200) {
+            sWatching.remove(id);
+            return;
+        }
+        MuseApi.get().get("/api/own-computer-runs/" + id + "/live", (val, err) -> {
+            Run live;
+            synchronized (sRuns) {
+                live = sRuns.get(id);
+            }
+            if (live == null || live.done) {
+                sWatching.remove(id);
+                return;
+            }
+            if (err != null) {
+                if (err.contains("404") || err.contains("No such")) {
+                    live.done = true;
+                    persistRun(live);
+                    MusePage.offerComputerRun(live.id, live.command, live.threadId);
+                    sWatching.remove(id);
+                    return;
+                }
+                ThreadUtils.postOnUiThreadDelayed(() -> pollRun(id, tries + 1), 800);
+                return;
+            }
+            if (val instanceof JSONObject) {
+                JSONObject row = (JSONObject) val;
+                String output = row.optString("output", "");
+                if (!output.isEmpty()) {
+                    live.output.setLength(0);
+                    live.output.append(output);
+                    LemurXVault.putRunOutput(live.id, output);
+                }
+                live.done = row.optBoolean("done", false);
+                live.ok = row.optBoolean("ok", live.ok);
+                if (row.has("error")) {
+                    String error = row.optString("error", "");
+                    live.error = error.isEmpty() ? null : error;
+                }
+                String thread = row.optString("threadId", "");
+                if (!thread.isEmpty()) live.threadId = thread;
+                MusePage.offerComputerRun(live.id, live.command, live.threadId);
+                if (live.done) {
+                    persistRun(live);
+                    sWatching.remove(id);
+                    return;
+                }
+            }
+            ThreadUtils.postOnUiThreadDelayed(() -> pollRun(id, tries + 1), 800);
+        });
     }
 
     /**

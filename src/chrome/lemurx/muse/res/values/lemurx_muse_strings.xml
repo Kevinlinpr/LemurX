@@ -85,6 +85,8 @@
     <string name="lemurx_muse_empty_title">What should this tab do?</string>
     <string name="lemurx_muse_empty_hint">Every tab is its own agent. The suggestions are things to do today. Past tasks stay under history.</string>
     <string name="lemurx_muse_empty_hint_guest">What you type opens a page or a search.</string>
+    <string name="lemurx_agent_ball_pick">Choose an expression</string>
+    <string name="lemurx_agent_ball_hint">Tap to spin. Touch and hold to pick an expression.</string>
     <string name="lemurx_muse_suggest_summarize">Summarize the page I was reading</string>
     <string name="lemurx_muse_suggest_summarize_prompt">Summarize this page for me: %1$s</string>
     <string name="lemurx_muse_suggest_news">What\'s on Hacker News today?</string>
@@ -202,6 +204,9 @@
     <string name="lemurx_muse_command_failed_tag">Failed</string>
     <string name="lemurx_muse_command_details">Details</string>
     <string name="lemurx_muse_command_collapse">Collapse</string>
+    <string name="lemurx_muse_computer_hold_channel">Remote computer</string>
+    <string name="lemurx_muse_computer_hold_title">Running on your computer</string>
+    <string name="lemurx_muse_computer_hold_text">Aero keeps going after you leave the app. Open Aero to see the result.</string>
     <string name="lemurx_muse_filter_all">All</string>
     <string name="lemurx_muse_filter_active">In progress</string>
     <string name="lemurx_muse_filter_done">Finished</string>
@@ -210,6 +215,7 @@
     <string name="lemurx_muse_take_over">Take control</string>
     <string name="lemurx_agent_working">Agent is working</string>
     <string name="lemurx_agent_log_steps">Agent is working · %1$d</string>
+    <string name="lemurx_agent_log_steps_done">Agent steps · %1$d</string>
     <string name="lemurx_agent_log_open">Opening %1$s</string>
     <string name="lemurx_agent_log_open_done">Opened “%1$s”. Address: %2$s</string>
     <string name="lemurx_agent_log_read">Reading “%1$s” to see what this page says</string>

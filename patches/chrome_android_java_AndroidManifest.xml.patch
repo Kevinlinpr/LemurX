@@ -1,0 +1,17 @@
+diff --git a/chrome/android/java/AndroidManifest.xml b/chrome/android/java/AndroidManifest.xml
+index bb740340ea..d81d908abf 100644
+--- a/chrome/android/java/AndroidManifest.xml
++++ b/chrome/android/java/AndroidManifest.xml
+@@ -987,6 +987,11 @@
+         <service android:name="org.chromium.chrome.browser.download.DownloadForegroundService"
+            android:foregroundServiceType="dataSync" android:exported="false">
+         </service>
+ 
++        <!-- Keep a remote-computer command alive after Aero leaves the screen. -->
++        <service android:name="org.chromium.chrome.browser.lemurx.muse.LemurXComputerHold"
++            android:foregroundServiceType="dataSync" android:exported="false">
++        </service>
++
+         <!-- Download broadcast manager service -->
+         <service android:name="org.chromium.chrome.browser.download.DownloadBroadcastManager"
+             android:exported="false">
