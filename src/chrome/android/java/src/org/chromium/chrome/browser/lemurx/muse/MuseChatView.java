@@ -118,6 +118,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -305,6 +306,7 @@ class MuseChatView extends FrameLayout {
     /** 命令打过去的那台电脑。空表示还没有被控制的电脑。 */
     private String mControlledHost = "";
     private int mTargetGen;
+    private final Set<String> mExpandedRuns = new HashSet<>();
     /** 操作日志挂在对应的那条回复上，不钉在输入栏。 */
     private final Runnable mAgentLogTick = this::paintAgentLog;
     /** 「Agent 操作」旁边的说明。点问号才出现，一会儿自己收起。 */
@@ -378,6 +380,8 @@ class MuseChatView extends FrameLayout {
 
     MuseChatView(Context context, MusePage page) {
         super(context);
+        setFocusable(true);
+        setFocusableInTouchMode(true);
         mPage = page;
         mTab = page.tab();
         int pad = MusePage.pagePadding(context);
@@ -771,11 +775,16 @@ class MuseChatView extends FrameLayout {
         tools.setOrientation(LinearLayout.HORIZONTAL);
         tools.setGravity(Gravity.CENTER_VERTICAL);
         tools.setPadding(dp(2), dp(2), dp(2), dp(2));
+        // 窄屏时芯片组吃剩余宽度并收缩；右侧附件、麦克风、发送固定宽度，不被挤出。
+        LinearLayout chips = new LinearLayout(context);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        chips.setGravity(Gravity.CENTER_VERTICAL);
         mTargetScroll.setPadding(0, 0, 0, 0);
-        tools.addView(mTargetScroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        tools.addView(modelChip(context));
-        tools.addView(new View(context), new LinearLayout.LayoutParams(0, 0, 1f));
+        chips.addView(mTargetScroll, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        chips.addView(modelChip(context));
+        tools.addView(chips, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         mAttach = new ImageView(context);
         mAttach.setImageResource(R.drawable.lemurx_muse_ic_paperclip);
         mAttach.setColorFilter(MusePage.text(context), PorterDuff.Mode.SRC_IN);
@@ -2018,6 +2027,7 @@ class MuseChatView extends FrameLayout {
         message.row = row;
         if (!"user".equals(message.role)) row.addView(messageActions(message));
         bindFiles(message);
+        if (!message.steps.isEmpty()) renderAgentLog(message);
         // 正在输入的那行始终压在列表最后。挂哪些气泡由窗口决定，不在这里整列加进去。
         if (!mBatch) scheduleWindow();
         updateEmpty();
@@ -2375,6 +2385,7 @@ class MuseChatView extends FrameLayout {
     /** 窗口离开前台：停掉这一轮，留一条继续。没有正在进行的操作就不动。 */
     void suspendForBackground() {
         if (mSuspended) return;
+        if (onRemoteComputer()) return;
         boolean drivingHere = mRun != null
                 || (LemurXDeviceBridge.isHoldingTab()
                         && LemurXDeviceBridge.anchorTabId() == mTab.getId());
@@ -2612,7 +2623,7 @@ class MuseChatView extends FrameLayout {
         mStreaming = null;
         setRunning(false);
         showStatus(null);
-        if (current != null && current.view != null && TextUtils.isEmpty(current.text)) {
+        if (current != null && current.view != null && TextUtils.isEmpty(current.text) && current.files.isEmpty() && current.steps.isEmpty()) {
             View gone = current.row != null ? current.row : current.view;
             if (gone.getParent() instanceof ViewGroup) {
                 ((ViewGroup) gone.getParent()).removeView(gone);
@@ -2625,6 +2636,7 @@ class MuseChatView extends FrameLayout {
             mBotSpan = -1;
             scheduleWindow();
         } else if (current != null) {
+            if (TextUtils.isEmpty(current.text) && current.view != null) current.view.setVisibility(View.GONE);
             mTypeFinished = true;
             if (mTypeMessage == null) mTypeMessage = current;
             scheduleType();
@@ -2702,8 +2714,22 @@ class MuseChatView extends FrameLayout {
         MuseApi.Run run = mRun;
         if (run == null) return;
         run.cancel();
+        paintAgentLog();
+        Message current = mStreaming;
+        if (current != null) {
+            for (Attach file : current.files) {
+                if ("computer".equals(file.kind) && file.computerRunId != null) {
+                    LemurXComputer.Run crun = LemurXComputer.getRun(file.computerRunId);
+                    if (crun != null && !crun.done) {
+                        LemurXComputer.endRun(file.computerRunId, false, "用户中止了操作", null);
+                    }
+                    if ("…".equals(file.excerpt)) file.excerpt = "用户中止了操作";
+                }
+            }
+        }
         finishRun(null);
     }
+
 
     private void setRunning(boolean running) {
         mBusy = running;
@@ -3334,7 +3360,7 @@ class MuseChatView extends FrameLayout {
         addSelectedTarget(picked);
         if (mAskPlaced && !mListening) {
             mInput.setHint(inputHintRes());
-            if (mInput.hasFocus()) scheduleAskSheet();
+            if (isComposing()) scheduleAskSheet();
         }
         mTargetBlock.setVisibility(View.GONE);
         if (mAskPlaced && mDeviceSheet.getVisibility() == View.VISIBLE) paintDeviceSheet();
@@ -3346,32 +3372,32 @@ class MuseChatView extends FrameLayout {
         LinearLayout chip = new LinearLayout(context);
         chip.setOrientation(LinearLayout.HORIZONTAL);
         chip.setGravity(Gravity.CENTER_VERTICAL);
-        chip.setPadding(dp(10), dp(6), dp(4), dp(6));
+        chip.setPadding(dp(8), dp(4), dp(6), dp(4));
         chip.setBackground(MusePage.rounded(MusePage.bg(context), 14, context));
         ImageView image = new ImageView(context);
         image.setImageResource(picked.icon);
         image.setColorFilter(MusePage.text(context));
         if (picked.online == null) {
-            chip.addView(image, new LinearLayout.LayoutParams(dp(18), dp(18)));
+            chip.addView(image, new LinearLayout.LayoutParams(dp(15), dp(15)));
         } else {
             FrameLayout mark = new FrameLayout(context);
             mark.addView(image, new FrameLayout.LayoutParams(
-                    dp(18), dp(18), Gravity.START | Gravity.CENTER_VERTICAL));
-            FrameLayout.LayoutParams dotLp = new FrameLayout.LayoutParams(dp(8), dp(8));
+                    dp(15), dp(15), Gravity.START | Gravity.CENTER_VERTICAL));
+            FrameLayout.LayoutParams dotLp = new FrameLayout.LayoutParams(dp(6), dp(6));
             dotLp.gravity = Gravity.BOTTOM | Gravity.END;
             mark.addView(presenceDot(context, picked.online), dotLp);
-            chip.addView(mark, new LinearLayout.LayoutParams(dp(22), dp(20)));
+            chip.addView(mark, new LinearLayout.LayoutParams(dp(18), dp(16)));
         }
         TextView text = new TextView(context);
         text.setText(picked.label);
         text.setSingleLine(true);
         text.setEllipsize(TextUtils.TruncateAt.END);
-        text.setMaxWidth(dp(96));
+        text.setMaxWidth(dp(68));
         text.setTextColor(MusePage.text(context));
-        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        textLp.setMarginStart(dp(8));
+        textLp.setMarginStart(dp(5));
         chip.addView(text, textLp);
         ImageView swap = new ImageView(context);
         swap.setImageResource(R.drawable.lemurx_muse_ic_switch);
@@ -3380,12 +3406,12 @@ class MuseChatView extends FrameLayout {
         swap.setClickable(true);
         swap.setFocusable(false);
         swap.setFocusableInTouchMode(false);
-        swap.setPadding(dp(8), dp(4), dp(8), dp(4));
+        swap.setPadding(dp(2), dp(2), dp(2), dp(2));
         swap.setOnClickListener(v -> {
             LemurXHaptics.tick(v);
             toggleDeviceSheet();
         });
-        chip.addView(swap, new LinearLayout.LayoutParams(dp(36), dp(28)));
+        LinearLayout.LayoutParams swapLp = new LinearLayout.LayoutParams(dp(16), dp(16)); swapLp.setMarginStart(dp(3)); chip.addView(swap, swapLp);
         chip.setOnClickListener(v -> {
             LemurXHaptics.tick(v);
             toggleDeviceSheet();
@@ -3411,6 +3437,8 @@ class MuseChatView extends FrameLayout {
         TextView text = new TextView(context);
         text.setText(R.string.lemurx_muse_model);
         text.setSingleLine(true);
+        text.setEllipsize(TextUtils.TruncateAt.END);
+        text.setMaxWidth(dp(72));
         text.setTextColor(MusePage.text(context));
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(
@@ -3430,8 +3458,9 @@ class MuseChatView extends FrameLayout {
             LemurXHaptics.tick(v);
             toggleModelSheet();
         });
+        // 极小 weight：多出来的宽度几乎都给设备滚动区，不够时才一起被压窄。
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0.01f);
         lp.setMarginStart(dp(6));
         chip.setLayoutParams(lp);
         return chip;
@@ -3536,6 +3565,7 @@ class MuseChatView extends FrameLayout {
     }
 
     private void presentPicker(FrameLayout sheet, LinearLayout card) {
+        hideKeyboard();
         sheet.animate().cancel();
         card.animate().cancel();
         sheet.setBackgroundColor(pickerScrim(getContext()));
@@ -3741,6 +3771,7 @@ class MuseChatView extends FrameLayout {
                 choice.online,
                 () -> {
                     hideDeviceSheet();
+                    if (mInput.hasFocus()) mInput.clearFocus();
                     if (choice.add) {
                         MusePage.showComputer(null, mThreadId);
                         return;
@@ -4626,11 +4657,17 @@ class MuseChatView extends FrameLayout {
                 out.append("\n[[aero-body:").append(body).append("]]");
             }
         }
+        for (String step : message.steps) {
+    String enc = Base64.encodeToString(step.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+    if (out.length() > 0) out.append('\n');
+    out.append("[[aero-step:").append(enc).append("]]");
+}
         String body = out.toString().trim();
         if (message.uiOnly && !body.isEmpty()) return "[[aero-ui]]\n" + body;
         return body;
     }
 
+    private static final Pattern STEP_MARK = Pattern.compile("\\[\\[aero-step:([A-Za-z0-9+/=]+)\\]\\]");
     private static final Pattern BODY_MARK = Pattern.compile("\\[\\[aero-body:([A-Za-z0-9+/=]+)\\]\\]");
 
     /** 发给模型的历史只留种类和文件名，正文留在存档里供预览。 */
@@ -4649,9 +4686,22 @@ class MuseChatView extends FrameLayout {
     private static Message decodeStored(String id, String role, String content) {
         boolean uiOnly = content.startsWith("[[aero-ui]]");
         if (uiOnly) content = content.substring("[[aero-ui]]".length()).trim();
+        List<String> steps = new ArrayList<>();
+        if (content.contains("[[aero-step:")) {
+            Matcher sm = STEP_MARK.matcher(content);
+            while (sm.find()) {
+                String b = sm.group(1);
+                try {
+                    steps.add(new String(Base64.decode(b, Base64.DEFAULT), StandardCharsets.UTF_8));
+                } catch (Exception ignored) {}
+            }
+            content = STEP_MARK.matcher(content).replaceAll("").trim();
+        }
+
         if (!content.contains("[[aero-file:")) {
             Message plain = new Message(id, role, content);
             plain.uiOnly = uiOnly;
+            plain.steps.addAll(steps);
             return plain;
         }
         List<Attach> files = new ArrayList<>();
@@ -4720,6 +4770,7 @@ class MuseChatView extends FrameLayout {
                         .trim();
         Message loaded = new Message(id, role, visible, files);
         loaded.uiOnly = uiOnly;
+        loaded.steps.addAll(steps);
         return loaded;
     }
 
@@ -5000,79 +5051,144 @@ class MuseChatView extends FrameLayout {
     }
 
     /** 对话里的一条命令：等宽、可选中，复制不离开对话，预览再看全文。 */
+        static String humanizeCommand(Context context, @Nullable String command) {
+        boolean zh = Locale.getDefault().getLanguage().startsWith("zh");
+        if (command == null || command.trim().isEmpty()) {
+            return zh ? "执行终端指令" : "Run terminal command";
+        }
+        String cmd = command.trim();
+        String lower = cmd.toLowerCase(Locale.US);
+        if (lower.contains("git status")) return zh ? "检查代码仓库状态" : "Check git status";
+        if (lower.contains("git diff")) return zh ? "对比代码修改与差异" : "View code diff";
+        if (lower.contains("git log")) return zh ? "查看代码提交记录" : "View git commit log";
+        if (lower.contains("git branch")) return zh ? "查看代码分支" : "View git branches";
+        if (lower.contains("git commit") || lower.contains("git add")) return zh ? "暂存或提交代码修改" : "Stage or commit changes";
+        if (lower.contains("git checkout") || lower.contains("git switch")) return zh ? "切换代码分支" : "Switch git branch";
+        if (lower.contains("git pull") || lower.contains("git fetch")) return zh ? "拉取最新代码" : "Pull latest code";
+        if (lower.contains("git push")) return zh ? "推送代码到远程仓库" : "Push code to remote";
+        if (lower.startsWith("git ")) return zh ? "执行 Git 操作" : "Execute git operation";
+        if (lower.contains("grep ") || lower.contains("rg ")) return zh ? "检索代码关键字" : "Search code in project";
+        if (lower.contains("find ")) return zh ? "搜索工程文件路径" : "Find files in project";
+        if (lower.contains("cat ") || lower.contains("sed ") || lower.contains("head ")) return zh ? "读取与分析文件内容" : "Read and analyze file";
+        if (lower.contains("ls ") || lower.equals("ls") || lower.contains("tree ")) return zh ? "浏览目录与文件列表" : "List files and directories";
+        if (lower.contains("ps ") || lower.contains("top")) return zh ? "检查系统运行进程" : "Inspect running processes";
+        if (lower.contains("df ") || lower.contains("free ")) return zh ? "检查系统资源与负载" : "Check system resources";
+        if (lower.contains("ninja") || lower.contains("gradle") || lower.contains("make")) return zh ? "编译构建工程项目" : "Build and compile project";
+        if (lower.contains("npm ") || lower.contains("pnpm ") || lower.contains("yarn ") || lower.contains("node ")) return zh ? "运行 Node 脚本与服务" : "Run Node scripts";
+        if (lower.contains("python") || lower.contains("pytest")) return zh ? "运行 Python 脚本或测试" : "Run Python script";
+        if (lower.contains("mkdir ") || lower.contains("cp ") || lower.contains("mv ")) return zh ? "整理与管理文件" : "Manage files";
+        return zh ? "在远程电脑上执行操作" : "Execute on remote computer";
+    }
+
+    private boolean commandFailed(Attach file) {
+        if (file.computerRunId != null) {
+            LemurXComputer.Run run = LemurXComputer.getRun(file.computerRunId);
+            if (run != null) return run.done && !run.ok;
+        }
+        return false;
+    }
     private View commandCard(Attach file) {
         Context context = getContext();
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(12), dp(10), dp(12), dp(12));
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
         card.setBackground(MusePage.rounded(MusePage.surface(context), 16, context));
-
         LinearLayout head = new LinearLayout(context);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setClickable(true);
         ImageView icon = new ImageView(context);
         icon.setImageResource(R.drawable.lemurx_muse_ic_code);
-        icon.setColorFilter(MusePage.text(context), PorterDuff.Mode.SRC_IN);
+        icon.setColorFilter(MusePage.accent(context), PorterDuff.Mode.SRC_IN);
         head.addView(icon, new LinearLayout.LayoutParams(dp(16), dp(16)));
+        LinearLayout titleCol = new LinearLayout(context);
+        titleCol.setOrientation(LinearLayout.VERTICAL);
         TextView label = new TextView(context);
-        label.setText(R.string.lemurx_muse_command_label);
-        label.setTextColor(MusePage.muted(context));
-        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        LinearLayout.LayoutParams labelLp =
-                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        labelLp.setMarginStart(dp(8));
-        head.addView(label, labelLp);
-        head.addView(
-                commandChip(
-                        context,
-                        R.string.lemurx_muse_command_copy,
-                        true,
-                        v -> copyPlain(commandText(file), (TextView) v)));
-        TextView open = commandChip(
-                context,
-                R.string.lemurx_muse_command_preview,
-                false,
-                v -> previewCommand(file));
-        LinearLayout.LayoutParams openLp =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        openLp.setMarginStart(dp(4));
-        head.addView(open, openLp);
+        label.setText(humanizeCommand(context, commandText(file)));
+        label.setTextColor(MusePage.text(context));
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setSingleLine(true);
+        label.setEllipsize(TextUtils.TruncateAt.END);
+        titleCol.addView(label);
+        boolean running = commandRunning(file);
+        boolean failed = commandFailed(file);
+        String statusText;
+        int statusColor;
+        statusText = running ? context.getString(R.string.lemurx_muse_command_running) : (failed ? context.getString(R.string.lemurx_muse_command_failed_tag) : context.getString(R.string.lemurx_muse_filter_done));
+        statusColor = running ? MusePage.accent(context) : (failed ? 0xFFE53935 : MusePage.muted(context));
+        TextView statusView = new TextView(context);
+        statusView.setText(statusText);
+        statusView.setTextColor(statusColor);
+        statusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        titleCol.addView(statusView);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        titleLp.setMarginStart(dp(8));
+        head.addView(titleCol, titleLp);
+        boolean expanded = file.computerRunId != null && mExpandedRuns.contains(file.computerRunId);
+        TextView toggleDetails = new TextView(context);
+        toggleDetails.setText(expanded ? R.string.lemurx_muse_command_collapse : R.string.lemurx_muse_command_details);
+        toggleDetails.setTextColor(MusePage.accent(context));
+        toggleDetails.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        toggleDetails.setPadding(dp(8), dp(4), dp(4), dp(4));
+        head.addView(toggleDetails);
         card.addView(head);
-
+        LinearLayout details = new LinearLayout(context);
+        details.setOrientation(LinearLayout.VERTICAL);
+        details.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        LinearLayout subBar = new LinearLayout(context);
+        subBar.setOrientation(LinearLayout.HORIZONTAL);
+        subBar.setGravity(Gravity.CENTER_VERTICAL);
+        TextView subLabel = new TextView(context);
+        subLabel.setText(R.string.lemurx_muse_command_label);
+        subLabel.setTextColor(MusePage.muted(context));
+        subLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        subBar.addView(subLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        subBar.addView(commandChip(context, R.string.lemurx_muse_command_copy, true, v -> copyPlain(commandText(file), (TextView) v)));
+        TextView open = commandChip(context, R.string.lemurx_muse_command_preview, false, v -> previewCommand(file));
+        LinearLayout.LayoutParams openLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        openLp.setMarginStart(dp(4));
+        subBar.addView(open, openLp);
+        LinearLayout.LayoutParams subBarLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subBarLp.topMargin = dp(8);
+        details.addView(subBar, subBarLp);
         TextView command = commandBody(context, commandText(file), MusePage.text(context));
         command.setBackground(MusePage.rounded(MusePage.bg(context), 10, context));
-        LinearLayout.LayoutParams commandLp =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        commandLp.topMargin = dp(8);
-        card.addView(command, commandLp);
-
+        LinearLayout.LayoutParams commandLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        commandLp.topMargin = dp(6);
+        details.addView(command, commandLp);
         String output = commandOutput(file);
         if (!output.isEmpty()) {
             TextView out = commandBody(context, output, MusePage.muted(context));
-            out.setMaxLines(6);
+            out.setMaxLines(8);
             out.setEllipsize(TextUtils.TruncateAt.END);
-            LinearLayout.LayoutParams outLp =
-                    new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            outLp.topMargin = dp(8);
-            card.addView(out, outLp);
-        } else if (commandRunning(file)) {
+            LinearLayout.LayoutParams outLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            outLp.topMargin = dp(6);
+            details.addView(out, outLp);
+        } else if (running) {
             TextView wait = new TextView(context);
             wait.setText(R.string.lemurx_muse_command_running);
             wait.setTextColor(MusePage.muted(context));
             wait.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            LinearLayout.LayoutParams waitLp =
-                    new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            waitLp.topMargin = dp(8);
-            card.addView(wait, waitLp);
+            LinearLayout.LayoutParams waitLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            waitLp.topMargin = dp(6);
+            details.addView(wait, waitLp);
         }
-
-        LinearLayout.LayoutParams lp =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        View.OnClickListener toggleClick = v -> {
+            LemurXHaptics.tick(v);
+            boolean show = details.getVisibility() != View.VISIBLE;
+            if (file.computerRunId != null) {
+                if (show) mExpandedRuns.add(file.computerRunId);
+                else mExpandedRuns.remove(file.computerRunId);
+            }
+            details.setVisibility(show ? View.VISIBLE : View.GONE);
+            toggleDetails.setText(show ? R.string.lemurx_muse_command_collapse : R.string.lemurx_muse_command_details);
+            scheduleWindow();
+        };
+        head.setOnClickListener(toggleClick);
+        toggleDetails.setOnClickListener(toggleClick);
+        card.addView(details);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = dp(8);
         lp.setMarginEnd(dp(16));
         card.setLayoutParams(lp);
@@ -5240,9 +5356,7 @@ class MuseChatView extends FrameLayout {
         if ("start".equals(phase)) {
             LemurXComputer.beginRun(runId, command, "chat", mThreadId, host);
             upsertComputerCard(runId, command, "…", true);
-            showStatus(getContext().getString(
-                    R.string.lemurx_muse_working,
-                    getContext().getString(R.string.lemurx_muse_tool_computer)));
+            showStatus(humanizeCommand(getContext(), command) + "…");
             return;
         }
         if ("chunk".equals(phase)) {

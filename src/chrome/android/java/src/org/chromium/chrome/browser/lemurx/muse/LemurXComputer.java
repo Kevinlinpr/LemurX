@@ -284,6 +284,18 @@ final class LemurXComputer {
             if (threadId != null && !threadId.isEmpty()) run.threadId = threadId;
             if (host != null && !host.isEmpty()) run.host = host;
         }
+        if (!done) {
+            MuseApi.get().get("/api/own-computer-runs/" + id, (val, err) -> {
+                if (err == null && val instanceof JSONObject) {
+                    JSONObject row = (JSONObject) val;
+                    run.done = row.optBoolean("done", true);
+                    run.ok = row.optBoolean("ok", true);
+                    run.error = row.optString("error", null);
+                    MusePage.offerComputerRun(run.id, run.command, run.threadId);
+                }
+            });
+        }
+
     }
 
     /**

@@ -199,6 +199,9 @@
     <string name="lemurx_muse_command_running">正在跑…</string>
     <string name="lemurx_muse_command_empty">还没有输出</string>
     <string name="lemurx_muse_command_failed">这台电脑没有执行这条命令</string>
+    <string name="lemurx_muse_command_failed_tag">失败</string>
+    <string name="lemurx_muse_command_details">查看详情</string>
+    <string name="lemurx_muse_command_collapse">收起详情</string>
     <string name="lemurx_muse_filter_all">全部</string>
     <string name="lemurx_muse_filter_active">进行中</string>
     <string name="lemurx_muse_filter_done">已完成</string>

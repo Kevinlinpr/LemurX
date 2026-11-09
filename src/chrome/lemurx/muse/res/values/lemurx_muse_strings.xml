@@ -199,6 +199,9 @@
     <string name="lemurx_muse_command_running">Running…</string>
     <string name="lemurx_muse_command_empty">No output yet</string>
     <string name="lemurx_muse_command_failed">This computer did not run the command</string>
+    <string name="lemurx_muse_command_failed_tag">Failed</string>
+    <string name="lemurx_muse_command_details">Details</string>
+    <string name="lemurx_muse_command_collapse">Collapse</string>
     <string name="lemurx_muse_filter_all">All</string>
     <string name="lemurx_muse_filter_active">In progress</string>
     <string name="lemurx_muse_filter_done">Finished</string>
