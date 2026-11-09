@@ -288,10 +288,15 @@ final class LemurXComputer {
             MuseApi.get().get("/api/own-computer-runs/" + id, (val, err) -> {
                 if (err == null && val instanceof JSONObject) {
                     JSONObject row = (JSONObject) val;
-                    run.done = row.optBoolean("done", true);
-                    run.ok = row.optBoolean("ok", true);
-                    run.error = row.optString("error", null);
-                    MusePage.offerComputerRun(run.id, run.command, run.threadId);
+                    Run live;
+                    synchronized (sRuns) {
+                        live = sRuns.get(id);
+                        if (live == null) return;
+                        live.done = row.optBoolean("done", true);
+                        live.ok = row.optBoolean("ok", true);
+                        live.error = row.optString("error", null);
+                    }
+                    MusePage.offerComputerRun(live.id, live.command, live.threadId);
                 }
             });
         }
