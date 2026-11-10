@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "498250877255",
+    "project_id": "aero-56bb3",
+    "storage_bucket": "aero-56bb3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:498250877255:android:0e732bb4f04a4ca000a462",
+        "android_client_info": {
+          "package_name": "com.osmangroupx.aero"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBKPF7IgBulQfE68VKejDcIYJpzf6Jnnh8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

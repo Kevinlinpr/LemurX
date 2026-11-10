@@ -1,0 +1,73 @@
+[
+  {
+    "path": "third_party/lemur/firebase_deps/firebase-analytics-24.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-analytics/24.0.0/firebase-analytics-24.0.0.aar",
+    "sha256": "7dd87294f3d47fd5bff6bb16d9d2cb66236177973603bbfd07c7b2f95addc94c"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/firebase-common-23.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-common/23.0.0/firebase-common-23.0.0.aar",
+    "sha256": "f8595dd404aa37bb4a92824ffd7b0325428432079ce4908ea3f97af1c6b33f0f"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/firebase-components-20.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-components/20.0.0/firebase-components-20.0.0.aar",
+    "sha256": "1a39e0a88fe34ee4c911cb10da88488c487714692cbdfacac6015ddeffa0029b"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/firebase-annotations-18.0.0.jar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-annotations/18.0.0/firebase-annotations-18.0.0.jar",
+    "sha256": "cdb20e14f4f77463f6bb6d339cf95efe132a4196eb9592bf3c4dc83856e2670d"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/firebase-installations-20.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-installations/20.0.0/firebase-installations-20.0.0.aar",
+    "sha256": "30b9c50a81e706bbe7fcac0f112a11cb151afd74f339b522631b8fd2b485e82e"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/firebase-installations-interop-18.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-installations-interop/18.0.0/firebase-installations-interop-18.0.0.aar",
+    "sha256": "fab7f3633204dd1c889a2ea419bfc1937e0e3766aae236a4b9d3c665d59765eb"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/play-services-measurement-24.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/android/gms/play-services-measurement/24.0.0/play-services-measurement-24.0.0.aar",
+    "sha256": "c7b64eb26c11b0ed3751af43628311b966e17b26ed829a9d06f740e5de1558dd"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/play-services-measurement-api-24.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/android/gms/play-services-measurement-api/24.0.0/play-services-measurement-api-24.0.0.aar",
+    "sha256": "39c4fa9ed5bd723dea35d5ab47007c8453bc90be5e588a4630101adfcb1e9268"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/play-services-measurement-base-24.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/android/gms/play-services-measurement-base/24.0.0/play-services-measurement-base-24.0.0.aar",
+    "sha256": "d23136e29847aef345c8b6077d450399e2f46a12fbe755c3da53a0919e03ead6"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/play-services-measurement-impl-24.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/android/gms/play-services-measurement-impl/24.0.0/play-services-measurement-impl-24.0.0.aar",
+    "sha256": "61c3ad553cd5a9e4ac006cacc362c913172974fe5d34180d0ef21219d83a8914",
+    "note": "Locally patched: zzwu calls GuavaFuturesCompat.propagateCancellation. Upstream Maven bytes differ."
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/play-services-measurement-sdk-24.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/android/gms/play-services-measurement-sdk/24.0.0/play-services-measurement-sdk-24.0.0.aar",
+    "sha256": "fb54c1f5f5102b0e68b3732fdba9be361b8afec65877efa6dac51db5248fe160"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/play-services-measurement-sdk-api-24.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/android/gms/play-services-measurement-sdk-api/24.0.0/play-services-measurement-sdk-api-24.0.0.aar",
+    "sha256": "5a823f377fa42af1b0aa15f1e27f792c9e3fb8226ac6bae01fc4b4ec23486f05"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/play-services-ads-identifier-18.0.0.aar",
+    "url": "https://dl.google.com/dl/android/maven2/com/google/android/gms/play-services-ads-identifier/18.0.0/play-services-ads-identifier-18.0.0.aar",
+    "sha256": "730c9b67e4f85dbb3849f4f3e42a5047cee1f59c2326469d01d96d0fbd21181a"
+  },
+  {
+    "path": "third_party/lemur/firebase_deps/kotlinx-coroutines-play-services-1.11.0.jar",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-play-services/1.11.0/kotlinx-coroutines-play-services-1.11.0.jar",
+    "sha256": "f441579409a9befc7391ae5620de773590dd6536b979d4a5a2a6e05b5f81e4d4"
+  }
+]

@@ -1,0 +1,20 @@
+diff --git a/chrome/android/java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java b/chrome/android/java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java
+index 5abcdccc9e..acc634c445 100644
+--- a/chrome/android/java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/ChromeApplicationImpl.java
+@@ -23,6 +23,7 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
+ import org.chromium.chrome.browser.fonts.FontPreloader;
+ import org.chromium.chrome.browser.night_mode.SystemNightModeMonitor;
+ import org.chromium.chrome.browser.notifications.chime.ChimeDelegate;
++import org.chromium.chrome.browser.lemurx.firebase.LemurXFirebase;
+ import org.chromium.chrome.browser.profiles.ProfileResolver;
+ import org.chromium.components.browser_ui.util.BrowserUiUtilsCachedFlags;
+ import org.chromium.components.browser_ui.util.GlobalDiscardableReferencePool;
+@@ -90,6 +91,7 @@ public class ChromeApplicationImpl extends SplitCompatApplication.Impl {
+         }
+ 
+         BrowserExitReasonTracker.onBrowserProcessCreated();
++        LemurXFirebase.initialize(getApplication());
+     }
+ 
+     @Override

@@ -1,0 +1,23 @@
+diff --git a/chrome/android/chrome_public_apk_tmpl.gni b/chrome/android/chrome_public_apk_tmpl.gni
+index 5fe17c0c74..e6b62b991d 100644
+--- a/chrome/android/chrome_public_apk_tmpl.gni
++++ b/chrome/android/chrome_public_apk_tmpl.gni
+@@ -13,6 +13,7 @@ import("//chrome/android/modules/chrome_bundle_tmpl.gni")
+ import("//chrome/android/modules/chrome_feature_modules.gni")
+ import("//chrome/android/trichrome.gni")
+ import("//chrome/common/features.gni")
++import("//chrome/lemurx/firebase/config.gni")
+ import("//chrome/version.gni")
+ import("//components/crash/android/silent_java_assert_reporting.gni")
+ import("//components/optimization_guide/features.gni")
+@@ -331,6 +332,10 @@ template("chrome_common_apk_or_module_tmpl") {
+ 
+       if (!_is_bundle && optimize_android_resources) {
+         resources_config_paths = [ "//chrome/android/aapt2.config" ]
++        if (lemurx_enable_firebase) {
++          # Keep Firebase string resource names (google_app_id, ...).
++          resources_config_paths += [ "//chrome/lemurx/firebase/aapt2.config" ]
++        }
+       }
+     }
+ 

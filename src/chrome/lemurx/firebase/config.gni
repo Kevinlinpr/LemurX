@@ -1,0 +1,5 @@
+# Firebase Analytics is opt-in. tools/args.gn turns it on for Aero builds.
+declare_args() {
+  lemurx_enable_firebase = false
+  lemurx_firebase_config = "//chrome/lemurx/firebase/google-services.json"
+}

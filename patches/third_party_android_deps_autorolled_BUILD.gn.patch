@@ -1,0 +1,77 @@
+diff --git a/third_party/android_deps/autorolled/BUILD.gn b/third_party/android_deps/autorolled/BUILD.gn
+index 79e9e4dd8a..e26c4904df 100644
+--- a/third_party/android_deps/autorolled/BUILD.gn
++++ b/third_party/android_deps/autorolled/BUILD.gn
+@@ -3,6 +3,7 @@
+ # found in the LICENSE file.
+ 
+ import("//build/config/android/rules.gni")
++import("//chrome/lemurx/firebase/config.gni")
+ 
+ template("define_autorolled_targets") {
+   not_needed([
+@@ -571,6 +572,10 @@ template("define_autorolled_targets") {
+           "//third_party/androidx:androidx_datastore_datastore_preferences_java",
+           "//third_party/kotlin_stdlib:kotlin_stdlib_java",
+         ]
++        if (lemurx_enable_firebase) {
++          aar_path = "//third_party/lemur/firebase_deps/firebase-common-23.0.0.aar"
++          info_path = "//third_party/lemur/firebase_deps/firebase-common-23.0.0.info"
++        }
+       }
+     }
+ 
+@@ -590,6 +595,10 @@ template("define_autorolled_targets") {
+           "//third_party/androidx:androidx_datastore_datastore_preferences_java",
+           "//third_party/kotlin_stdlib:kotlin_stdlib_java",
+         ]
++        if (lemurx_enable_firebase) {
++          aar_path = "//third_party/lemur/firebase_deps/firebase-installations-20.0.0.aar"
++          info_path = "//third_party/lemur/firebase_deps/firebase-installations-20.0.0.info"
++        }
+       }
+     }
+ 
+@@ -1373,6 +1382,10 @@ template("define_autorolled_targets") {
+           "//third_party/androidx:*",
+         ]
+         deps = [ "//third_party/android_deps:javax_inject_javax_inject_java" ]
++        if (lemurx_enable_firebase) {
++          jar_path = "//third_party/lemur/firebase_deps/firebase-annotations-18.0.0.jar"
++          deps += [ "//third_party/kotlin_stdlib:kotlin_stdlib_java" ]
++        }
+       }
+     }
+ 
+@@ -1395,6 +1408,10 @@ template("define_autorolled_targets") {
+           "//third_party/android_deps:com_google_errorprone_error_prone_annotations_java",
+           "//third_party/androidx:androidx_annotation_annotation_java",
+         ]
++        if (lemurx_enable_firebase) {
++          aar_path = "//third_party/lemur/firebase_deps/firebase-components-20.0.0.aar"
++          info_path = "//third_party/lemur/firebase_deps/firebase-components-20.0.0.info"
++        }
+       }
+     }
+ 
+@@ -1525,6 +1542,10 @@ template("define_autorolled_targets") {
+           "$google_play_services_package:google_firebase_firebase_annotations_java",
+           "$google_play_services_package:google_play_services_tasks_java",
+         ]
++        if (lemurx_enable_firebase) {
++          aar_path = "//third_party/lemur/firebase_deps/firebase-installations-interop-18.0.0.aar"
++          info_path = "//third_party/lemur/firebase_deps/firebase-installations-interop-18.0.0.info"
++        }
+       }
+     }
+ 
+@@ -2181,6 +2202,9 @@ template("define_autorolled_targets") {
+         "//third_party/android_deps:org_jetbrains_kotlinx_kotlinx_coroutines_core_java",
+         "//third_party/kotlin_stdlib:kotlin_stdlib_java",
+       ]
++      if (lemurx_enable_firebase) {
++        jar_path = "//third_party/lemur/firebase_deps/kotlinx-coroutines-play-services-1.11.0.jar"
++      }
+     }
+ 
+     # This is generated, do not edit. Update BuildConfigGenerator.groovy

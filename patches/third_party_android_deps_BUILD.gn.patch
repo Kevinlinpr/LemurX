@@ -1,0 +1,15 @@
+diff --git a/third_party/android_deps/BUILD.gn b/third_party/android_deps/BUILD.gn
+index 014dde6f3a..0e3b64eaab 100644
+--- a/third_party/android_deps/BUILD.gn
++++ b/third_party/android_deps/BUILD.gn
+@@ -363,3 +363,10 @@ if (!limit_android_deps) {
+   }
+ }
+ # === Generated Code End ===
++
++import("//chrome/lemurx/firebase/config.gni")
++if (lemurx_enable_firebase) {
++  import("//third_party/lemur/firebase_deps/targets.gni")
++  lemurx_firebase_targets("firebase") {
++  }
++}

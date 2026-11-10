@@ -1,0 +1,106 @@
+import("//build/config/android/rules.gni")
+
+template("lemurx_firebase_targets") {
+  not_needed(invoker, "*")
+  not_needed([ "target_name" ])
+  android_aar_prebuilt("google_firebase_firebase_analytics_java") {
+    aar_path = "//third_party/lemur/firebase_deps/firebase-analytics-24.0.0.aar"
+    info_path =
+        "//third_party/lemur/firebase_deps/firebase-analytics-24.0.0.info"
+    enable_bytecode_checks = false
+    deps = [
+      "$google_play_services_package:google_play_services_measurement_api_java",
+      "$google_play_services_package:google_play_services_measurement_java",
+      "$google_play_services_package:google_play_services_measurement_sdk_java",
+    ]
+  }
+  android_aar_prebuilt("google_play_services_ads_identifier_java") {
+    aar_path = "//third_party/lemur/firebase_deps/play-services-ads-identifier-18.0.0.aar"
+    info_path = "//third_party/lemur/firebase_deps/play-services-ads-identifier-18.0.0.info"
+    enable_bytecode_checks = false
+    deps =
+        [ "$google_play_services_package:google_play_services_basement_java" ]
+  }
+  android_aar_prebuilt("google_play_services_measurement_java") {
+    aar_path =
+        "//third_party/lemur/firebase_deps/play-services-measurement-24.0.0.aar"
+    info_path =
+        "//third_party/lemur/firebase_deps/play-services-measurement-24.0.0.info"
+    enable_bytecode_checks = false
+    deps = [
+      "$google_play_services_package:google_play_services_ads_identifier_java",
+      "$google_play_services_package:google_play_services_basement_java",
+      "$google_play_services_package:google_play_services_measurement_base_java",
+      "$google_play_services_package:google_play_services_measurement_impl_java",
+      "$google_play_services_package:google_play_services_measurement_sdk_api_java",
+      "$google_play_services_package:google_play_services_stats_java",
+      "//third_party/androidx:androidx_collection_collection_java",
+      "//third_party/androidx:androidx_core_core_java",
+      "//third_party/androidx:androidx_legacy_legacy_support_core_utils_java",
+    ]
+  }
+  android_aar_prebuilt("google_play_services_measurement_api_java") {
+    aar_path = "//third_party/lemur/firebase_deps/play-services-measurement-api-24.0.0.aar"
+    info_path = "//third_party/lemur/firebase_deps/play-services-measurement-api-24.0.0.info"
+    enable_bytecode_checks = false
+    deps = [
+      "$google_play_services_package:google_firebase_firebase_common_java",
+      "$google_play_services_package:google_firebase_firebase_components_java",
+      "$google_play_services_package:google_firebase_firebase_installations_interop_java",
+      "$google_play_services_package:google_firebase_firebase_installations_java",
+      "$google_play_services_package:google_firebase_firebase_measurement_connector_java",
+      "$google_play_services_package:google_play_services_ads_identifier_java",
+      "$google_play_services_package:google_play_services_basement_java",
+      "$google_play_services_package:google_play_services_measurement_base_java",
+      "$google_play_services_package:google_play_services_measurement_sdk_api_java",
+      "$google_play_services_package:google_play_services_tasks_java",
+      "//third_party/android_deps:guava_java",
+      "//third_party/kotlin_stdlib:kotlin_stdlib_java",
+    ]
+  }
+  android_aar_prebuilt("google_play_services_measurement_impl_java") {
+    aar_path = "//third_party/lemur/firebase_deps/play-services-measurement-impl-24.0.0.aar"
+    info_path = "//third_party/lemur/firebase_deps/play-services-measurement-impl-24.0.0.info"
+    enable_bytecode_checks = false
+    deps = [
+      "$google_play_services_package:google_play_services_ads_identifier_java",
+      "$google_play_services_package:google_play_services_base_java",
+      "$google_play_services_package:google_play_services_basement_java",
+      "$google_play_services_package:google_play_services_measurement_base_java",
+      "$google_play_services_package:google_play_services_stats_java",
+      "$google_play_services_package:google_play_services_tasks_java",
+      "//third_party/android_deps:guava_java",
+      "//third_party/androidx:androidx_collection_collection_java",
+      "//third_party/androidx:androidx_core_core_java",
+      "//third_party/androidx:androidx_privacysandbox_ads_ads_adservices_java",
+      "//third_party/androidx:androidx_privacysandbox_ads_ads_adservices_java_java",
+    ]
+  }
+  android_aar_prebuilt("google_play_services_measurement_sdk_java") {
+    aar_path = "//third_party/lemur/firebase_deps/play-services-measurement-sdk-24.0.0.aar"
+    info_path = "//third_party/lemur/firebase_deps/play-services-measurement-sdk-24.0.0.info"
+    enable_bytecode_checks = false
+    deps = [
+      "$google_play_services_package:google_play_services_basement_java",
+      "$google_play_services_package:google_play_services_measurement_base_java",
+      "$google_play_services_package:google_play_services_measurement_impl_java",
+      "//third_party/androidx:androidx_collection_collection_java",
+    ]
+  }
+  android_aar_prebuilt("google_play_services_measurement_base_java") {
+    aar_path = "//third_party/lemur/firebase_deps/play-services-measurement-base-24.0.0.aar"
+    info_path = "//third_party/lemur/firebase_deps/play-services-measurement-base-24.0.0.info"
+    enable_bytecode_checks = false
+    deps =
+        [ "$google_play_services_package:google_play_services_basement_java" ]
+  }
+  android_aar_prebuilt("google_play_services_measurement_sdk_api_java") {
+    aar_path = "//third_party/lemur/firebase_deps/play-services-measurement-sdk-api-24.0.0.aar"
+    info_path = "//third_party/lemur/firebase_deps/play-services-measurement-sdk-api-24.0.0.info"
+    enable_bytecode_checks = false
+    deps = [
+      "$google_play_services_package:google_play_services_basement_java",
+      "$google_play_services_package:google_play_services_measurement_base_java",
+    ]
+  }
+}

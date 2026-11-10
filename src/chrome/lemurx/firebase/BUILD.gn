@@ -1,0 +1,73 @@
+import("//build/config/android/config.gni")
+import("//build/config/android/rules.gni")
+import("//chrome/lemurx/firebase/config.gni")
+
+if (lemurx_enable_firebase) {
+  import("//chrome/android/chrome_public_apk_tmpl.gni")
+
+  action("config") {
+    script = "generate_config.py"
+    inputs = [ lemurx_firebase_config ]
+    outputs = [ "$target_gen_dir/config.srcjar" ]
+    args = [
+      "--input",
+      rebase_path(lemurx_firebase_config, root_build_dir),
+      "--package",
+      chrome_public_manifest_package,
+      "--output",
+      rebase_path(outputs[0], root_build_dir),
+    ]
+  }
+  action("generate_config_xml") {
+    script = "generate_config.py"
+    inputs = [ lemurx_firebase_config ]
+    outputs = [ "$target_gen_dir/res/values/google_services.xml" ]
+    args = [
+      "--input",
+      rebase_path(lemurx_firebase_config, root_build_dir),
+      "--package",
+      chrome_public_manifest_package,
+      "--output",
+      rebase_path(outputs[0], root_build_dir),
+      "--resources",
+    ]
+  }
+
+  android_resources("java_resources") {
+    sources = get_target_outputs(":generate_config_xml")
+    deps = [ ":generate_config_xml" ]
+  }
+
+  # measurement-impl calls this from the base module, so the class has to live there.
+  android_library("compat_java") {
+    sources = [ "java/src/org/chromium/chrome/browser/lemurx/firebase/GuavaFuturesCompat.java" ]
+    deps = [ "//third_party/android_deps:guava_java" ]
+  }
+
+  java_group("sdk_java") {
+    mergeable_android_manifests = [ "AndroidManifest.xml" ]
+    deps = [
+      ":compat_java",
+      ":java_resources",
+      "$google_play_services_package:google_firebase_firebase_analytics_java",
+      "$google_play_services_package:google_firebase_firebase_common_java",
+    ]
+  }
+}
+
+android_library("java") {
+  if (lemurx_enable_firebase) {
+    sources = [ "java/src/org/chromium/chrome/browser/lemurx/firebase/LemurXFirebase.java" ]
+    srcjar_deps = [ ":config" ]
+    resources_package = "org.chromium.chrome.browser.lemurx.firebase"
+    deps = [
+      ":java_resources",
+      ":sdk_java",
+      "//base:base_java",
+      "$google_play_services_package:google_firebase_firebase_analytics_java",
+      "$google_play_services_package:google_firebase_firebase_common_java",
+    ]
+  } else {
+    sources = [ "java/stub/org/chromium/chrome/browser/lemurx/firebase/LemurXFirebase.java" ]
+  }
+}

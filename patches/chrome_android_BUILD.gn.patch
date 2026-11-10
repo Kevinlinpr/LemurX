@@ -1,8 +1,16 @@
 diff --git a/chrome/android/BUILD.gn b/chrome/android/BUILD.gn
-index 2133a964d0..d773aad774 100644
+index 2133a964d0..30fd9c56ec 100644
 --- a/chrome/android/BUILD.gn
 +++ b/chrome/android/BUILD.gn
-@@ -175,6 +175,30 @@ if (_is_default_toolchain) {
+@@ -48,6 +48,7 @@ if (_is_default_toolchain) {
+   import("//third_party/icu/config.gni")
+   import("//third_party/jni_zero/jni_zero.gni")
+   import("//third_party/protobuf/proto_library.gni")
++  import("//chrome/lemurx/firebase/config.gni")
+   import("//tools/resources/generate_resource_allowlist.gni")
+   import("channel.gni")
+   import("java_sources.gni")
+@@ -175,6 +176,30 @@ if (_is_default_toolchain) {
      deps = [
        ":chrome_base_module_resources",
        ":ui_locale_string_resources",
@@ -33,7 +41,7 @@ index 2133a964d0..d773aad774 100644
        "//chrome/android/webapk/libs/common:splash_resources",
        "//chrome/app:java_strings_grd",
        "//chrome/browser/actor/android:java_resources",
-@@ -324,6 +348,10 @@ if (_is_default_toolchain) {
+@@ -324,6 +349,11 @@ if (_is_default_toolchain) {
        ":usage_stats_proto_java",
        ":xr_java",
        "$google_play_services_package:google_play_services_auth_base_java",
@@ -41,10 +49,11 @@ index 2133a964d0..d773aad774 100644
 +      # RevocationBoundService class must also be on base_module_java so the
 +      # Play App Bundle isolatedSplits check finds it in the base dex.
 +      "$google_play_services_package:google_play_services_auth_java",
++      "//chrome/lemurx/firebase:java",
        "$google_play_services_package:google_play_services_base_java",
        "$google_play_services_package:google_play_services_basement_java",
        "$google_play_services_package:google_play_services_cast_framework_java",
-@@ -1840,6 +1868,7 @@ if (_is_default_toolchain) {
+@@ -1840,6 +1870,7 @@ if (_is_default_toolchain) {
    java_group("chrome_public_non_pak_assets") {
      deps = [
        "//chrome/android/webapk/libs/runtime_library:runtime_library_assets",
@@ -52,7 +61,7 @@ index 2133a964d0..d773aad774 100644
        "//components/privacy_sandbox/privacy_sandbox_attestations/preload:privacy_sandbox_attestations_assets",
      ]
    }
-@@ -2229,6 +2258,11 @@ if (_is_default_toolchain) {
+@@ -2229,6 +2260,11 @@ if (_is_default_toolchain) {
        # Deps to pull services into base module.
        # TODO(crbug.com/40148088): Consider moving these to the chrome module to
        # reduce base dex size.
@@ -64,7 +73,20 @@ index 2133a964d0..d773aad774 100644
        "//base:service_loader_java",
        "//chrome/android/modules/on_demand:provider_java",
        "//components/background_task_scheduler:background_task_scheduler_java",
-@@ -2990,6 +3024,10 @@ if (_is_default_toolchain) {
+@@ -2237,6 +2273,12 @@ if (_is_default_toolchain) {
+       "//third_party/androidx:androidx_browser_browser_java",
+     ]
+ 
++    # Firebase Analytics SDK and its component manifest stay in the base module
++    # so isolated splits can see them. The target exists only when the flag is on.
++    if (lemurx_enable_firebase) {
++      deps += [ "//chrome/lemurx/firebase:sdk_java" ]
++    }
++
+     # More deps for DFMs.
+     if (enable_chrome_android_internal) {
+       deps += [
+@@ -2990,6 +3032,10 @@ if (_is_default_toolchain) {
  
    generate_jni("chrome_jni_headers") {
      sources = [

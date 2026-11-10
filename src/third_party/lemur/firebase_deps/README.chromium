@@ -1,0 +1,21 @@
+Name: Firebase Analytics and aligned runtime dependencies
+URL: https://firebase.google.com/docs/analytics
+Version: Analytics 24.0.0 (Firebase BoM 35.0.2)
+License: Android Software Development Kit License (Analytics/Measurement/ads-identifier); Apache-2.0 (Firebase core and Kotlin coroutines)
+Security Critical: yes
+Shipped: yes
+
+Pinned from Google Maven and Maven Central. Exact URLs and SHA-256 hashes are
+in artifacts.json; fetch.py restores or checks those artifacts.
+
+Used only when lemurx_enable_firebase=true. Chromium already ships coroutines
+1.11.0, so only kotlinx-coroutines-play-services is overridden (1.9.0 -> 1.11.0).
+Firebase common 23.0.0, components 20.0.0, annotations 18.0.0, installations
+20.0.0 and installations-interop 18.0.0 replace the older autorolled copies.
+Measurement 24.0.0 and play-services-ads-identifier 18.0.0 are new targets;
+this Chromium revision does not vendor them.
+
+play-services-measurement-impl-24.0.0.aar is locally patched: zzwu no longer
+calls Futures.propagateCancellation (absent from public Guava). It calls
+org.chromium.chrome.browser.lemurx.firebase.GuavaFuturesCompat instead.
+fetch.py --check expects the patched bytes.
